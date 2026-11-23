@@ -1,9 +1,14 @@
-//! The system's accent colour, where it has one: on Linux from the desktop
-//! portal, which Plasma 6, GNOME 47 and later and others answer, but in a
-//! Plasma session from KDE's `kdeglobals` first, as Plasma's portal answers
-//! with a colour made from the accent rather than the accent; on Windows
-//! from the registry; on macOS from AppKit. Read on a thread, as the portal
-//! may take a while to start, and followed as it changes.
+//! System accent colour reader and watcher.
+//!
+//! - Linux: queries `org.freedesktop.portal.Settings` (supported by Plasma 6,
+//!   GNOME 47+, and others), preferring KDE's `kdeglobals` inside a Plasma
+//!   session because Plasma's portal returns a blended selection highlight
+//!   rather than the raw accent colour.
+//! - Windows: reads `HKCU\Software\Microsoft\Windows\DWM\AccentColor`.
+//! - macOS: reads AppKit's `NSColor.controlAccentColor`.
+//!
+//! Runs on a background thread because the desktop portal may block on startup,
+//! and requests an egui repaint whenever the accent changes.
 
 use std::sync::{Arc, Mutex};
 
@@ -14,7 +19,8 @@ pub(crate) struct Accent {
 }
 
 impl Accent {
-    /// Starts reading the accent; `ctx` repaints when it arrives or changes.
+    /// Spawns the background accent watcher; requests a repaint on `ctx` when
+    /// the accent arrives or changes.
     pub(crate) fn watch(ctx: &egui::Context) -> Accent {
         let colour = Arc::new(Mutex::new(None));
         let shared = colour.clone();
@@ -26,7 +32,7 @@ impl Accent {
                 ctx.request_repaint();
             }
         };
-        // nothing to do without one: the GUI keeps Breeze's
+        // If thread creation fails, the GUI falls back to Breeze blue.
         let _ = std::thread::Builder::new().name("accent".into()).spawn(move || follow(set));
         Accent { colour }
     }
@@ -310,22 +316,22 @@ mod portal {
     }
 }
 
-/// KDE's accent, from `kdeglobals`. Plasma 6's portal answers with the
-/// palette's highlight, which Plasma makes, once an accent is chosen, of 70%
-/// of it over the view's background: on Breeze Dark a darker, duller colour
-/// than the one chosen, where the GUI's fills, as Breeze's, are made from the
-/// accent itself. Plasma 5's portal has no accent at all.
+/// KDE accent reader from `kdeglobals`. Plasma 6's portal returns the
+/// palette highlight colour (70% accent blended over the view background,
+/// which on Breeze Dark is darker and duller than the chosen accent, whereas
+/// our theme derives fills from the raw accent like Breeze). Plasma 5's portal
+/// does not expose an accent colour at all.
 #[cfg(all(unix, not(target_os = "macos")))]
 pub(crate) mod kde {
     use std::path::PathBuf;
 
     use eframe::egui::Color32;
 
-    /// The accent of a Plasma session, given the `portal`'s: the one chosen,
-    /// from the wallpaper too, or where it follows the colour scheme, the
-    /// portal's, or else the scheme's selection colour, which is the same.
-    /// Elsewhere the portal's: other desktops may have left a `kdeglobals`
-    /// behind, which isn't theirs to follow.
+    /// Returns the accent for a Plasma session: `AccentColor` from
+    /// `kdeglobals` (including wallpaper accents), falling back to `portal` or
+    /// the colour scheme's selection background when the accent tracks the
+    /// scheme. Outside Plasma, returns `portal`: a `kdeglobals` left behind
+    /// there is not that desktop's to follow.
     pub(super) fn accent(portal: Option<Color32>) -> Option<Color32> {
         if !plasma() {
             return portal;

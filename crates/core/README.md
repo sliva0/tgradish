@@ -1,10 +1,10 @@
 # tgradish-core
 
-What the command line and the GUI of
-[tgradish](https://github.com/sliva0/tgradish) share: Telegram video, static
-and animated stickers and emoji made from videos, pictures and pixel art,
-fitted to Telegram's limits. ffmpeg runs as the `ffmpeg` and `ffprobe`
-programs, or with the `linked` feature as its libraries.
+Shared conversion library for the [tgradish](https://github.com/sliva0/tgradish)
+CLI and GUI. Converts videos, images and pixel art into Telegram video, static
+and animated stickers and emoji fitted to Telegram's limits. Runs external
+`ffmpeg` and `ffprobe` binaries by default, or links ffmpeg libraries directly
+with the `linked` feature.
 
-It is made for tgradish and has its version: to convert files, install
-`tgradish` itself.
+This crate is made for tgradish and shares its version; to convert files,
+install `tgradish`.

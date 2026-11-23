@@ -1,5 +1,5 @@
-//! What of an Aseprite file is read, whatever it is made into: the frames
-//! of one tag, and which layers show.
+//! Aseprite input selection across all output formats: frame tag and visible
+//! layers.
 
 use std::rc::Rc;
 

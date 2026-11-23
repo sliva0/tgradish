@@ -1,6 +1,6 @@
-//! The same conversion as command lines to copy, so it can be repeated
-//! or scripted outside the GUI: the `tgradish` one, and for WebM the
-//! ffmpeg ones it runs, quoted for the shell of the system at hand.
+//! Copyable CLI command lines reproducing the current conversion outside the
+//! GUI: the `tgradish` command and, for WebM, the underlying `ffmpeg` commands,
+//! quoted for the host OS shell.
 
 use crate::config::Config;
 use eframe::egui;
@@ -47,25 +47,21 @@ fn joined<S: AsRef<str>>(args: &[S], word: fn(&str) -> String) -> String {
     args.iter().map(|arg| word(arg.as_ref())).collect::<Vec<_>>().join(" ")
 }
 
-/// `word` for a POSIX shell, bash and zsh: as it is when nothing in it is
-/// special to any of them, so a flag and its value read `--start=0.16`,
-/// else in single quotes, which keep everything but a single quote,
-/// written `'\''`. Not special are ASCII letters and digits, `+ , - . /
-/// : @ _ %`, and `=` but as the first character, where zsh takes `=name`
-/// for the path of the program `name`; the rest, as `~`, `#`, `!`, `{}`,
-/// globs and anything not ASCII, is quoted.
+/// Quotes `word` for a POSIX shell (`bash`/`zsh`). Left unquoted when every
+/// character is safe (`A-Za-z0-9+,-./:=@_%` and not starting with `=`, which
+/// `zsh` expands as a command path), so `--start=0.16` stays readable;
+/// otherwise single-quoted with `'` escaped as `'\''`.
 fn posix_word(word: &str) -> String {
     let plain = |c: char| c.is_ascii_alphanumeric() || "+,-./:=@_%".contains(c);
     let bare = !word.is_empty() && !word.starts_with('=') && word.chars().all(plain);
     if bare { word.to_owned() } else { format!("'{}'", word.replace('\'', r"'\''")) }
 }
 
-/// `word` for PowerShell: as it is when nothing in it is special, else in
-/// single quotes, which keep everything but a single quote, doubled; it
-/// takes the typographic ones, `‘ ’ ‚ ‛`, for single quotes too. A word
-/// that starts with a dash it reads as a parameter's name up to a dot,
-/// passing other programs what follows as a word of its own, as
-/// `-Dname.more` is: so one with a dot is quoted too.
+/// Quotes `word` for PowerShell. Left unquoted when safe, otherwise wrapped in
+/// single quotes with any single quote (the ASCII `'` and the typographic
+/// `‘ ’ ‚ ‛`, which PowerShell treats as quote characters) doubled. Words
+/// starting with `-` that contain `.` are also quoted because PowerShell splits
+/// unquoted `-name.more` parameters at the dot.
 fn powershell_word(word: &str) -> String {
     const QUOTES: [char; 5] = ['\'', '‘', '’', '‚', '‛'];
     let plain =

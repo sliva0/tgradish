@@ -1,93 +1,89 @@
-//! The values conversion options take, shared by every format's options:
-//! [`webm::Options`](crate::webm::Options), which static stickers take too,
-//! and [`tgs::Options`](crate::tgs::Options); and how options are
-//! layered and written as flags.
+//! Shared option value types, option layering, validation, and CLI flag
+//! formatting used by [`webm::Options`](crate::webm::Options) (for WebM and
+//! WebP) and [`tgs::Options`](crate::tgs::Options).
 //!
-//! Every field of options is optional so they can be layered: built-in
-//! defaults, then a preset, then command-line flags. Missing values get
-//! defaults when a conversion is planned, some of them based on the input
-//! video.
+//! Every option field is `Option<T>` so options can be layered in order:
+//! built-in defaults, then a preset, then command-line flags. Unset fields
+//! receive defaults during planning, some derived from the input video.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::webm::CRFS;
 
-/// How the video is scaled into the target box.
+/// How the input is fitted into the target dimensions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Resize {
-    /// Keep the aspect ratio, touch the box with the longer side. Default
-    /// for stickers.
+    /// Keep aspect ratio and scale so the longer side matches the target.
+    /// Default for stickers.
     Contain,
-    /// Like contain, then fill the rest of the box with transparency.
-    /// Default for emoji, which must be exactly square.
+    /// Scale like `contain`, then fill remaining space with transparency.
+    /// Default for emoji (which must be exactly square) and TGS.
     Pad,
-    /// Keep the aspect ratio, fill the box and cut off what sticks out.
+    /// Keep aspect ratio, fill the target box and crop the excess.
     Crop,
-    /// Ignore the aspect ratio and stretch to the box.
+    /// Ignore aspect ratio and stretch to fill the target box.
     Stretch,
 }
 
-/// How the picture's pixels become the result's.
+/// How pixels are scaled.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Scaling {
-    /// Sharp for pixel art made at least twice as large, smooth otherwise.
+    /// Use sharp scaling for pixel art upscaled 2x or more; smooth otherwise.
     Auto,
-    /// Neighbouring pixels blend.
+    /// Smooth interpolation between neighbouring pixels.
     Smooth,
-    /// Each pixel becomes a block, and blocks blend only at their edges.
-    /// Keeps pixel art crisp at any size.
+    /// Nearest-neighbour block scaling with anti-aliased edges. Keeps pixel
+    /// art crisp at any size.
     Sharp,
-    /// Each pixel becomes the same whole number of output pixels, and
-    /// transparent margins fill the rest of the box.
+    /// Scale by whole-number multiples with transparent margins filling the
+    /// remaining space.
     // read as `pixel-perfect` too, as it was once named
     #[serde(alias = "pixel-perfect")]
     Integer,
 }
 
-/// What to tune so the file ends up just under the file size limit.
+/// Which parameter to adjust to fit within Telegram's file size limit.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Fit {
-    /// Fit the bitrate, and where nothing fits or the best that does looks
-    /// poor in a way more bits for each frame could mend, try lower frame
-    /// rates too and keep what looks most like the input (by SSIM).
-    /// Slowest, best looking.
+    /// Fit bitrate first; if nothing fits, or the best that fits looks poor in
+    /// a way more bits per frame could mend, try lower frame rates and keep
+    /// the encode most like the input (by SSIM). Slowest, best looking.
     Auto,
-    /// Fit the bitrate at the configured frame rate.
+    /// Fit bitrate at the configured frame rate.
     Bitrate,
-    /// Fit the constant quality value (CRF).
+    /// Fit constant quality (CRF).
     Crf,
-    /// Fit the frame rate at constant quality.
+    /// Fit frame rate at constant quality.
     Fps,
-    /// Fit the length at constant quality.
+    /// Fit duration at constant quality.
     Length,
-    /// Encode once with the given settings, even if the result is too large.
+    /// Encode once with the given settings, even if the file exceeds the limit.
     Off,
 }
 
-/// What a fit range counts, which depends on the way of fitting it is
-/// for.
+/// Unit of a [`Range`] searched by [`Fit`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FitUnit {
-    /// Bitrates, in kbit/s.
+    /// Bitrate in kbit/s.
     Kbps,
-    /// libvpx's constant qualities.
+    /// libvpx constant quality (CRF).
     Crf,
-    /// Frame rates.
+    /// Frames per second.
     Fps,
-    /// Lengths, in seconds.
+    /// Duration in seconds.
     Seconds,
 }
 
 impl Fit {
-    /// What a range searched while fitting this way counts. Fitting
-    /// nothing counts bitrates, as the way it encodes is by one.
+    /// Returns the unit of a fit range for this strategy (`Fit::Off` uses
+    /// bitrates because single-attempt encoding targets a bitrate by default).
     pub fn unit(self) -> FitUnit {
         match self {
             Fit::Auto | Fit::Bitrate | Fit::Off => FitUnit::Kbps,
@@ -97,10 +93,9 @@ impl Fit {
         }
     }
 
-    /// What the ends of a range searched while fitting this way can be:
-    /// bitrates of at least 1 kbit/s, libvpx's CRFs, frame rates up to
-    /// Telegram's, and lengths above 0, which planning also keeps within
-    /// the result's.
+    /// Valid bounds for a fit range under this strategy (bitrate >= 1 kbit/s,
+    /// libvpx CRF range, 1..=60 fps, or duration > 0 s, which planning also
+    /// clamps to the output duration).
     pub fn range_limits(self) -> std::ops::RangeInclusive<f64> {
         match self.unit() {
             FitUnit::Kbps => 1.0..=f64::INFINITY,
@@ -111,8 +106,8 @@ impl Fit {
     }
 }
 
-/// How hard the encoder works. Less effort is faster, and makes worse
-/// looking stickers at the same size.
+/// How hard the encoder works. Lower effort is faster, but produces lower
+/// quality at the same size.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -121,7 +116,7 @@ pub enum Effort {
     Fast,
     /// `-cpu-used 2`.
     Balanced,
-    /// `-cpu-used 0`, the slowest.
+    /// `-cpu-used 0` (slowest, highest quality).
     Best,
 }
 
@@ -136,26 +131,26 @@ impl Effort {
     }
 }
 
-/// When to spoof the duration in the metadata.
+/// When to spoof container duration metadata.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Spoof {
-    /// Only when the video is longer than Telegram allows.
+    /// Spoof only when the video exceeds Telegram's 3-second limit.
     Auto,
-    /// Always, even for a video Telegram takes as it is.
+    /// Always spoof, even for videos under 3 seconds.
     Always,
-    /// Never; videos longer than Telegram allows are cut to fit.
+    /// Never spoof; trim videos longer than 3 seconds instead.
     Never,
 }
 
-/// A `[min, max]` range for the value tuned by [`Fit`], in its
+/// A `[min, max]` search range for the value tuned by [`Fit`], in its
 /// [`FitUnit`].
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct Range {
-    /// The least it may be.
+    /// Lower bound.
     pub min: f64,
-    /// The most it may be, at least `min`.
+    /// Upper bound (must be at least `min`).
     pub max: f64,
 }
 
@@ -164,7 +159,7 @@ impl std::str::FromStr for Range {
 
     /// Parses `MIN..MAX`.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let (min, max) = s.split_once("..").ok_or("expected MIN..MAX, for example 100..400")?;
+        let (min, max) = s.split_once("..").ok_or("expected MIN..MAX (for example, 100..400)")?;
         let parse = |v: &str| v.trim().parse::<f64>().map_err(|err| format!("{v:?}: {err}"));
         let range = Range { min: parse(min)?, max: parse(max)? };
         if !(range.min.is_finite() && range.max.is_finite() && range.min <= range.max) {
@@ -180,18 +175,18 @@ impl std::fmt::Display for Range {
     }
 }
 
-/// The part of the input to use, in its pixels as shown (after rotation),
-/// from the top left.
+/// Region of the input to keep, in rotated source pixels from the top-left
+/// corner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct Crop {
-    /// Its left edge, from the input's.
+    /// Left edge offset in pixels.
     pub x: u32,
-    /// Its top edge, from the input's.
+    /// Top edge offset in pixels.
     pub y: u32,
-    /// Its width, at least 1.
+    /// Width in pixels (at least 1).
     #[schemars(range(min = 1))]
     pub width: u32,
-    /// Its height, at least 1.
+    /// Height in pixels (at least 1).
     #[schemars(range(min = 1))]
     pub height: u32,
 }
@@ -215,7 +210,7 @@ impl Crop {
         if self.fits(width, height) {
             Ok(())
         } else {
-            let reason = format!("{self} is not within the {width}×{height} input");
+            let reason = format!("{self} is outside the {width}×{height} input");
             Err(crate::Error::invalid("crop", reason))
         }
     }
@@ -226,7 +221,7 @@ impl std::str::FromStr for Crop {
 
     /// Parses `WIDTHxHEIGHT+X+Y`, or `WIDTHxHEIGHT` for the top left.
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let invalid = || format!("{s:?}: expected WIDTHxHEIGHT+X+Y, for example 640x360+100+50");
+        let invalid = || format!("{s:?}: expected WIDTHxHEIGHT+X+Y (for example, 640x360+100+50)");
         let (size, offset) = s.split_once('+').unwrap_or((s, "0+0"));
         let (width, height) = size.split_once('x').ok_or_else(invalid)?;
         let (x, y) = offset.split_once('+').ok_or_else(invalid)?;
@@ -234,7 +229,7 @@ impl std::str::FromStr for Crop {
         let crop =
             Crop { x: number(x)?, y: number(y)?, width: number(width)?, height: number(height)? };
         if crop.width == 0 || crop.height == 0 {
-            return Err(format!("{s:?}: the crop must be at least 1x1"));
+            return Err(format!("{s:?}: crop must be at least 1x1"));
         }
         Ok(crop)
     }
@@ -246,16 +241,16 @@ impl std::fmt::Display for Crop {
     }
 }
 
-/// How a sprite sheet is laid out: `columns` by `rows` equal cells, its
-/// frames row by row. Written `COLUMNSxROWS`, as `4x2`, the `x` either
-/// case and spaces around the numbers allowed; reading it, as from a
-/// file, refuses anything else, a side of 0 included.
+/// Sprite sheet grid of `columns` by `rows` equal cells, read row by row.
+/// Formatted as `COLUMNSxROWS` (e.g. `4x2`, case-insensitive `x`, optional
+/// spaces around numbers); parsing rejects anything else, including a side
+/// of 0.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct Sheet {
-    /// Cells across.
+    /// Number of columns.
     pub columns: u32,
-    /// Cells down.
+    /// Number of rows.
     pub rows: u32,
 }
 
@@ -263,7 +258,7 @@ impl std::str::FromStr for Sheet {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let invalid = || format!("{s:?} is not COLUMNSxROWS, for example 4x2");
+        let invalid = || format!("{s:?}: expected COLUMNSxROWS (for example, 4x2)");
         let (columns, rows) = s.split_once(['x', 'X']).ok_or_else(invalid)?;
         let number = |n: &str| n.trim().parse::<u32>().ok().filter(|&n| n > 0).ok_or_else(invalid);
         Ok(Sheet { columns: number(columns)?, rows: number(rows)? })
@@ -298,49 +293,46 @@ impl JsonSchema for Sheet {
         schemars::json_schema!({
             "type": "string",
             "pattern": r"^\s*[0-9]*[1-9][0-9]*\s*[xX]\s*[0-9]*[1-9][0-9]*\s*$",
-            "description": "COLUMNSxROWS equal cells, frames row by row"
+            "description": "Sprite sheet grid as COLUMNSxROWS equal cells, read row by row"
         })
     }
 }
 
-/// A scale that lines input pixels up with the result's: a whole number of
-/// result pixels for each input pixel (`2`), or the other way round
-/// (`1/2`). Written as `N`, `1/N` or a decimal like `0.5`; reading it, as
-/// from a preset, refuses anything else, zero included, but for nothing at
-/// all, which is [`IntegerScale::NONE`].
+/// Exact integer scale factor aligning input and output pixels: `N` output
+/// pixels per input pixel (`2`) or `1/N` (`1/2`, or a decimal like `0.5`).
+/// Parsing rejects anything else (including 0), except an empty string, which
+/// parses as [`IntegerScale::NONE`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(try_from = "String", into = "String")]
 pub struct IntegerScale {
-    /// Result pixels along an input pixel; 1 when shrinking. Never 0, but
-    /// in [`IntegerScale::NONE`].
+    /// Output pixels per input pixel (1 when downscaling; 0 only in
+    /// [`IntegerScale::NONE`]).
     pub up: u32,
-    /// Input pixels along a result pixel; 1 when growing. Never 0, but in
-    /// [`IntegerScale::NONE`].
+    /// Input pixels per output pixel (1 when upscaling; 0 only in
+    /// [`IntegerScale::NONE`]).
     pub down: u32,
 }
 
 impl IntegerScale {
-    /// Not a scale, but what clears one: options layered over a preset or
-    /// the config file can't otherwise say that the scale below has no
-    /// say, as leaving it out keeps it. Written as nothing: `--integer-scale=`,
-    /// `integer-scale = ''` or `"integer-scale": ""`. `merged` leaves no scale
-    /// in its place, so presets, the command line and the GUI never hand
-    /// it on; and where options holding it aren't merged, the options'
-    /// `integer_scale()` leaves it out, so it scales as no scale does.
+    /// Sentinel value that clears an inherited `integer-scale`: options layered
+    /// over a preset or config cannot otherwise clear a scale below because
+    /// `None` keeps it. Written as an empty string (`--integer-scale=`,
+    /// `integer-scale = ""`, `"integer-scale": ""`). `merged` strips it so
+    /// presets, the CLI, and the GUI never pass it on, and `integer_scale()`
+    /// ignores it if unmerged.
     pub const NONE: IntegerScale = IntegerScale { up: 0, down: 0 };
 
-    /// The largest scale either way: a pixel to a whole sticker side.
+    /// Maximum supported factor in either direction (1 pixel to a 512 px
+    /// sticker).
     pub const MAX: u32 = 512;
 
-    /// Whether it scales by anything: a scale made in code with a side of
-    /// 0 makes no pixels, and planning refuses it. [`IntegerScale::NONE`]
-    /// isn't valid either, as it is no scale, which planning never sees as
-    /// one.
+    /// Whether both `up` and `down` are non-zero: planning refuses a scale
+    /// that is not, and [`IntegerScale::NONE`] is not one.
     pub fn is_valid(self) -> bool {
         self.up > 0 && self.down > 0
     }
 
-    /// `size` input pixels at this scale, if they make whole result pixels.
+    /// Scales `size` by this factor if it produces an exact integer result.
     pub fn apply(self, size: u32) -> Option<u32> {
         if !self.is_valid() || !size.is_multiple_of(self.down) {
             return None;
@@ -348,8 +340,8 @@ impl IntegerScale {
         (size / self.down).checked_mul(self.up)
     }
 
-    /// The most input pixels that make at most `size` result pixels: none
-    /// at a scale that isn't valid.
+    /// Returns the largest input dimension that scales to at most `size` output
+    /// pixels (0 if the scale is invalid).
     pub fn most_input(self, size: u32) -> u32 {
         size.checked_div(self.up).map_or(0, |whole| whole.saturating_mul(self.down))
     }
@@ -361,7 +353,7 @@ impl std::str::FromStr for IntegerScale {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let invalid = || {
             format!(
-                "{s:?}: expected a whole number like 2, or 1/N like 1/2, up to {}",
+                "{s:?}: expected a whole number (such as 2) or 1/N (such as 1/2), up to {}",
                 IntegerScale::MAX
             )
         };
@@ -429,22 +421,19 @@ impl JsonSchema for IntegerScale {
         schemars::json_schema!({
             "type": "string",
             "pattern": r"^([1-9][0-9]*|1/[1-9][0-9]*|)$",
-            "description": "N result pixels for each input pixel, or 1/N, with N up to 512; \
-                            nothing for none, which clears a preset's"
+            "description": "Scale by N output pixels per input pixel, or 1/N (N up to 512); \
+                            empty string clears a preset value"
         })
     }
 }
 
-/// Gives a struct of options, every field an `Option`, `overlaid`: the
-/// options with every value another sets in place of their own, which is
-/// how presets, items and flags layer. Every field is named, and the
-/// struct destructured by them, so adding one without naming it here fails
-/// to compile.
+/// Generates `overlaid(&self, overlay)` for an options struct whose fields are
+/// all `Option<T>`. Destructuring `overlay` guarantees every new field must be
+/// added here.
 macro_rules! layered {
     ($options:ident { $($field:ident),* $(,)? }) => {
         impl $options {
-            /// These options with every value `overlay` sets in place of
-            /// their own.
+            /// Copies every `Some` field from `overlay` onto `self`.
             fn overlaid(mut self, overlay: &$options) -> $options {
                 let $options { $($field: _),* } = overlay;
                 $(if overlay.$field.is_some() {
@@ -457,18 +446,17 @@ macro_rules! layered {
 }
 pub(crate) use layered;
 
-/// Options renamed since they were first named, each old key with the key
-/// it has now: files, JSON and flags still read the old ones.
+/// Legacy option keys kept as aliases in configs, JSON and CLI flags:
+/// `(old, current)`.
 pub const RENAMED: [(&str, &str); 2] = [("speed", "effort"), ("exact-scale", "integer-scale")];
 
-/// The key an option named `key` has now: `key`, unless it was renamed
-/// since, as [`RENAMED`] says.
+/// Maps a legacy option key to its current key (see [`RENAMED`]), or
+/// returns `key`.
 pub fn current_key(key: &str) -> &str {
     RENAMED.iter().find(|(old, _)| *old == key).map_or(key, |(_, new)| new)
 }
 
-/// The keys of the values `options` sets, as files, JSON and flags name
-/// them, in the order of its fields.
+/// Returns the keys of all fields set in `options`, in struct field order.
 pub fn set_keys(options: &impl Serialize) -> Vec<String> {
     match serde_json::to_value(options) {
         Ok(serde_json::Value::Object(fields)) => fields.keys().cloned().collect(),
@@ -476,18 +464,16 @@ pub fn set_keys(options: &impl Serialize) -> Vec<String> {
     }
 }
 
-/// Command line flags that set the values `options` sets: the flag of each
-/// field has its name, as `tgradish convert` has them. A flag and its
-/// value are one word, `--name=value`: in a word of its own, a value that
-/// starts with a dash, as a title or a layer's name can, would be taken
-/// for another flag. A switch is `--name` on and `--no-name` off.
+/// Formats set fields of `options` as `tgradish convert` CLI flags.
+/// Values use `--name=value` so values starting with `-` (such as titles or
+/// layer names) are never mistaken for flags. Booleans use `--name` and
+/// `--no-name`.
 pub fn flags(options: &impl Serialize) -> Vec<String> {
     let Ok(serde_json::Value::Object(fields)) = serde_json::to_value(options) else {
         return Vec::new();
     };
-    // to nine decimals, far finer than any cut between frames, so the
-    // noise of sums and differences of times doesn't print as
-    // 0.07999999999999996
+    // Round to 9 decimal places (far finer than any cut between frames) so
+    // float arithmetic noise does not print as 0.07999999999999996.
     let number = |value: &serde_json::Value| match value.as_f64() {
         Some(n) if n.abs() < 1e15 => {
             let n = (n * 1e9).round() / 1e9;
@@ -547,13 +533,13 @@ pub fn flags(options: &impl Serialize) -> Vec<String> {
     flags
 }
 
-/// The slowest and fastest tempos, for WebM and .tgs alike.
+/// Allowed playback speed multiplier range for both WebM and `.tgs`.
 pub const TEMPOS: std::ops::RangeInclusive<f64> = tgradish_tgs::normalise::TEMPOS;
 
-/// Why `value` can't be the option `key`'s whatever the input is, as
-/// "must be from 0.1 to 10", or `None` when it can be, or `key` is no
-/// number [`check`] knows: what a front-end checks a value by as it is
-/// typed, in the words conversions would refuse it in.
+/// Validates a numeric option value independent of any input file. Used by
+/// front-ends to check values as they are typed, returning the same error
+/// wording as conversions (or `None` if valid or not a number checked by
+/// [`check`]).
 pub fn wrong_value(key: &str, value: f64) -> Option<String> {
     let max_seconds = crate::telegram::MAX_SECONDS;
     let max_fps = crate::telegram::MAX_FPS;
@@ -572,23 +558,24 @@ pub fn wrong_value(key: &str, value: f64) -> Option<String> {
         return None;
     }
     Some(match key {
-        "start" => "must be 0 or more seconds".into(),
-        "length" => "must be more than 0 seconds".into(),
+        "start" => "must be 0 seconds or greater".into(),
+        "length" => "must be greater than 0 seconds".into(),
         "tempo" => format!("must be from {} to {}", TEMPOS.start(), TEMPOS.end()),
-        "fps" => format!("must be more than 0 and at most {max_fps}"),
+        "fps" => format!("must be greater than 0 and at most {max_fps}"),
         "bitrate" => "must be at least 1 kbit/s".into(),
         "crf" => format!("must be from {} to {}", CRFS.start(), CRFS.end()),
         "attempts" => format!("must be from 1 to {}", crate::webm::MAX_ATTEMPTS),
-        _ => format!("must be more than 0 and at most {max_seconds} seconds"),
+        _ => format!("must be greater than 0 and at most {max_seconds} seconds"),
     })
 }
 
-/// Options [`check`] looks over, by their fields: serialised, as to JSON,
-/// a number that isn't finite would be nothing at all, and pass.
+/// Options structs validated by [`check`]. Inspects fields directly so
+/// non-finite floats (which JSON would drop as `null`) are caught.
 pub trait Checked {
-    /// The numbers set that [`wrong_value`] knows, each under its key.
+    /// Set numeric options recognised by [`wrong_value`], paired with their
+    /// keys.
     fn numbers(&self) -> Vec<(&'static str, f64)>;
-    /// The range searched while fitting, if one is set.
+    /// Fit range if set.
     fn fit_range(&self) -> Option<Range> {
         None
     }
@@ -626,11 +613,9 @@ impl Checked for crate::tgs::Options {
     }
 }
 
-/// Checks the values `options` sets that are wrong whatever the input:
-/// numbers out of their range, as [`wrong_value`] says, those that aren't
-/// finite among them, and a fit range that isn't finite or runs backwards.
-/// What depends on the input, as a start past its end, is checked as it is
-/// converted.
+/// Validates all input-independent values in `options` (numeric bounds,
+/// finiteness, and `fit-range` ordering). Input-dependent checks happen during
+/// conversion.
 pub fn check(options: &impl Checked) -> crate::Result<()> {
     for (key, value) in options.numbers() {
         if let Some(reason) = wrong_value(key, value) {
@@ -639,7 +624,10 @@ pub fn check(options: &impl Checked) -> crate::Result<()> {
     }
     if let Some(range) = options.fit_range() {
         if !(range.min.is_finite() && range.max.is_finite()) {
-            return Err(crate::Error::invalid("fit-range", format!("{range} must be finite")));
+            return Err(crate::Error::invalid(
+                "fit-range",
+                format!("{range} must have finite ends"),
+            ));
         }
         if range.min > range.max {
             let reason = format!("{range} must have MIN <= MAX");
@@ -664,15 +652,15 @@ mod tests {
         let webm = Options { tempo: Some(50.0), ..Default::default() };
         assert_eq!(invalid(check(&webm)), "tempo must be from 0.1 to 10");
         let tgs = crate::tgs::Options { fps: Some(0.0), ..Default::default() };
-        assert_eq!(invalid(check(&tgs)), "fps must be more than 0 and at most 60");
+        assert_eq!(invalid(check(&tgs)), "fps must be greater than 0 and at most 60");
         let range = Options { fit_range: Some(Range { min: 4.0, max: 1.0 }), ..Default::default() };
         assert_eq!(invalid(check(&range)), "fit-range 4..1 must have MIN <= MAX");
         let length = Options { length: Some(0.0), ..Default::default() };
-        assert_eq!(invalid(check(&length)), "length must be more than 0 seconds");
+        assert_eq!(invalid(check(&length)), "length must be greater than 0 seconds");
         let fine =
             Options { start: Some(0.0), crf: Some(63), attempts: Some(1), ..Default::default() };
         assert!(check(&fine).is_ok());
-        assert_eq!(wrong_value("start", f64::NAN).unwrap(), "must be 0 or more seconds");
+        assert_eq!(wrong_value("start", f64::NAN).unwrap(), "must be 0 seconds or greater");
         assert!(wrong_value("title", -1.0).is_none());
     }
 
@@ -718,7 +706,7 @@ mod tests {
         let range =
             Options { fit_range: Some(Range { min: 1.0, max: f64::NAN }), ..Default::default() };
         let Err(crate::Error::InvalidOption { reason, .. }) = check(&range) else { panic!() };
-        assert_eq!(reason, "1..NaN must be finite");
+        assert_eq!(reason, "1..NaN must have finite ends");
     }
 
     #[test]

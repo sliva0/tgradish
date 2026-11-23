@@ -1,5 +1,5 @@
-//! Running ffmpeg and ffprobe as child processes, their output read line
-//! by line as they go, so that a [`CancelToken`] can kill them.
+//! Runs `ffmpeg` and `ffprobe` child processes with streaming output and
+//! [`CancelToken`]-based termination.
 
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader, Read};
@@ -21,13 +21,12 @@ pub(crate) enum Output {
 
 const STDERR_TAIL: usize = 40;
 
-/// How long a process ended by an interrupt waits for the token to say
-/// what it meant, before it counts as a failure.
+/// Grace period for an interrupted child process to wait for `CancelToken`
+/// before treating the exit as an error.
 const INTERRUPT_GRACE: std::time::Duration = std::time::Duration::from_millis(500);
 
-/// A child process started: killed and reaped if dropped before it is
-/// waited for, so that a panic or an early return while it runs never
-/// leaves it running.
+/// Guard for a spawned child process. Kills and reaps the child on drop if not
+/// explicitly waited on, preventing orphans on panic or early return.
 struct Running<'a> {
     child: Arc<Mutex<Child>>,
     cancel: &'a CancelToken,
@@ -36,17 +35,17 @@ struct Running<'a> {
 }
 
 impl Running<'_> {
-    /// Waits for it, its output read to the end. `stderr` is the last
-    /// lines of its stderr, for the error if it failed.
+    /// Waits for the child to exit after its pipes reach EOF, using `stderr`
+    /// lines in any failure error.
     fn wait(mut self, stderr: &[String]) -> Result<()> {
         self.waited = true;
         let status = self.child.lock().unwrap_or_else(PoisonError::into_inner).wait();
         self.cancel.register(None);
         let status = status.map_err(Error::io(FileAction::Run, self.program))?;
-        // Ctrl-C reaches ffmpeg as it reaches tgradish, in the terminal's
-        // process group, as SIGTERM and SIGHUP may: what it means, as
-        // cancelling or settling, may be decided only after ffmpeg has
-        // ended for it
+        // Ctrl-C in the terminal's process group reaches ffmpeg at the same
+        // time as tgradish (as SIGTERM and SIGHUP may), so ffmpeg may exit
+        // before our signal handler records whether to cancel or settle. Wait
+        // briefly for that decision.
         if interrupted(&status) {
             self.cancel.await_interruption(INTERRUPT_GRACE);
         }
@@ -170,10 +169,9 @@ pub(crate) fn run_bytes(
     })
 }
 
-/// Runs `cmd` and returns what it writes to stdout as pieces of `len`
-/// bytes, such as frames of raw video, each read into its own buffer
-/// rather than all into one and copied out. A last piece cut short is
-/// left out.
+/// Runs `cmd` and reads stdout in fixed `len`-byte chunks (such as raw RGBA
+/// frames), each straight into its own buffer rather than one large buffer
+/// copied out; a trailing partial chunk is discarded.
 pub(crate) fn run_pieces(
     cmd: Command,
     program: &'static str,

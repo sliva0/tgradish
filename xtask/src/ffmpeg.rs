@@ -1,8 +1,8 @@
-//! The minimal static ffmpeg that release builds link in, and the exact
-//! sources it is made from. Everything comes from archives pinned by their
-//! hashes, so a release can say what is in it and publish those very
-//! sources, as the LGPL asks. Each build records its recipe, so one made
-//! from other sources or flags is known to be out of date.
+//! Builds the minimal static LGPL ffmpeg linked into release builds and packs
+//! its exact source tarballs for LGPL compliance. All upstream archives are
+//! pinned by SHA-256, so a release can state its contents and publish the exact
+//! corresponding sources, and each build records a recipe fingerprint so cached
+//! builds from different sources or flags are rebuilt.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -525,7 +525,7 @@ pub fn ensure_ffmpeg(target: Target, asm: bool) -> Result<()> {
         eprintln!("building ffmpeg for {}", target.name());
         return ffmpeg_for(target, asm);
     }
-    eprintln!("ffmpeg for {} is up to date; --force builds it again", target.name());
+    eprintln!("ffmpeg for {} is up to date; pass --force to rebuild", target.name());
     carry_licenses(&licenses)?;
     println!("{}\n{}", prefix.display(), licenses.display());
     Ok(())
@@ -613,12 +613,11 @@ pub fn package_sources() -> Result<()> {
     }
     std::fs::create_dir_all(&stage)?;
     let mut readme = String::from(
-        "Sources of the ffmpeg build that tgradish releases include or link\n\
-         statically. Build it with `cargo xtask ffmpeg` from the tgradish\n\
-         repository at the same version; xtask/src/ffmpeg.rs has every configure\n\
-         flag. To relink tgradish against a modified ffmpeg, build that with\n\
-         `cargo xtask ffmpeg --target TARGET`, then tgradish with\n\
-         `cargo xtask build --target TARGET`, which links it in.\n\n",
+        "Source archives for the static ffmpeg build included in tgradish releases.\n\n\
+         To build it, run `cargo xtask ffmpeg` from the matching tgradish version\n\
+         (see xtask/src/ffmpeg.rs for all configure flags). To relink tgradish against\n\
+         a modified ffmpeg, run `cargo xtask ffmpeg --target TARGET` followed by\n\
+         `cargo xtask build --target TARGET`.\n\n",
     );
     for source in LIBRARIES {
         let archive = download(source, &downloads)?;

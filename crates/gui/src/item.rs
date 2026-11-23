@@ -1,4 +1,5 @@
-//! A file in the list: what it is, what to make of it, and what came out.
+//! Open file item state: input kind, user conversion choices, loaded media,
+//! conversion jobs, and preview state.
 
 use std::path::{Path, PathBuf};
 

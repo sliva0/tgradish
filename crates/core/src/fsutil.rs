@@ -1,11 +1,12 @@
-//! Writing files without leaving half-written ones behind: results, and
-//! files kept between runs, as the config and the GUI's session.
+//! Atomic file writing and filesystem helpers used for conversion outputs,
+//! configuration files and GUI session state.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-/// Where a result goes beside `input`: its name with `suffix` for an
-/// extension, or for a folder, after its whole name, dots and all.
+/// Builds a sibling output path from `input` and `suffix`. Replaces the
+/// extension for files, and appends `.{suffix}` to the full name for
+/// directories (preserving dots in directory names).
 pub(crate) fn beside(input: &Path, suffix: &str) -> PathBuf {
     if !input.is_dir() {
         return input.with_extension(suffix);
@@ -15,16 +16,16 @@ pub(crate) fn beside(input: &Path, suffix: &str) -> PathBuf {
     input.with_file_name(name)
 }
 
-/// Writes `bytes` to `path` through a temporary file in the same directory,
-/// so nobody sees a half-written file and hard links to the old file keep
-/// their content. With `replace` an existing file is replaced; otherwise
-/// this fails with [`std::io::ErrorKind::AlreadyExists`], even if the file
-/// appeared while tgradish was working. Where `path` is a link to a file,
-/// that file is the one written, and the link stays.
+/// Atomically writes `bytes` to `path` via a temporary file in the same
+/// directory so partial writes are never visible and hard links to the old
+/// file stay intact.
+///
+/// When `replace` is false, fails with [`std::io::ErrorKind::AlreadyExists`]
+/// if `path` exists (even if created concurrently). When `path` is a symlink
+/// to an existing target, writes through to the target and preserves the link.
 pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<()> {
-    // renaming over a link would put a file in its place, and leave what
-    // it points to, as a config file kept in a dotfiles folder, behind; a
-    // link to nothing is replaced, as there is nowhere to write through it
+    // Follow symlinks to existing files (e.g. stowed dotfiles) so the target
+    // is updated instead of replacing the link. Dangling symlinks are replaced.
     let linked = match std::fs::symlink_metadata(path) {
         Ok(found) if found.is_symlink() => std::fs::canonicalize(path).ok(),
         _ => None,
@@ -33,8 +34,8 @@ pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<(
     let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
     let mut builder = tempfile::Builder::new();
     builder.prefix(".tgradish-");
-    // temporary files are private; results get the permissions any new
-    // file gets, which the umask decides
+    // Temporary files default to 0600; 0666 lets the umask decide, as for any
+    // new file.
     #[cfg(unix)]
     builder.permissions(std::os::unix::fs::PermissionsExt::from_mode(0o666));
     let mut tmp = builder.tempfile_in(dir)?;
@@ -44,10 +45,9 @@ pub fn write_file(path: &Path, bytes: &[u8], replace: bool) -> std::io::Result<(
     result.map(drop).map_err(|err| err.error)
 }
 
-/// Fails as writing `path` would where its folder can't be written to, as
-/// one that is read-only: a temporary file made there and removed, so it
-/// is found before the work whose result it is, not after. A folder that
-/// isn't there yet passes, as it is made before the result is written.
+/// Checks early whether `path`'s parent directory is writable by creating and
+/// immediately deleting a temporary file. Succeeds if the directory does not
+/// exist yet (it will be created later).
 pub(crate) fn check_writable(path: &Path) -> std::io::Result<()> {
     let dir = path.parent().filter(|dir| !dir.as_os_str().is_empty()).unwrap_or(Path::new("."));
     if !dir.is_dir() {
@@ -56,20 +56,20 @@ pub(crate) fn check_writable(path: &Path) -> std::io::Result<()> {
     tempfile::Builder::new().prefix(".tgradish-").tempfile_in(dir).map(drop)
 }
 
-/// The bytes of the file at `path` if it has at most `most` of them, or
-/// `None`, read without reading more than that, however large it is.
+/// Reads `path` if it is at most `most` bytes, or returns `Ok(None)` without
+/// reading past the limit.
 pub(crate) fn read_at_most(path: &Path, most: u64) -> std::io::Result<Option<Vec<u8>>> {
     let file = std::fs::File::open(path)?;
     if file.metadata()?.len() > most {
         return Ok(None);
     }
     let mut bytes = Vec::new();
-    // it may have grown since
+    // Guard against the file growing after the metadata check.
     std::io::Read::read_to_end(&mut std::io::Read::take(file, most + 1), &mut bytes)?;
     Ok((bytes.len() as u64 <= most).then_some(bytes))
 }
 
-/// [`write_file`] for a result, where an output already there is
+/// Writes an output file via [`write_file`], mapping `AlreadyExists` to
 /// [`Error::OutputExists`](crate::Error::OutputExists).
 pub(crate) fn write_output(path: &Path, bytes: &[u8], replace: bool) -> crate::Result<()> {
     write_file(path, bytes, replace).map_err(|err| match err.kind() {
@@ -112,7 +112,7 @@ mod tests {
         // said without the temporary file's path, nor the OS's number
         let path = locked.join("out.tgs");
         let said = written.unwrap_err().to_string();
-        assert_eq!(said, format!("couldn't write {}: permission denied", path.display()));
+        assert_eq!(said, format!("failed to write {}: permission denied", path.display()));
         assert_eq!(std::fs::read_dir(&locked).unwrap().count(), 0);
     }
 

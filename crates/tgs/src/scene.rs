@@ -1,146 +1,142 @@
-//! What encoders produce: paint groups (one fill over rectangles and
-//! rectilinear paths) stacked bottom to top, in layers that are each shown
-//! for a range of 60 fps frames. Coordinates are in cells of the
-//! [`PixelAnim`] grid.
+//! Intermediate scene representation produced by encoders: paint groups (one
+//! fill over rectangles or rectilinear paths) stacked bottom to top inside
+//! timed layers. Coordinates are cell indices on the [`PixelAnim`] grid.
 //!
-//! Two properties are checked here rather than in a renderer:
+//! Two invariants can be verified directly on a scene without a renderer:
 //! - rasterising the scene reproduces the normalised frames exactly;
-//! - the seam invariant: wherever two 8-adjacent
-//!   opaque cells show different paint groups, one group of the lower
-//!   one's colour, under the upper one, covers both cells (usually the
-//!   lower group itself), so anti-aliased inner edges are drawn over the
-//!   right colour instead of over transparency.
+//! - the seam invariant: wherever two 8-adjacent opaque cells display
+//!   different paint groups, a group of the lower cell's colour drawn under
+//!   the upper group (usually the lower group itself) covers both cells so
+//!   anti-aliased inner edges blend over the right colour rather than
+//!   transparency.
 
 #[cfg(any(test, feature = "internals"))]
 use crate::normalise::PixelAnim;
 
-/// A whole animation as paint groups in layers.
+/// An animation represented as layered paint groups.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Scene {
     /// Width in cells.
     pub width: u32,
     /// Height in cells.
     pub height: u32,
-    /// Length in 60 fps frames.
+    /// Duration in 60 fps ticks.
     pub ticks: u32,
-    /// Bottom first.
+    /// Layers ordered bottom to top.
     pub layers: Vec<Layer>,
 }
 
-/// Groups shown together for a range of frames.
+/// Paint groups sharing a visibility lifetime.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Layer {
-    /// Shown for frames `from..to`.
+    /// Start tick (inclusive).
     pub from: u32,
-    /// See `from`.
+    /// End tick (exclusive).
     pub to: u32,
-    /// Spans of frames within those where the layer is hidden after all,
-    /// in order.
+    /// Sorted tick spans within `from..to` during which the layer is hidden.
     pub hidden: Vec<(u32, u32)>,
-    /// Bottom first.
+    /// Paint groups ordered bottom to top.
     pub groups: Vec<Group>,
 }
 
-/// How a group's shapes fill. The painter fills by [`FillRule::NonZero`]
-/// only; the even-odd rule is for tgs-lab, to check that renderers draw it.
+/// Fill rule for a paint group. The painter uses [`FillRule::NonZero`] only;
+/// [`FillRule::EvenOdd`] is used by `tgs-lab` to test renderers.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum FillRule {
-    /// Where outlines wind around a point any number of times but none.
+    /// Non-zero winding rule.
     #[default]
     NonZero,
-    /// Where they wind around it an odd number of times.
+    /// Even-odd winding rule.
     EvenOdd,
 }
 
-/// Shapes filled together as one path with one palette colour.
+/// Shapes filled together with one palette colour.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Group {
-    /// An index into the animation's palette.
+    /// Palette index.
     pub colour: u16,
-    /// How its shapes fill.
+    /// Fill rule.
     pub rule: FillRule,
-    /// What it fills.
+    /// Shapes in this group.
     pub shapes: Vec<Shape>,
-    /// Spans of frames the group is shown in, in order, while its layer is;
-    /// empty for all of them.
+    /// Sorted tick spans where the group is shown while its layer is visible;
+    /// empty means shown for the layer's full lifetime.
     pub shown: Vec<(u32, u32)>,
 }
 
-/// What a group fills. The painter draws rectangles only; paths are for
-/// tgs-lab's probes and render checks.
+/// Geometry inside a [`Group`]. The painter emits rectangles only; paths are
+/// used by `tgs-lab` probes and renderer checks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Shape {
-    /// A rectangle of cells.
+    /// Axis-aligned rectangle of cells.
     Rect {
-        /// Its left column.
+        /// Left column.
         x: u32,
-        /// Its top row.
+        /// Top row.
         y: u32,
-        /// Its width in cells.
+        /// Width in cells.
         width: u32,
-        /// Its height in cells.
+        /// Height in cells.
         height: u32,
     },
-    // never made by the painter, whose scenes are all of this crate's
-    // without `internals`
+    // Unused without `internals` because the painter emits only rectangles.
     #[cfg_attr(not(feature = "internals"), allow(dead_code))]
-    /// A closed outline through corners, alternating horizontal and
-    /// vertical edges. Clockwise (on screen, y down) like rectangles, so
-    /// with the non-zero rule it adds to them; counter-clockwise cuts holes.
+    /// Closed rectilinear polygon of alternating horizontal and vertical edges.
+    /// Clockwise (screen coordinates, y down) adds area under non-zero fill;
+    /// counter-clockwise cuts holes.
     Path(Vec<(u32, u32)>),
 }
 
 #[cfg(any(test, feature = "internals"))]
-/// A cell of a rasterised scene.
+/// Rasterised colour state of one cell.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Paint {
-    /// Nothing drawn.
+    /// Transparent (nothing painted).
     Clear,
-    /// One palette colour, opaque or over nothing.
+    /// Single palette colour (opaque, or translucent over transparency).
     Colour(u16),
-    /// A translucent colour over another colour. Renderers blend these and
-    /// round differently, so [`Scene::compare`] counts every blend as wrong,
-    /// even one that would come out right; encoders never draw translucent
-    /// colours over anything.
+    /// Translucent colour painted over another colour. Renderers round blends
+    /// differently, so [`Scene::compare`] treats every blend as a mismatch;
+    /// encoders never draw translucent paint over existing paint.
     Blend,
 }
 
 #[cfg(any(test, feature = "internals"))]
-/// Where a scene differs from the animation it should draw.
+/// First difference found between a [`Scene`] and a [`PixelAnim`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Mismatch {
-    /// The scene is of another size or length: `(width, height, ticks)`
-    /// of each.
+    /// Scene dimensions or tick count differ (`(width, height, ticks)`).
     Size {
-        /// The animation's.
+        /// Expected `(width, height, ticks)` from the animation.
         expected: (u32, u32, u32),
-        /// The scene's.
+        /// Actual `(width, height, ticks)` of the scene.
         got: (u32, u32, u32),
     },
-    /// The first cell that shows something else.
+    /// First cell that renders differently.
     Cell {
-        /// The 60 fps frame.
+        /// Tick (60 fps frame index).
         tick: u32,
-        /// The cell's column.
+        /// Cell column.
         x: u32,
-        /// The cell's row.
+        /// Cell row.
         y: u32,
-        /// The palette colour the animation shows there.
+        /// Expected palette index.
         expected: u16,
-        /// What the scene paints there.
+        /// Actual rasterised cell state.
         got: Paint,
     },
 }
 
 #[cfg(any(test, feature = "internals"))]
-/// A pair of neighbouring cells that breaks the seam invariant.
+/// A pair of adjacent opaque cells violating the seam invariant.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Seam {
-    /// The 60 fps frame, the first of those it is broken in.
+    /// First tick where the seam occurs.
     pub tick: u32,
-    /// The cell where the lower group's colour should also be painted.
+    /// The cell showing the upper group, where the lower group's colour must
+    /// also be painted.
     pub cell: (u32, u32),
-    /// Its neighbour, which shows the lower group.
+    /// Adjacent cell displaying the lower paint group.
     pub neighbour: (u32, u32),
 }
 
@@ -268,7 +264,7 @@ fn opaque(palette: &[[u8; 4]], colour: u16) -> bool {
 
 #[cfg(any(test, feature = "internals"))]
 impl Layer {
-    /// Whether the layer is shown at a frame.
+    /// Returns whether this layer is visible at `tick`.
     pub fn shown(&self, tick: u32) -> bool {
         (self.from..self.to).contains(&tick)
             && !self.hidden.iter().any(|&(start, end)| (start..end).contains(&tick))
@@ -277,7 +273,8 @@ impl Layer {
 
 #[cfg(any(test, feature = "internals"))]
 impl Scene {
-    /// Frames where the set of visible layers changes, from 0 to `ticks`.
+    /// Sorted ticks where layer or group visibility changes, spanning
+    /// `0..=ticks`.
     fn changes(&self) -> Vec<u32> {
         let mut ticks = vec![0, self.ticks];
         for layer in &self.layers {
@@ -292,7 +289,7 @@ impl Scene {
         ticks
     }
 
-    /// Visible groups at a frame, bottom first.
+    /// Visible groups at `tick`, ordered bottom to top.
     fn visible(&self, tick: u32) -> impl Iterator<Item = &Group> {
         self.layers
             .iter()
@@ -304,8 +301,8 @@ impl Scene {
             })
     }
 
-    /// The scene at a frame, with `palette` alpha deciding what blends.
-    /// Colours past the palette count as opaque.
+    /// Rasterises the scene at `tick`, using `palette` alpha to detect blends.
+    /// Out-of-range colour indices count as opaque.
     pub(crate) fn rasterise(&self, tick: u32, palette: &[[u8; 4]]) -> Vec<Paint> {
         let mut cells = vec![Paint::Clear; self.width as usize * self.height as usize];
         for group in self.visible(tick) {
@@ -322,7 +319,8 @@ impl Scene {
         cells
     }
 
-    /// Where the scene first differs from `anim`, if it does.
+    /// Returns the first mismatch between this scene and `anim`, or `None` if
+    /// they match exactly.
     pub fn compare(&self, anim: &PixelAnim) -> Option<Mismatch> {
         let expected = (anim.width(), anim.height(), anim.ticks());
         let got = (self.width, self.height, self.ticks);
@@ -349,9 +347,9 @@ impl Scene {
         None
     }
 
-    /// Every place the seam invariant is broken. Only pairs of opaque cells
-    /// count: a translucent colour can't be drawn over anything. Colours
-    /// past `palette` count as opaque.
+    /// Finds every pair of 8-adjacent opaque cells violating the seam
+    /// invariant. Translucent cells are excluded because they cannot be painted
+    /// over backing colours. Out-of-range palette indices count as opaque.
     pub fn seams(&self, palette: &[[u8; 4]]) -> Vec<Seam> {
         let (w, h) = (self.width as usize, self.height as usize);
         let mut out = Vec::new();

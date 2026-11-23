@@ -1,10 +1,10 @@
-//! The window's icon on Wayland.
+//! Sets the Wayland window icon via `xdg-toplevel-icon-v1`.
 //!
-//! Compositors take a window's icon from the desktop entry its app id
-//! names, which a binary run from where it was unpacked has none of, and
-//! winit doesn't set one. This sends the icon itself with the
-//! xdg-toplevel-icon protocol, on winit's connection, where the compositor
-//! has the protocol: KWin does.
+//! Wayland compositors normally take a window's icon from the `.desktop` entry
+//! matching its `app_id`, which does not exist when running an unpacked binary
+//! directly, and winit does not implement `xdg-toplevel-icon-v1`. This module
+//! sends the icon over winit's Wayland connection when the compositor supports
+//! the protocol (e.g. KWin).
 
 use std::io::Write;
 use std::os::fd::AsFd;
@@ -22,25 +22,26 @@ use wayland_protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_manager
 use wayland_protocols::xdg::toplevel_icon::v1::client::xdg_toplevel_icon_v1::XdgToplevelIconV1;
 use winit::platform::wayland::WindowExtWayland;
 
-/// The icon and the pixels it is made of, which must outlive it.
+/// Wayland icon resources and backing shared-memory buffers, kept alive for the
+/// lifetime of the window.
 pub(crate) struct ToplevelIcon {
     _icon: XdgToplevelIconV1,
     _buffers: Vec<WlBuffer>,
     _pool: WlShmPool,
     _file: std::fs::File,
-    /// Holds the few events the compositor sends about these, unread.
+    /// Holds any events sent for these objects without dispatching them.
     _queue: EventQueue<State>,
 }
 
-/// Sets the icon of `window` when it is on Wayland and the compositor has
-/// the protocol.
+/// Attaches the application icon to `window` when running on Wayland with
+/// `xdg_toplevel_icon_manager_v1`.
 pub(crate) fn set(window: &winit::window::Window) -> Option<ToplevelIcon> {
     let toplevel = window.xdg_toplevel()?;
     let RawDisplayHandle::Wayland(display) = window.display_handle().ok()?.as_raw() else {
         return None;
     };
-    // SAFETY: winit keeps its display open as long as the window is, and
-    // the xdg_toplevel with it
+    // SAFETY: winit keeps both the Wayland display and the `xdg_toplevel`
+    // valid for as long as `window` is alive.
     #[allow(unsafe_code)]
     let (backend, toplevel) = unsafe {
         let backend = Backend::from_foreign_display(display.display.as_ptr().cast());
@@ -53,7 +54,7 @@ pub(crate) fn set(window: &winit::window::Window) -> Option<ToplevelIcon> {
     let manager: XdgToplevelIconManagerV1 = globals.bind(&handle, 1..=1, ()).ok()?;
     let shm: WlShm = globals.bind(&handle, 1..=1, ()).ok()?;
 
-    // the icon at whole multiples of its pixels, one after another
+    // Pack 1x, 2x, and 4x integer-scaled icons into one shared-memory file.
     let images: Vec<(i32, Vec<u8>)> = [1, 2, 4]
         .into_iter()
         .map(|scale| {
@@ -68,7 +69,7 @@ pub(crate) fn set(window: &winit::window::Window) -> Option<ToplevelIcon> {
     let bytes = images.iter().map(|(_, pixels)| pixels.len()).sum::<usize>();
     let pool = shm.create_pool(file.as_fd(), i32::try_from(bytes).ok()?, &handle, ());
     let icon = manager.create_icon(&handle, ());
-    // the icon theme's, where tgradish is installed
+    // Allow installed icon themes to override the buffer icon.
     icon.set_name("tgradish".into());
     let mut offset = 0;
     let buffers = images
@@ -86,7 +87,8 @@ pub(crate) fn set(window: &winit::window::Window) -> Option<ToplevelIcon> {
     Some(ToplevelIcon { _icon: icon, _buffers: buffers, _pool: pool, _file: file, _queue: queue })
 }
 
-/// Straight RGBA as wl_shm's ARGB8888: premultiplied, blue first in memory.
+/// Converts straight RGBA into little-endian `wl_shm::Format::Argb8888`
+/// (premultiplied BGRA bytes in memory).
 fn argb(rgba: &[u8]) -> Vec<u8> {
     rgba.as_chunks::<4>()
         .0

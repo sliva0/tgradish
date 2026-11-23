@@ -44,7 +44,7 @@ fn decodes_cleanly(path: &Path) -> bool {
 
 #[test]
 fn spoofs_and_watermarks_ffmpeg_output() {
-    // a clip made by an earlier run is there without ffmpeg
+    // Require a live backend even if a cached clip from an earlier run exists.
     if common::backends().is_none() {
         return;
     }

@@ -1,26 +1,25 @@
-//! Where an input's frames start and which part of it is used, as the
-//! timeline shows and edits them and items keep them, written as the cuts
-//! converting reads.
+//! Where an input's frames start and which part of it is used, as the timeline
+//! shows them, items keep them and conversion reads them.
 
 use tgradish_core::webm::{edge_leeway, frame_edge, read_from};
 
-/// How a cut between frames is written, so converting keeps the frames
-/// meant, whatever rounding does to the number.
+/// How frame-accurate cuts are encoded into `start` and `length` options so
+/// conversion selects the intended frames despite float rounding.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Cut {
-    /// ffmpeg keeps frames from the first that starts at or after a cut,
-    /// and counts them over the length: a cut is a hair before the frame
-    /// it starts, and the length is the frames'.
+    /// Video inputs: ffmpeg includes frames starting at or after `start` and
+    /// counts frames over `length`, so `start` is placed slightly before the
+    /// first frame ([`read_from`]) and `length` equals the selected frames'
+    /// span.
     Video,
-    /// Converting keeps every frame of pixel art any of which falls within
-    /// a cut, and takes a cut near where its frames start or end as there,
-    /// normalised for a `.tgs` or drawn for ffmpeg: a cut is
-    /// where the frames start and the length theirs, each in as few digits
-    /// as are still that near.
+    /// Pixel-art inputs: `.tgs` normalisation and drawn WebM conversion snap
+    /// cuts within [`edge_leeway`] of a frame boundary, so `start` and
+    /// `length` are formatted with the fewest decimal places that stay within
+    /// a tenth of that leeway.
     Art,
 }
 
-/// Where an input's frames start, then where the last one ends.
+/// Frame start timestamps followed by the end timestamp of the final frame.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Frames {
     pub(crate) times: Vec<f64>,

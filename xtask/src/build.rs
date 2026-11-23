@@ -1,6 +1,5 @@
-//! Release builds of tgradish for a target, with the settings the release
-//! workflow and `local-release` both build with, kept here so the two
-//! can't drift apart.
+//! Release build runner shared by the release workflow and `local-release` so
+//! both use identical flags.
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -11,7 +10,7 @@ use anyhow::{Context, Result, bail, ensure};
 use crate::ffmpeg::{c_flags, ffmpeg_prefix};
 use crate::{MUSL_GCC, Target, cargo, output, run, rustc, workspace_root};
 
-/// The `build` task: [`build`] as its arguments ask.
+/// Entry point for `cargo xtask build`.
 pub fn build_release(args: &[String]) -> Result<()> {
     let mut target = None;
     let mut system_ffmpeg = false;
@@ -32,7 +31,7 @@ pub fn build_release(args: &[String]) -> Result<()> {
 /// without it. Windows builds are cross-compiled with mingw-w64, musl ones
 /// made with musl-gcc.
 pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
-    ensure!(!(system_ffmpeg && target.is_windows()), "Windows builds always link ffmpeg in");
+    ensure!(!(system_ffmpeg && target.is_windows()), "Windows builds always include ffmpeg");
     let root = workspace_root();
     let mut cargo = cargo();
     cargo
@@ -46,7 +45,7 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
         let pkgconfig = ffmpeg_prefix(target).join("lib/pkgconfig");
         ensure!(
             pkgconfig.is_dir(),
-            "{} is missing, run cargo xtask ffmpeg --target {}",
+            "{} is missing; run cargo xtask ffmpeg --target {}",
             pkgconfig.display(),
             target.name()
         );
@@ -108,11 +107,9 @@ pub fn build(target: Target, system_ffmpeg: bool) -> Result<()> {
     run(&mut cargo)
 }
 
-/// Flags that write the paths of the machine building into the binary,
-/// where panics and debug information name source files, as the same
-/// on every machine: the workspace as `/tgradish`, and cargo's registry
-/// and git checkouts under `/cargo`, as the AUR's package of the source
-/// does with its own folder.
+/// Returns `--remap-path-prefix` flags so embedded source paths in panics and
+/// debug info are reproducible across machines (the workspace as `/tgradish`,
+/// `CARGO_HOME` as `/cargo`, as the AUR source package does).
 fn remapped_paths(root: &Path) -> Vec<String> {
     let cargo_home = std::env::var_os("CARGO_HOME").map(PathBuf::from).or_else(|| {
         let home = std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" })?;
@@ -125,10 +122,10 @@ fn remapped_paths(root: &Path) -> Vec<String> {
     flags
 }
 
-/// A folder whose `libgcc_s.so` names Rust's own static libunwind for
-/// `target`. Rust's std links libgcc's unwinder when musl is linked
-/// dynamically, and Ubuntu has none built for musl; found here first, this
-/// links in its place, so musl builds need no libgcc where they run either.
+/// Creates a linker script `libgcc_s.so` pointing at Rust's self-contained
+/// static `libunwind.a`. Dynamically linked musl builds normally link
+/// `libgcc_s`, which Ubuntu does not provide for musl; placing this directory
+/// first on the library search path avoids any runtime `libgcc` dependency.
 fn static_unwinder(root: &Path, target: Target) -> Result<PathBuf> {
     let libdir = output(rustc().current_dir(root).args([
         "--print",
@@ -157,7 +154,7 @@ fn musl_headers() -> Result<PathBuf> {
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
-        .with_context(|| format!("could not run {MUSL_GCC}, which musl builds need"))?;
+        .with_context(|| format!("could not run {MUSL_GCC} (required for musl builds)"))?;
     gcc.stdin.take().context("no stdin")?.write_all(b"#include <stdio.h>\n")?;
     let out = gcc.wait_with_output()?;
     ensure!(out.status.success(), "{MUSL_GCC} could not find stdio.h");
@@ -165,8 +162,8 @@ fn musl_headers() -> Result<PathBuf> {
     let stdio = deps
         .split_whitespace()
         .find(|word| word.ends_with("/stdio.h"))
-        .context("musl-gcc named no stdio.h")?;
-    Ok(PathBuf::from(stdio).parent().context("stdio.h in no folder")?.to_owned())
+        .context("musl-gcc did not report stdio.h")?;
+    Ok(PathBuf::from(stdio).parent().context("stdio.h path has no parent directory")?.to_owned())
 }
 
 #[cfg(test)]

@@ -1,8 +1,8 @@
-//! The grids of cells art is read on: how colour edges fall, the grid
-//! they make, and moving pixels onto a grid of a given scale.
+//! Pixel-grid detection and snapping: counting colour edges, building cell
+//! grids, and snapping pixels onto a target grid scale.
 
-/// Where cells start, in input pixels from the top left of the crop. Made
-/// by normalising, so there is always a cell at least.
+/// Cell boundary positions in input pixels, measured from the top-left of the
+/// crop. Produced by normalisation and always contains at least one cell.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Grid {
     pub(crate) columns: Vec<u32>,
@@ -10,22 +10,21 @@ pub struct Grid {
 }
 
 impl Grid {
-    /// Where each column of cells starts, from 0, and then the crop's
-    /// width: one more entry than there are columns.
+    /// Column start positions from `0` up to the crop width (`columns + 1`
+    /// entries).
     pub fn columns(&self) -> &[u32] {
         &self.columns
     }
 
-    /// Where each row of cells starts, from 0, and then the crop's height:
-    /// one more entry than there are rows.
+    /// Row start positions from `0` up to the crop height (`rows + 1` entries).
     pub fn rows(&self) -> &[u32] {
         &self.rows
     }
 
-    /// The largest size every cell is a multiple of: the art's pixel scale
-    /// when the input is an exact upscale. Along a side of three cells or
-    /// more, those at its ends don't count, since the canvas or a crop can
-    /// cut art pixels there.
+    /// Greatest common divisor of interior cell sizes: the art's pixel scale
+    /// when the input is an exact upscale. For axes with three or more cells,
+    /// the outer cells are excluded because the canvas or a crop can clip edge
+    /// art pixels.
     pub fn scale(&self) -> u32 {
         let sizes = |edges: &[u32]| {
             let sizes: Vec<u32> = edges.windows(2).map(|w| w[1] - w[0]).collect();
@@ -37,17 +36,16 @@ impl Grid {
         sizes(&self.columns).into_iter().chain(sizes(&self.rows)).fold(0, gcd)
     }
 
-    /// Where the art's pixel grid starts across and down: how far into the
-    /// first cell the second begins, modulo the scale. Not 0 where the
-    /// canvas or a crop cut the first art pixels.
+    /// Start offset `(x, y)` of the pixel grid modulo [`Grid::scale`]. Non-zero
+    /// when the canvas or a crop clipped the leading art pixels.
     pub fn origin(&self) -> (u32, u32) {
         let unit = self.scale().max(1);
         let origin = |edges: &[u32]| if edges.len() > 2 { edges[1] % unit } else { 0 };
         (origin(&self.columns), origin(&self.rows))
     }
 
-    /// Whether the canvas or a crop cut art pixels at the sides, so the
-    /// cells there are smaller than the rest.
+    /// Whether the canvas or a crop clipped the outer cells on either axis to
+    /// a non-multiple of [`Grid::scale`].
     pub fn cut_at_sides(&self) -> bool {
         let unit = self.scale().max(1);
         let cut = |edges: &[u32]| match edges {
@@ -64,10 +62,9 @@ pub(crate) fn gcd(a: u32, b: u32) -> u32 {
     if b == 0 { a } else { gcd(b, a % b) }
 }
 
-/// Colour changes between neighbouring pixels, over every row (or
-/// column) of every frame: `columns[x]` counts changes between columns
-/// `x - 1` and `x`. Outside the crop counts as transparent, so the first
-/// and last entries count visible pixels on the border.
+/// Colour transitions between adjacent pixels across all frames:
+/// `columns[x]` counts changes between columns `x - 1` and `x`. Pixels outside
+/// the crop count as transparent, so border entries count visible edge pixels.
 #[cfg_attr(test, derive(Debug, PartialEq))]
 pub(crate) struct Edges {
     columns: Vec<u64>,
@@ -76,9 +73,9 @@ pub(crate) struct Edges {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct GridFit {
-    /// Where the grid starts, from the crop's top left.
+    /// Grid origin offset from the crop's top-left corner.
     pub(crate) offset: (u32, u32),
-    /// Share of colour edges on the grid.
+    /// Fraction of colour edges lying on the grid.
     pub(crate) fit: f64,
 }
 
@@ -106,10 +103,10 @@ impl Edges {
         Edges { columns, rows }
     }
 
-    /// [`Edges::count`] of frames of cells between `columns` and `rows`
-    /// (edges in pixels, from 0 to the size), each frame a colour index a
-    /// cell, row by row, with 0 transparent and no two indices of one
-    /// colour: what counting their pixels gives, without them.
+    /// Equivalent to [`Edges::count`], computed directly from indexed cells
+    /// without expanding to full pixel buffers. `columns` and `rows` are pixel
+    /// boundaries from `0` to size; colour `0` is transparent and indices are
+    /// distinct colours.
     pub(crate) fn of_cells<'a>(
         columns: &[u32],
         rows: &[u32],
@@ -150,8 +147,8 @@ impl Edges {
         Edges { columns: column_counts, rows: row_counts }
     }
 
-    /// Columns and rows that differ from their neighbour in some frame
-    /// start a new cell; the rest are copies and join the cell before them.
+    /// Starts a new cell wherever a column or row differs from its neighbour
+    /// in any frame; identical consecutive lines merge into the previous cell.
     pub(crate) fn grid(&self) -> Grid {
         let edges = |counts: &[u64]| {
             let size = counts.len() - 1;
@@ -163,10 +160,9 @@ impl Edges {
         Grid { columns: edges(&self.columns), rows: edges(&self.rows) }
     }
 
-    /// How well colour edges line up with a grid of `scale`, which is at
-    /// least 1, at its best offset. The `borders` of the crop count as edges where they lie on
-    /// the art's grid, as those of the visible pixels do; where a crop cut
-    /// through art pixels they would mislead, and only edges inside count.
+    /// Measures how well colour edges align with a grid of `scale` (>= 1) at
+    /// its best offset. Include `borders` when crop edges lie on the art's
+    /// grid; exclude them when a crop may have cut through art pixels.
     pub(crate) fn fit(&self, scale: u32, borders: bool) -> GridFit {
         let skip = usize::from(!borders);
         let counted = |counts: &[u64]| counts.len() - 2 * skip;
@@ -190,8 +186,8 @@ impl Edges {
     }
 }
 
-/// Fills every cell of the grid with its most common colour (the one at
-/// its centre on ties, then the largest). Returns how many pixels changed.
+/// Fills each grid cell with its most common colour (breaking ties by the
+/// centre pixel, then highest packed value). Returns the changed pixel count.
 pub(crate) fn snap(
     pixels: &mut [u32],
     width: u32,
@@ -204,9 +200,8 @@ pub(crate) fn snap(
     snap_to(pixels, width, &columns, &rows)
 }
 
-/// Edges of a grid of `scale`, which is at least 1, along a side of `size`
-/// pixels, starting at `offset`: from 0 to the size, cells at the ends cut
-/// short.
+/// Grid cell boundaries of spacing `scale` (>= 1) across `size` pixels,
+/// starting at `offset` (from `0` to `size`, with partial edge cells).
 pub(crate) fn grid_starts(offset: u32, size: u32, scale: u32) -> Vec<u32> {
     let mut starts = vec![0];
     starts.extend((offset % scale..size).step_by(scale as usize).filter(|&start| start > 0));
@@ -214,9 +209,9 @@ pub(crate) fn grid_starts(offset: u32, size: u32, scale: u32) -> Vec<u32> {
     starts
 }
 
-/// Fills every cell between `columns` and `rows` (edges in pixels, from 0
-/// to the size) with its most common colour, the one at its centre on
-/// ties. Returns how many pixels changed.
+/// Fills each cell defined by `columns` and `rows` with its most common colour
+/// (breaking ties by centre pixel, then highest packed value). Returns the
+/// changed pixel count.
 pub(crate) fn snap_to(pixels: &mut [u32], width: u32, columns: &[u32], rows: &[u32]) -> u64 {
     let w = width as usize;
     let mut changed = 0;

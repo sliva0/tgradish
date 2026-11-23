@@ -1,6 +1,6 @@
-//! Running ffmpeg as separate programs, which a [`CancelToken`] kills,
-//! and what both backends share: the [`Probe`] of an input, and the filter
-//! chains and command lines they follow.
+//! External `ffmpeg`/`ffprobe` process runner (cancellable via
+//! [`CancelToken`]) and types shared with the linked backend: [`Probe`],
+//! [`Orientation`], filter graphs and command-line builders.
 
 mod args;
 mod locate;
@@ -102,8 +102,8 @@ pub struct Ffmpeg {
     pub source: FfmpegSource,
 }
 
-/// Up to `count` frames of `input` from `start` seconds on, at `fps`,
-/// scaled to `size`, as straight RGBA, read in as many `threads`.
+/// Decodes up to `count` straight-RGBA frames of `input` starting at `start`
+/// seconds at `fps`, scaled to `(width, height)`.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn frames(
     ffmpeg: &Ffmpeg,
@@ -135,8 +135,8 @@ pub(crate) fn frames(
     process::run_pieces(cmd, "ffmpeg", frame, cancel)
 }
 
-/// The planned frame at the plan's start, cropped, scaled and padded as the
-/// plan says for a static sticker, as straight RGBA of the plan's size.
+/// Decodes the planned frame at `plan.start`, cropped, scaled and padded to
+/// the plan's size, as straight RGBA for static WebP output.
 pub(crate) fn still(
     ffmpeg: &Ffmpeg,
     plan: &crate::webm::Plan,
@@ -148,8 +148,8 @@ pub(crate) fn still(
     cmd.args(["-hide_banner", "-nostdin", "-v", "error"]);
     cmd.args(threads_args(plan.threads, "-filter_threads"));
     cmd.args(args::input_args(plan, length, plan.fps));
-    // the first frame from the start, as it is: resampling to a frame rate
-    // can skip a short one
+    // Take the first frame directly without fps resampling, which can skip a
+    // short frame.
     cmd.args([
         "-map",
         "0:v:0",

@@ -1,13 +1,13 @@
-//! Aseprite's layer blend modes on straight 8-bit RGBA.
+//! Aseprite layer blend modes on straight 8-bit RGBA.
 //!
-//! Ported from asefile 0.3.8 (`src/blend.rs`, MIT, Copyright (c) 2020
+//! Ported from `asefile` 0.3.8 (`src/blend.rs`, MIT, Copyright (c) 2020
 //! Alpine Alpaca Games), itself a port of Aseprite's
-//! `src/doc/blend_funcs.cpp`, keeping its integer rounding and the
-//! saturation quirk so results match Aseprite's exports.
+//! `src/doc/blend_funcs.cpp`, preserving its integer rounding and saturation
+//! tie-breaking quirk so output matches Aseprite's exports.
 
 pub type Colour = [u8; 4];
 
-/// Blend modes by their number in the file.
+/// Returns the blend function for Aseprite's numeric blend mode ID.
 pub fn by_number(mode: u16) -> Option<fn(Colour, Colour, u8) -> Colour> {
     Some(match mode {
         0 => normal,

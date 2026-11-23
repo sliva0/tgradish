@@ -1,4 +1,4 @@
-//! Stopping conversions and other work under way, from another thread.
+//! Cross-thread cancellation and early settling for conversions.
 
 use std::process::Child;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -6,14 +6,13 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use crate::error::{Error, Result};
 
-/// Cancels work from another thread: conversions check it between steps,
-/// and an ffmpeg process one waits for is killed. It knows one process at
-/// a time, the last started, so work that runs several at once needs a
-/// token for each.
+/// Cancels work from another thread. Conversions check the token between steps,
+/// and cancelling it kills the active ffmpeg child process. Each token tracks
+/// one child process at a time (the last one started), so work that runs
+/// several processes at once needs a separate token for each.
 ///
-/// Fitting a WebM to the size limit can also be asked to settle: to stop
-/// searching and keep the best encode that fits so far, see
-/// [`CancelToken::settle`].
+/// During WebM size-fitting, callers can also ask the search to settle early
+/// and keep the best encode that fits so far; see [`CancelToken::settle`].
 #[derive(Debug, Clone, Default)]
 pub struct CancelToken {
     inner: Arc<Inner>,
@@ -22,12 +21,11 @@ pub struct CancelToken {
 #[derive(Debug, Default)]
 struct Inner {
     cancelled: AtomicBool,
-    /// What fitting is at, whether it was asked to settle, and the process
-    /// at work, under one lock: a settle is taken, and the process killed,
-    /// only for the fitting it was checked against, never for the next
-    /// conversion's, which may start while it is asked.
+    /// Fitting state, settle flag and active child process under a single lock
+    /// so a settle request only applies to the conversion it checked against
+    /// and never leaks into the next conversion.
     state: Mutex<State>,
-    /// Runs as a settle has been taken and not yet acted on.
+    /// Test hook invoked immediately after a settle check succeeds.
     #[cfg(test)]
     settle_hook: hook::Hook,
 }
@@ -35,71 +33,69 @@ struct Inner {
 #[derive(Debug, Default)]
 struct State {
     fitting: Fitting,
-    /// Asked to settle, while it could: until the conversion ends, though
-    /// it stops work only while the search goes on.
+    /// True once a settle request has been accepted; stays set until the
+    /// conversion ends, though it stops work only while the search is running.
     settling: bool,
     child: Option<Arc<Mutex<Child>>>,
 }
 
-/// What fitting a WebM is at, for the conversion under way.
+/// Lifecycle phase of WebM size-fitting for the active conversion.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 enum Fitting {
-    /// Not fitting: nothing to settle.
+    /// No size-fitting in progress.
     #[default]
     Idle,
-    /// Searching, nothing fitting yet.
+    /// Searching, with no attempt under the size limit yet.
     Searching,
-    /// Searching, and an encode fits, so it can settle.
+    /// Searching, and at least one attempt fits, so settling is possible.
     Fits,
-    /// The search has ended, and what it kept is written: too late to
-    /// settle, though cancelling still stops it.
+    /// Search finished and the chosen output is being written; too late to
+    /// settle, though cancellation still works.
     Done,
 }
 
 impl CancelToken {
-    /// A token nothing has cancelled yet.
+    /// Creates a fresh, uncancelled token.
     pub fn new() -> Self {
         Self::default()
     }
 
-    /// What it knows of fitting and the process at work: poisoning is
-    /// ignored, as nothing there is left half changed.
+    /// Locks the internal state, ignoring mutex poisoning because no state
+    /// transition leaves it inconsistent.
     fn state(&self) -> MutexGuard<'_, State> {
         self.inner.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Says to stop: work asks at its next step, and the ffmpeg process
-    /// running for it, if one is, is killed. Every clone of the token is
-    /// cancelled, for good.
+    /// Cancels the token permanently (along with all clones) and kills any
+    /// active ffmpeg child process.
     pub fn cancel(&self) {
         self.inner.cancelled.store(true, Ordering::SeqCst);
         kill(&self.state());
     }
 
-    /// Whether [`CancelToken::cancel`] was called, on it or a clone.
+    /// Returns true if [`CancelToken::cancel`] has been called on this token or
+    /// any clone.
     pub fn is_cancelled(&self) -> bool {
         self.inner.cancelled.load(Ordering::SeqCst)
     }
 
-    /// Whether fitting can settle now: a WebM conversion is fitting, and
-    /// one of its encodes fits under the limit. Front-ends offer
-    /// [`CancelToken::settle`] while this holds, as events say too
-    /// ([`Event::Progress`](crate::Event::Progress) and
-    /// [`Event::AttemptFinished`](crate::Event::AttemptFinished)).
+    /// Returns true when a WebM search can settle now (at least one encode fits
+    /// under the size limit and the token is not cancelled). Front-ends also
+    /// receive this in [`Event::Progress`](crate::Event::Progress) and
+    /// [`Event::AttemptFinished`](crate::Event::AttemptFinished).
     pub fn can_settle(&self) -> bool {
         self.state().fitting == Fitting::Fits && !self.is_cancelled()
     }
 
-    /// Asks fitting to settle: the encode at work is abandoned, its ffmpeg
-    /// process killed, and the best encode that fits so far, by the
-    /// search's own ordering, is written as the result, as if the search
-    /// had ended there. The outcome says it settled. Returns false, and
-    /// does nothing, where it can't: when nothing fits yet, nothing is
-    /// fitting, the search has ended and its result is being written, or
-    /// the work was cancelled. It holds for the conversion
-    /// under way only: whether it can, and what it stops, are of the same
-    /// moment, so a conversion that starts as it is asked is never stopped
-    /// by it.
+    /// Stops an active WebM search early: the encode in progress is abandoned
+    /// and its ffmpeg process killed, and the best fitting encode so far (by
+    /// the search's own ordering) is written, as if the search had ended there.
+    /// The outcome reports that it settled.
+    ///
+    /// Returns `false` and does nothing if no search is running, nothing fits
+    /// yet, the search has already finished, or the token is cancelled. Because
+    /// the check and process kill share one lock, a settle request can never
+    /// affect a subsequent conversion.
     pub fn settle(&self) -> bool {
         let mut state = self.state();
         if state.fitting != Fitting::Fits || self.is_cancelled() {
@@ -112,26 +108,27 @@ impl CancelToken {
         true
     }
 
-    /// Whether [`CancelToken::settle`] was called and took, and the work
-    /// isn't cancelled since.
+    /// Returns true if [`CancelToken::settle`] succeeded for the current
+    /// conversion and the token has not been cancelled since.
     pub fn is_settling(&self) -> bool {
         self.state().settling && !self.is_cancelled()
     }
 
-    /// Cancelled, or settling while the search goes on: the step at work
-    /// is to stop.
+    /// Returns true if the current step should stop (cancelled, or settling
+    /// while the search is still active).
     pub(crate) fn interrupted(&self) -> bool {
         self.is_cancelled() || self.state().stops_search()
     }
 
-    /// An error where the step at work is to stop, cancelled or settling.
+    /// Returns [`Error::Cancelled`] if [`CancelToken::interrupted`] is true.
     pub(crate) fn check(&self) -> Result<()> {
         if self.interrupted() { Err(Error::Cancelled) } else { Ok(()) }
     }
 
-    /// Waits up to `most` for the work to be cancelled or asked to settle,
-    /// giving whether it was: a process interrupted as Ctrl-C reaches it
-    /// may end before the one who pressed it has said what it means.
+    /// Waits up to `most` for cancellation or settling. Useful when a child
+    /// process exits from Ctrl-C before the signal handler thread updates the
+    /// token, so the caller can return [`Error::Cancelled`] instead of an
+    /// ffmpeg error.
     pub(crate) fn await_interruption(&self, most: std::time::Duration) -> bool {
         let deadline = std::time::Instant::now() + most;
         loop {
@@ -145,16 +142,15 @@ impl CancelToken {
         }
     }
 
-    /// A conversion starts fitting: nothing fits yet, and nothing was
-    /// asked of it.
+    /// Marks the start of a WebM size-fitting search.
     pub(crate) fn begin_fitting(&self) {
         let mut state = self.state();
         state.fitting = Fitting::Searching;
         state.settling = false;
     }
 
-    /// Lets fitting settle from now on: an encode fits. Only while a
-    /// conversion is fitting.
+    /// Marks that at least one encode fits under the size limit, enabling
+    /// [`CancelToken::settle`] (if the search is still active).
     pub(crate) fn allow_settling(&self) {
         let mut state = self.state();
         if state.fitting == Fitting::Searching {
@@ -162,25 +158,25 @@ impl CancelToken {
         }
     }
 
-    /// The search ends, however it does: no settle is taken from now on,
-    /// and none stops what follows. Gives whether one was taken, in the
-    /// search's last moment as well, for the outcome to say so.
+    /// Marks the end of the search phase so further settle requests are ignored
+    /// and do not interrupt writing the output. Returns whether a settle was
+    /// requested during the search.
     pub(crate) fn end_search(&self) -> bool {
         let mut state = self.state();
         state.fitting = Fitting::Done;
         state.settling
     }
 
-    /// Forgets that fitting could settle, or was asked to: a conversion
-    /// ends, and the token may serve the next.
+    /// Resets fitting state after a conversion finishes so the token can be
+    /// reused.
     pub(crate) fn end_fitting(&self) {
         let mut state = self.state();
         state.fitting = Fitting::Idle;
         state.settling = false;
     }
 
-    /// The ffmpeg process to kill when cancelled, while one runs. One
-    /// started as the work was asked to stop is killed at once.
+    /// Registers the active ffmpeg child process to kill on cancellation or
+    /// settle. If the token is already interrupted, kills `child` immediately.
     pub(crate) fn register(&self, child: Option<Arc<Mutex<Child>>>) {
         let mut state = self.state();
         state.child = child;
@@ -191,13 +187,11 @@ impl CancelToken {
 }
 
 impl State {
-    /// Asked to settle while the search goes on, which is to stop.
     fn stops_search(&self) -> bool {
         self.settling && self.fitting != Fitting::Done
     }
 }
 
-/// Kills the process at work, if one is.
 fn kill(state: &State) {
     if let Some(child) = &state.child {
         let _ = child.lock().unwrap_or_else(PoisonError::into_inner).kill();
@@ -305,10 +299,8 @@ mod tests {
         }
     }
 
-    /// A settle checked against one conversion, and taken a moment later
-    /// on another thread, as a signal handler's, never settles the next
-    /// conversion, started in that moment, nor kills its process: what is
-    /// checked and what is done are of the same conversion.
+    /// Verifies that a settle check against one conversion cannot settle or
+    /// kill a second conversion that starts concurrently.
     #[cfg(unix)]
     #[test]
     fn a_settle_never_reaches_the_conversion_after_the_one_it_was_for() {

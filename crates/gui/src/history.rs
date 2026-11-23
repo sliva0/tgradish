@@ -1,18 +1,17 @@
-//! Each file's settings as they were, step by step, for Ctrl+Z to go back
-//! through and Ctrl+Shift+Z on again.
+//! Per-file undo/redo history (`Ctrl+Z` / `Ctrl+Shift+Z`).
 //!
-//! The settings are changed in place by a great many controls, so rather
-//! than each of them saying what it changed, every file's settings are
-//! looked at as each frame ends, and a change becomes a step once it comes
-//! to rest: once nothing holds the pointer down or types in a field, and a
-//! frame has passed without it changing further. A drag, a button held to
-//! repeat or a field typed in is then one step, and what follows from a
-//! change over the next frames, as a crop kept to an integer scale, goes
-//! with it rather than being a step of its own, which undoing would only
-//! bring back.
+//! Because many controls mutate item settings in place, we snapshot settings at
+//! the end of each frame rather than instrumenting every control. A change is
+//! committed as an undo step once interaction settles (no pointer button held
+//! on the preview/settings and no text field being edited, followed by one
+//! unchanged frame). This groups continuous drags, held stepper buttons, typed
+//! numbers, and follow-on adjustments (such as clamping a crop to an integer
+//! scale on the next frame; undoing it on its own would only re-apply it) into
+//! a single undo step.
 //!
-//! Only what the user did is a step: a change the GUI makes by itself, as
-//! it settles what a file is once it is read, is taken in as it is.
+//! Only user-initiated changes create undo steps; automatic adjustments (such
+//! as initial format detection once a file is read) update the baseline in
+//! place.
 
 use eframe::egui;
 use tgradish_core::presets::Format;

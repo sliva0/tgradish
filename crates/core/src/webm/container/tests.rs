@@ -392,7 +392,8 @@ fn reads_the_apps_from_the_head_alone() {
     assert_eq!(whole.muxing_app, changes.muxing_app);
     assert_eq!(whole.writing_app, changes.writing_app);
     assert_eq!(whole.signature, changes.signature);
-    // as much as is read of a longer file, cut in a block
+    // Prefix truncated mid-block, simulating a partial header read of a larger
+    // file.
     let cluster = inspect(&buf).unwrap().file_size as usize - 20;
     assert_eq!(head(&buf[..cluster]).unwrap(), whole);
     assert!(matches!(head(b"\x00\x00ftyp"), Err(WebmError::Ebml(_) | WebmError::NotEbml)));
@@ -404,7 +405,7 @@ fn reads_no_more_of_large_files_than_it_needs() {
     use crate::Error;
 
     let dir = tempfile::tempdir().unwrap();
-    // without blocks on the disk, as long as a long video
+    // Sparse 8 GiB file occupying no disk blocks beyond `start`.
     let sparse = |name: &str, start: &[u8]| {
         let path = dir.path().join(name);
         std::fs::write(&path, start).unwrap();
@@ -417,7 +418,7 @@ fn reads_no_more_of_large_files_than_it_needs() {
     assert!(not_ebml(head_file(&video).map(drop)));
     let long = sparse("long.webm", &Fixture::default().build());
     assert!(matches!(inspect_file(&long), Err(Error::Webm(WebmError::TooLarge))));
-    // its start, which is a WebM's, reads
+    // Reading just the header still succeeds on an oversized WebM.
     assert_eq!(head_file(&long).unwrap().muxing_app.as_deref(), Some("Lavf63.1.102"));
     let empty = dir.path().join("empty.webm");
     std::fs::write(&empty, b"").unwrap();

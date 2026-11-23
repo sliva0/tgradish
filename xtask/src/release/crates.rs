@@ -1,6 +1,5 @@
-//! Publishing to crates.io, which stays a step taken by hand, as nothing
-//! published there can be taken back: this says which crates are new,
-//! asks, and publishes them, in the order they depend on each other.
+//! Publishes unpublished crate versions to crates.io in dependency order after
+//! interactive confirmation (publishing is permanent).
 
 use std::io::Write;
 
@@ -30,13 +29,13 @@ pub fn crates(args: &[String]) -> Result<()> {
         let version = if name == "tgradish-tgs" { tgs } else { app };
         let url = format!("https://index.crates.io/{}", index_path(name));
         let published = fetch(&url)?.is_some_and(|index| has_version(&index, version));
-        println!("{name} {version}: {}", if published { "on crates.io already" } else { "new" });
+        println!("{name} {version}: {}", if published { "already on crates.io" } else { "new" });
         if !published {
             new.push(name);
         }
     }
     if new.is_empty() {
-        println!("crates.io has every crate at its version");
+        println!("All crates are already published at their current versions.");
         return Ok(());
     }
     let mut publish = cargo();
@@ -47,10 +46,10 @@ pub fn crates(args: &[String]) -> Result<()> {
     if dry_run {
         publish.arg("--dry-run");
     } else {
-        print!("Publish {} to crates.io, for good? [y/N] ", new.join(", "));
+        print!("Publish {} permanently to crates.io? [y/N] ", new.join(", "));
         std::io::stdout().flush()?;
         let mut answer = String::new();
-        std::io::stdin().read_line(&mut answer).context("could not read the answer")?;
+        std::io::stdin().read_line(&mut answer).context("could not read confirmation")?;
         if !matches!(answer.trim(), "y" | "Y" | "yes") {
             println!("Nothing published.");
             return Ok(());

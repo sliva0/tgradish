@@ -1,13 +1,12 @@
-//! The user's own presets: the selected item's settings saved as one, and
-//! a dialog to rename, describe or delete them. The settings and the bar
-//! under them ask for them; they open over everything.
+//! User preset dialogs: saving the selected item's settings as a preset, and
+//! renaming, describing, or deleting user presets. Triggered from the settings
+//! panel or action bar and shown as a modal over the window.
 //!
-//! An item saved as a preset takes it up: its own values over the preset
-//! it started from, of every format, but none that only make sense for its
-//! file: its title and sprite sheet layout, which the item keeps as its
-//! own. Its crop, cut, Aseprite tag and layers are kept apart from the
-//! preset's values in [`crate::item::Choices`] anyway, so they stay as
-//! they are.
+//! When an item is saved as a preset, it adopts that preset: its format
+//! overrides (merged with the preset it started from) become the new preset's
+//! values, except file-specific fields (title and sprite-sheet layout), which
+//! remain on the item. Crop, trim, and Aseprite tag/layer choices live outside
+//! the preset in [`crate::item::Choices`] and are unchanged.
 
 use std::path::Path;
 
@@ -24,10 +23,10 @@ use crate::jobs::failure;
 use crate::l10n::fl;
 use crate::{theme, widgets};
 
-/// A dialog the settings ask for.
+/// Preset dialog request stored in egui temporary data.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum Ask {
-    /// Saving the settings of the item with this id.
+    /// Save the settings of the item with this ID as a preset.
     Save(u64),
     Manage,
 }
@@ -36,12 +35,12 @@ fn ask_id() -> egui::Id {
     egui::Id::new("preset dialog asked for")
 }
 
-/// Asks for a preset dialog to open.
+/// Requests that a preset dialog be opened on the next frame.
 pub(crate) fn ask(ctx: &egui::Context, ask: Ask) {
     ctx.data_mut(|data| data.insert_temp(ask_id(), ask));
 }
 
-/// An open preset dialog and what is typed into it.
+/// Active preset dialog state.
 pub(crate) enum Dialog {
     Save(Saving),
     Manage(Managing),
@@ -52,30 +51,31 @@ pub(crate) struct Saving {
     name: String,
     description: String,
     problem: Option<String>,
-    /// The name field has had the focus, as it gets when the dialog opens.
+    /// Whether the name input has already received initial focus on open.
     focused: bool,
 }
 
-/// The user's presets as the dialog edits them.
+/// State of the Manage Presets dialog.
 pub(crate) struct Managing {
     rows: Vec<Row>,
-    /// Presets deleted while it was open, which Undo puts back.
+    /// Presets deleted while the dialog has been open, restorable via Undo.
     deleted: Vec<Deleted>,
 }
 
 #[derive(Debug, Clone)]
 struct Row {
-    /// Which row it is, as rows come and go.
+    /// Stable row ID across additions and deletions.
     id: u64,
-    /// Its name, as its file is called.
+    /// Current preset name on disk.
     name: String,
     description: String,
-    /// What is typed into its fields, kept as they lose the focus.
+    /// Uncommitted text in the name and description fields (applied when the
+    /// field loses focus).
     typed_name: String,
     typed_description: String,
-    /// Why its file couldn't be read.
+    /// Parse or read error if the preset file is invalid.
     broken: Option<String>,
-    /// Why the last change couldn't be made.
+    /// Error from the last rename, description, or delete attempt.
     problem: Option<String>,
 }
 
@@ -96,24 +96,24 @@ impl Row {
 }
 
 struct Deleted {
-    /// The id of its row, which Undo brings back.
+    /// Original row ID restored on Undo.
     id: u64,
     name: String,
-    /// What its file held.
+    /// Raw TOML file contents before deletion.
     text: String,
-    /// The items that were made with it, which take it up again with Undo.
+    /// IDs of items that used this preset, re-associated on Undo.
     items: Vec<u64>,
-    /// Whether the config made it the default for WebM and pictures, and
-    /// for `.tgs`.
+    /// Whether `config` used this preset as the default for WebM/pictures and
+    /// `.tgs`.
     defaults: (bool, bool),
-    /// The items' own ranges to search that went with it, by item, with
-    /// the way of fitting they were for.
+    /// Per-item `fit_range` overrides dropped when falling back to the default
+    /// preset changed the fitting unit, paired with the original [`Fit`] mode.
     ranges: Vec<(u64, Range, Fit)>,
 }
 
 impl Managing {
     fn of(presets: &Presets) -> Managing {
-        // built-in presets have no file, and are never broken
+        // Built-in presets have no file on disk and are never broken.
         let rows = presets
             .iter()
             .filter(|(_, preset)| preset.is_err() || preset.is_ok_and(is_users))
@@ -124,13 +124,13 @@ impl Managing {
     }
 }
 
-/// Whether the user made `preset`, rather than it being built in.
+/// Returns true if `preset` is a user preset on disk rather than built-in.
 pub(crate) fn is_users(preset: &presets::Preset) -> bool {
     preset.path.is_some()
 }
 
-/// What the manage dialog asks to change, once it is drawn: a row, by its
-/// id, which stays as other changes move the rows.
+/// Action queued while drawing the Manage Presets dialog, keyed by stable row
+/// ID so earlier changes shifting row indices do not misdirect later ones.
 enum Change {
     Rename(u64),
     Describe(u64),
@@ -138,8 +138,7 @@ enum Change {
     Undo(u64),
 }
 
-/// What keeps a preset from being named, renamed or deleted as asked, in
-/// the GUI's words.
+/// Formats a preset name/rename/delete error for the GUI.
 fn problem(err: &tgradish_core::Error) -> String {
     use tgradish_core::Error;
     use tgradish_core::presets::PresetError;
@@ -158,14 +157,14 @@ fn problem(err: &tgradish_core::Error) -> String {
     }
 }
 
-/// What is wrong with `name` as a preset's, as tgradish-core checks it.
+/// Validates a preset `name` via `tgradish-core` and returns any localised
+/// error message.
 fn name_problem(name: &str) -> Option<String> {
     presets::check_name(name).err().map(|err| problem(&err))
 }
 
 impl App {
-    /// Opens a preset dialog the settings asked for, and shows the one
-    /// open.
+    /// Opens any requested preset dialog and draws the currently open one.
     pub(crate) fn preset_dialogs(&mut self, ctx: &egui::Context) {
         let asked = ctx.data_mut(|data| {
             let asked = data.get_temp::<Ask>(ask_id());
@@ -197,8 +196,7 @@ impl App {
         };
     }
 
-    /// Reads the presets again, as after one changed; gives whether they
-    /// could be.
+    /// Reloads presets from disk and returns true on success.
     pub(crate) fn reload_presets(&mut self) -> bool {
         match Presets::load(self.presets_dir.as_deref()) {
             Ok(presets) => {
@@ -219,18 +217,17 @@ impl App {
         }
     }
 
-    /// The dialog that saves an item's settings as a preset; `None` once
-    /// it is done or closed.
+    /// Draws the Save Preset dialog; returns `None` once saved or closed.
     fn save_dialog(
         &mut self,
         ctx: &egui::Context,
         dir: &Path,
         mut saving: Saving,
     ) -> Option<Saving> {
-        // the item is gone
+        // Close if the target item was removed.
         self.item(saving.item)?;
         let name = saving.name.trim_end().to_owned();
-        // a built-in one's name would stand in for it, for every file
+        // Disallow shadowing a built-in preset name across all items.
         let builtin = self.presets.get(&name).is_ok_and(|preset| !is_users(preset));
         let valid = match name_problem(&name) {
             Some(problem) => Err(problem),
@@ -255,7 +252,7 @@ impl App {
                         field.request_focus();
                         saving.focused = true;
                     }
-                    // Enter in it saves, as the button would
+                    // Pressing Enter in the name field submits the dialog.
                     if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
                         save = valid.is_ok();
                     }
@@ -300,7 +297,8 @@ impl App {
         let description = saving.description.trim().to_owned();
         match presets::save(dir, &name, &description, (&webm, &tgs), exists) {
             Ok(_) => {
-                // the same settings, as a preset now: no step to undo
+                // Adopting the newly saved preset keeps effective settings identical,
+                // so do not record an undo step.
                 self.settle_edits();
                 if let Some(item) = self.item_mut(saving.item) {
                     take_up(item, &name);
@@ -316,8 +314,8 @@ impl App {
         }
     }
 
-    /// The dialog that renames, describes or deletes the user's presets;
-    /// `None` once closed. Each change is made as it is asked for.
+    /// Draws the Manage Presets dialog (renaming, describing, or deleting user
+    /// presets immediately as requested); returns `None` once closed.
     fn manage_dialog(
         &mut self,
         ctx: &egui::Context,
@@ -333,7 +331,7 @@ impl App {
             if managing.rows.is_empty() && managing.deleted.is_empty() {
                 widgets::note(ui, fl!("no-presets"));
             }
-            // the list scrolls, its title and Close staying in sight
+            // Scroll the preset list so the header and Close button stay visible.
             let room = (ctx.content_rect().height() - 240.0).max(120.0);
             widgets::scrolled(ui, egui::ScrollArea::vertical().max_height(room), |ui| {
                 egui::Grid::new("presets").num_columns(3).spacing([8.0, 6.0]).show(ui, |ui| {
@@ -342,12 +340,12 @@ impl App {
                         ui.label(RichText::new(fl!("preset-description")).weak());
                         ui.end_row();
                     }
-                    // a field left by Escape puts back what it held, rather
-                    // than renaming or describing by what was typed, and the
-                    // presets stay open, for the next Escape
+                    // Pressing Escape in a field reverts its text and consumes the
+                    // key so the dialog stays open until a second Escape.
                     let escaped = ui.input(|input| input.key_pressed(egui::Key::Escape));
                     for row in &mut managing.rows {
-                        // sized, as a grid keeps a column as narrow as its header
+                        // Explicit size prevents the grid from shrinking
+                        // columns to their header width.
                         let line = ui.spacing().interact_size.y;
                         let name = widgets::text_field(&mut row.typed_name);
                         if ui.add_sized(vec2(170.0, line), name).lost_focus() {
@@ -403,17 +401,18 @@ impl App {
                 close |= ui.add(widgets::dialog_button(fl!("close"))).clicked();
             });
         });
-        // in the order asked, as a field left by clicking a button asks
-        // for its own change first
+        // Apply changes in order: clicking a button while editing a field
+        // leaves the field first, queueing its rename/describe before the
+        // click action.
         for change in changes {
             self.change_preset(dir, &mut managing, change);
         }
         (!close && !modal.should_close()).then_some(managing)
     }
 
-    /// Makes `change`. What it changes of the files' settings, as they
-    /// follow a preset renamed or deleted, is no step to undo, but how
-    /// they are from then on.
+    /// Applies `change` without recording an item undo step for items that
+    /// follow a renamed or deleted preset; the new settings are simply how
+    /// those items are from then on.
     fn change_preset(&mut self, dir: &Path, managing: &mut Managing, change: Change) {
         self.settle_edits();
         self.make_change(dir, managing, change);
@@ -493,8 +492,9 @@ impl App {
                             }
                         });
                         self.reload_presets();
-                        // ranges dropped as fitting changed, where it is as
-                        // it was again and nothing took their place
+                        // Restore fit ranges dropped when the fitting unit changed,
+                        // provided the restored preset uses that unit again and no
+                        // new range was set in the meantime.
                         for &(id, range, fit) in &deleted.ranges {
                             let Some(item) = self.items.iter_mut().find(|item| item.id == id)
                             else {
@@ -528,14 +528,16 @@ impl App {
         self.reload_presets();
     }
 
-    /// Items and the config that named the preset `from` name `to` now, or
-    /// the default preset when it is gone. Gives the items' own ranges
-    /// that dropped, with the way of fitting they were for.
+    /// Updates items and `config` references from preset `from` to `to` (or to
+    /// the default preset when `to` is `None`). Returns any per-item fit
+    /// ranges dropped due to a fitting-unit change, paired with their previous
+    /// [`Fit`] mode.
     fn follow_preset(&mut self, from: &str, to: Option<&str>) -> Vec<(u64, Range, Fit)> {
-        // the default may fit another way than a deleted preset, so that an
-        // item's own range no longer suits it, as when another is chosen; a
-        // renamed one fits as before. The presets are read again only
-        // later, which doesn't matter: what the items name now is in them
+        // Deleting a preset falls back to the default, which may use a
+        // different fitting unit and invalidate an item's custom fit_range
+        // (renaming keeps the same fitting mode). Evaluating against
+        // `self.presets` before reload is fine because the fallback preset is
+        // already loaded.
         let fits: Option<Vec<Fit>> = to.is_none().then(|| {
             let fit = |item: &Item| {
                 crate::file_settings::fit_of(&item.choices, &self.presets, &self.config)
@@ -546,14 +548,15 @@ impl App {
             if item.choices.preset.as_deref() == Some(from) {
                 item.choices.preset = to.map(str::to_owned);
             }
-            // as the steps back name it, or undoing would name one gone; one
-            // deleted they go on naming, as the dialog's Undo may put it back
+            // Update undo history on rename so undoing does not reference the
+            // old name; on delete, leave history entries intact in case the
+            // dialog's Undo restores the preset.
             if let Some(to) = to {
                 item.history.rename_preset(from, to);
             }
         }
-        // those removed a moment ago too, as they may be put back; one
-        // deleted they go on naming, as the steps back do
+        // Rename it in recently removed items too (they may be put back);
+        // after a delete they keep its name, as undo history does.
         if let Some(to) = to {
             for item in self.removed.iter_mut().flat_map(crate::app::Removed::items_mut) {
                 if item.choices.preset.as_deref() == Some(from) {
@@ -589,8 +592,9 @@ impl App {
     }
 }
 
-/// The item made with the preset `name`, which now holds its values, but
-/// for those of its file alone.
+/// Switches `item` to preset `name` and clears per-item format overrides that
+/// are now stored in the preset, keeping only file-specific fields (title and
+/// sprite-sheet layout).
 fn take_up(item: &mut Item, name: &str) {
     let choices = &mut item.choices;
     choices.preset = Some(name.to_owned());

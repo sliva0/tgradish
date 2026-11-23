@@ -1,7 +1,6 @@
-//! `tgradish watch`: converts videos and images as they appear in a
-//! directory. Looks at the directory every `--interval` seconds and
-//! converts a file once its size and modification time stop changing, so
-//! files that are still being copied are left alone.
+//! `tgradish watch`: polls a directory every `--interval` seconds and converts
+//! new or changed media files once their size and modification time settle, so
+//! files still being copied are left alone.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -16,12 +15,12 @@ use tgradish_core::input::{self, Input};
 
 use crate::ui;
 
-/// Failed conversions are retried this many times, in case the file was
-/// locked or not readable yet.
+/// Failed attempts at a file before giving up on it until it changes (it may
+/// have been locked or not readable yet).
 const MAX_FAILURES: u32 = 5;
 
-/// Whether `path` looks like an input rather than a result, a hidden file
-/// or a download in progress.
+/// Returns whether `path` is a supported input file (not a converted output,
+/// hidden file, or in-progress download).
 fn is_input(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|n| n.to_str()) else { return false };
     let name = name.to_lowercase();
@@ -38,7 +37,7 @@ fn is_input(path: &Path) -> bool {
         || input::ASEPRITE.contains(&extension)
 }
 
-/// What a file looked like at one scan.
+/// File size and modification time observed during a directory scan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Stamp {
     size: u64,
@@ -50,8 +49,8 @@ fn current_stamp(path: &Path) -> Option<Stamp> {
     metadata.is_file().then(|| Stamp { size: metadata.len(), modified: metadata.modified().ok() })
 }
 
-/// One look at the directory: input files, and directories that could not
-/// be read.
+/// Results of a single directory scan: candidate input files and unreadable
+/// directories.
 #[derive(Default)]
 struct Scan {
     files: HashMap<PathBuf, Stamp>,
@@ -73,11 +72,11 @@ impl Scan {
                 return;
             }
         };
-        // entries can disappear while listing, they are simply skipped
+        // Skip entries that disappear mid-scan.
         for entry in entries.flatten() {
             let path = entry.path();
-            // links to directories aren't followed, so they can't make
-            // loops; a link to a file is taken as the file
+            // Do not follow directory symlinks (avoids cycles); file symlinks
+            // are treated as regular files.
             let Ok(file_type) = entry.file_type() else { continue };
             let file = file_type.is_file()
                 || file_type.is_symlink() && std::fs::metadata(&path).is_ok_and(|m| m.is_file());
@@ -96,13 +95,13 @@ impl Scan {
     }
 }
 
-/// Files whose stamp did not change since the previous scan and that were
-/// not handled at that stamp yet.
+/// Tracks file stamps across scans to identify files that have settled and have
+/// not yet been processed at that stamp.
 #[derive(Default)]
 struct Tracker {
-    /// Stamp at the previous scan, for files not handled yet.
+    /// Stamps from the previous scan for unhandled files.
     pending: HashMap<PathBuf, Stamp>,
-    /// Stamp at which a file was converted or ignored.
+    /// Stamps at which files were already converted or ignored.
     handled: HashMap<PathBuf, Stamp>,
 }
 
@@ -111,15 +110,15 @@ impl Tracker {
         self.handled.insert(path, stamp);
     }
 
-    /// Makes a handled file ready again at the next update, if it stays
-    /// the same till then.
+    /// Marks a previously handled file as pending again so it becomes ready on
+    /// the next scan if unchanged.
     fn redo(&mut self, path: &Path) {
         if let Some(stamp) = self.handled.remove(path) {
             self.pending.insert(path.to_path_buf(), stamp);
         }
     }
 
-    /// Returns files that are ready, sorted by path.
+    /// Returns settled files ready for conversion, sorted by path.
     fn update(&mut self, current: HashMap<PathBuf, Stamp>) -> Vec<(PathBuf, Stamp)> {
         self.handled.retain(|path, _| current.contains_key(path));
         let mut ready = Vec::new();
@@ -140,15 +139,15 @@ impl Tracker {
     }
 }
 
-/// Failed attempts at one file, while its stamp stays the same.
+/// Retry state for a failing file at a single [`Stamp`].
 struct Failures {
     stamp: Stamp,
     count: u32,
     retry_at: Instant,
 }
 
-/// Whether trying again could help: the file may have been locked, not
-/// readable yet, or still being written.
+/// Returns whether a failed conversion is worth retrying (for example when the
+/// file was temporarily locked, unreadable, or still being written).
 fn worth_retrying(err: &Failed) -> bool {
     use tgradish_core::Error;
     match err {
@@ -166,9 +165,10 @@ fn worth_retrying(err: &Failed) -> bool {
     }
 }
 
-/// Whether `path`, an input at the last scan but not at this one, is no
-/// longer one: deleted, renamed or replaced by a folder. One that can't
-/// be looked at, as in a folder that can't be read, isn't gone yet.
+/// Returns whether `path` (seen on the previous scan, missing now) is truly
+/// gone (deleted, renamed, or replaced by a directory). A file whose metadata
+/// cannot be read (for example inside an unreadable directory) is not treated
+/// as gone yet.
 fn gone(path: &Path) -> bool {
     use std::io::ErrorKind;
     match std::fs::metadata(path) {
@@ -177,8 +177,8 @@ fn gone(path: &Path) -> bool {
     }
 }
 
-/// Says watching stopped: stopping is the only way out of it, so it ends
-/// the command as done.
+/// Prints the stop message and returns `Ok(())`; cancellation is the normal way
+/// to end `watch`.
 fn stopped(ctx: &Context) -> Result<()> {
     if !ctx.global.json {
         eprintln!("{}", crate::ui::status("Stopped", "watching"));
@@ -186,7 +186,7 @@ fn stopped(ctx: &Context) -> Result<()> {
     Ok(())
 }
 
-/// Sleeps for `seconds`, waking up early when cancelled.
+/// Sleeps for `seconds`, waking early if cancelled.
 fn sleep(ctx: &Context, seconds: f64) {
     let until = Instant::now() + Duration::from_secs_f64(seconds);
     while !ctx.cancel.is_cancelled() && Instant::now() < until {
@@ -194,8 +194,7 @@ fn sleep(ctx: &Context, seconds: f64) {
     }
 }
 
-/// Says something about watching, rather than one conversion, which
-/// goes on: as a warning, which events of every format can be.
+/// Emits a watcher-level warning without stopping the loop.
 fn warn(ctx: &Context, message: String) {
     if ctx.global.json {
         crate::json_line(&tgradish_core::Event::Warning { message });
@@ -204,18 +203,18 @@ fn warn(ctx: &Context, message: String) {
     }
 }
 
-/// Watches until stopped, by Ctrl-C or `--cancel-on-stdin`, which ends it
-/// as done, whether it was waiting or converting then.
+/// Watches the directory until cancelled by Ctrl-C or `--cancel-on-stdin`,
+/// which exits with success whether waiting or converting.
 pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
     let dir = args.dir.display();
     if !args.dir.exists() {
-        bail!("{dir}: no such directory");
+        bail!("{dir}: directory does not exist");
     }
     if !args.dir.is_dir() {
-        bail!("{dir} isn't a directory: watch watches one");
+        bail!("{dir} is not a directory");
     }
     std::fs::read_dir(&args.dir).map_err(|err| {
-        anyhow::anyhow!("couldn't read {dir}: {}", tgradish_core::io_reason(&err))
+        anyhow::anyhow!("failed to read {dir}: {}", tgradish_core::io_reason(&err))
     })?;
     let converter = Converter::new(ctx, &args.conversion, args.format, None)?;
     let output_for =
@@ -223,7 +222,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
 
     let mut tracker = Tracker::default();
     let first = Scan::run(&args.dir, args.recursive).files;
-    // inputs at the last scan, to see which are gone
+    // Inputs seen on the previous scan, used to detect deletions.
     let mut seen: HashSet<PathBuf> = first.keys().cloned().collect();
     for (path, stamp) in first {
         if args.existing && !output_for(&path).exists() {
@@ -232,18 +231,18 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
             tracker.ignore(path, stamp);
         }
     }
-    // inputs whose result this command wrote, so it may replace it when the
-    // input changes again
+    // Inputs whose output we created, so we may overwrite it if the input
+    // changes.
     let mut ours: HashSet<PathBuf> = HashSet::new();
     let mut failures: HashMap<PathBuf, Failures> = HashMap::new();
-    // inputs refused as another's result is theirs, with that result, to be
-    // tried again once it is free
+    // Inputs skipped due to an output-path collision, mapped to the conflicting
+    // output path so they can retry once that output is freed.
     let mut refused: HashMap<PathBuf, PathBuf> = HashMap::new();
     let mut unreadable: HashSet<PathBuf> = HashSet::new();
 
     if !ctx.global.json && !ctx.global.quiet {
         let dir = crate::term::link(args.dir.display(), &args.dir);
-        eprintln!("{}", crate::ui::status("Watching", format!("{dir}, Ctrl-C stops")));
+        eprintln!("{}", crate::ui::status("Watching", format!("{dir} (press Ctrl-C to stop)")));
     }
     loop {
         sleep(ctx, args.interval);
@@ -257,13 +256,13 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
         for (path, err) in &scan.unreadable {
             if !unreadable.contains(path) {
                 let err = tgradish_core::io_reason(err);
-                warn(ctx, format!("couldn't read {}: {err}", path.display()));
+                warn(ctx, format!("failed to read {}: {err}", path.display()));
             }
         }
         unreadable = now_unreadable;
-        // a result whose input is gone, as one deleted or renamed, may be
-        // another's of the same name; the input, back, may replace it again.
-        // One that can't be looked at stays watched till it can be
+        // If an input disappears (deleted or renamed), release its output path
+        // so another input with the same stem can use it, or the original input
+        // can replace it if it returns. Keep files we could not stat in `seen`.
         let mut freed = Vec::new();
         let mut unsure = Vec::new();
         for path in seen.iter().filter(|path| !scan.files.contains_key(*path)) {
@@ -287,11 +286,12 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
                 if failed.stamp != stamp {
                     failures.remove(&path);
                 } else if Instant::now() < failed.retry_at {
-                    // comes back as ready after the next scan
+                    // Leave in pending so it returns as ready on the next scan.
                     continue;
                 }
             }
-            // earlier conversions took time, the file may have changed since
+            // Earlier conversions in this batch may have taken time; skip if
+            // the file changed since the scan.
             if current_stamp(&path) != Some(stamp) {
                 continue;
             }
@@ -306,7 +306,8 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
                     ours.insert(path.clone());
                     failures.remove(&path);
                 }
-                // stopped while converting, which leaves nothing behind
+                // Cancelled mid-conversion; temporary files are already
+                // cleaned up.
                 Err(Failed::Core(tgradish_core::Error::Cancelled)) => return stopped(ctx),
                 Err(err) if worth_retrying(&err) && !changed_meanwhile => {
                     let failed = failures.entry(path.clone()).or_insert(Failures {
@@ -319,7 +320,7 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
                     if failed.count < MAX_FAILURES {
                         let delay = (args.interval * 2f64.powi(failed.count as i32)).min(60.0);
                         failed.retry_at = Instant::now() + Duration::from_secs_f64(delay);
-                        // not handled: it is retried while it stays the same
+                        // Do not mark handled so it is retried if unchanged.
                         continue;
                     }
                     warn(ctx, format!("giving up on {} until it changes", path.display()));
@@ -332,8 +333,8 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
                     converter.report_failure(&path, err);
                 }
             }
-            // a file that changed while converting is converted again once
-            // it settles
+            // If the file changed during conversion, leave it pending so it is
+            // reconverted once it settles.
             if !changed_meanwhile {
                 tracker.ignore(path, stamp);
             }
@@ -345,8 +346,8 @@ pub fn run(ctx: &Context, args: WatchArgs) -> Result<()> {
 mod tests {
     use super::*;
 
-    /// A link to a file is watched as the file, and a link to a
-    /// directory isn't followed.
+    /// File symlinks are watched as regular files, whereas directory symlinks
+    /// are not followed.
     #[cfg(unix)]
     #[test]
     fn follows_links_to_files_only() {
@@ -404,7 +405,7 @@ mod tests {
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
         let scan = Scan::run(dir.path(), true);
         std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
-        // root can read anything, then there is nothing to report
+        // Skip when running as root, which can read 0o000 directories.
         if scan.unreadable.is_empty() {
             return;
         }

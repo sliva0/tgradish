@@ -15,36 +15,37 @@ pub use crate::term::ColourChoice;
 /// The help pages' sections after the options, each under its heading,
 /// which [`sections`] adds; each line indented as clap indents options.
 const EXAMPLES: &str =
-    "  tgradish convert clip.mp4                 a video sticker, clip.sticker.webm
-  tgradish convert clip.mp4 --target emoji  an emoji, clip.emoji.webm
-  tgradish convert walk.ase -f tgs          an animated sticker, walk.sticker.tgs
-  tgradish convert photo.jpg -f webp        a static sticker, photo.sticker.webp
-  tgradish watch ~/Videos -O ~/Stickers     each new video or picture as it comes
-  tgradish inspect clip.sticker.webm        what Telegram would say of it
-  tgradish inspect clip.mp4                 its size, frames, length and frame rate";
+    "  tgradish convert clip.mp4                 video sticker (clip.sticker.webm)
+  tgradish convert clip.mp4 --target emoji  video emoji (clip.emoji.webm)
+  tgradish convert walk.ase -f tgs          animated sticker (walk.sticker.tgs)
+  tgradish convert photo.jpg -f webp        static sticker (photo.sticker.webp)
+  tgradish watch ~/Videos -O ~/Stickers     convert new media as it appears
+  tgradish inspect clip.sticker.webm        check against Telegram's limits
+  tgradish inspect clip.mp4                 show size, frames, length and fps";
 
 const CONVERT_EXAMPLES: &str =
-    "  tgradish convert clip.mp4 -s 2 -t 5          5 seconds from 0:02, spoofed to pass
-  tgradish convert frames/ --sequence -f tgs   the pictures in frames/ as one sticker
-  tgradish convert *.gif -O stickers -y        each into stickers/, replacing results
-  tgradish convert -q *.png | xargs ls -l      the paths of the results alone, a line each";
+    "  tgradish convert clip.mp4 -s 2 -t 5         5 s from 0:02, spoofed to pass
+  tgradish convert frames/ --sequence -f tgs  join frames/ as one TGS sticker
+  tgradish convert *.gif -O stickers -y       to stickers/, overwriting files
+  tgradish convert -q *.png | xargs ls -l     output paths only, one per line";
 
-const ENVIRONMENT: &str = "  TGRADISH_CONFIG  The config file, as --config names it.
-  TGRADISH_FFMPEG  The ffmpeg to use, as --ffmpeg names it, when neither --ffmpeg
-                   nor --ffmpeg-from is given; over the config file's.
-  TGRADISH_LANG    The GUI's language, as de, over the system's.
-  NO_COLOR         No colours, with --colour auto.
-  CLICOLOR_FORCE   Colours even where the terminal isn't one, with --colour auto.
-  FORCE_HYPERLINK  1 links file names, 0 doesn't, whatever the terminal.";
+const ENVIRONMENT: &str = "  TGRADISH_CONFIG  Config file path (overridden by --config).
+  TGRADISH_FFMPEG  Path to ffmpeg or its directory (overrides the config;
+                   overridden by --ffmpeg or --ffmpeg-from).
+  TGRADISH_LANG    GUI language, as de, over the config's and the system's.
+  NO_COLOR         Disable colours when --colour is auto.
+  CLICOLOR_FORCE   Force colours when --colour is auto, even off a terminal.
+  FORCE_HYPERLINK  Set to 1 to force file hyperlinks, or 0 to disable them.";
 
-const EXIT_STATUS: &str = "  0    Done.
-  1    Something failed. With several inputs, this beats 3.
-  2    The command line was wrong.
-  3    Everything was made or read, but Telegram would refuse a result or
-       an inspected file: as a .tgs that --exact keeps too large, WebM
-       with --fit off over the limit, or a picture of the wrong size.
-  130  convert was cancelled, by Ctrl-C or with --cancel-on-stdin; watch
-       stops as done when cancelled, with 0.";
+const EXIT_STATUS: &str = "  0      Success (also when watch is cancelled).
+  1      Runtime or conversion error. With multiple inputs, beats 3.
+  2      Invalid command-line arguments.
+  3      Files were read or created, but Telegram would reject a result or
+         inspected file (e.g. a .tgs kept oversized by --exact, a WebM over
+         the limit with --fit off, or an image of the wrong size).
+  128+N  ended by SIGTERM or SIGHUP on Unix, which tgradish re-raises.
+  130    convert was cancelled via Ctrl-C or --cancel-on-stdin.
+  141    stdout closed early on Unix (1 on other platforms).";
 
 /// `sections` under their headings, styled as clap styles its own.
 fn sections(sections: &[(&str, &str)]) -> String {
@@ -61,9 +62,9 @@ fn top_help() -> String {
 }
 
 const CONVERT_STOPPING: &str =
-    "  Ctrl-C while a WebM is fitting, once one of its encodes fits, stops fitting, keeps
-  the best encode so far as the result and goes on to the next input. Ctrl-C again
-  within 2 seconds, or before anything fits, cancels, as it does for other formats.";
+    "  Ctrl-C while a WebM is being fitted, once an encode fits, stops fitting,
+  keeps the best encode so far and moves on to the next input. Ctrl-C again
+  within 2 seconds, before anything fits, or for any other format, cancels.";
 
 fn convert_help() -> String {
     sections(&[
@@ -76,7 +77,7 @@ fn convert_help() -> String {
 fn config_help() -> String {
     sections(&[(
         "Examples",
-        "  tgradish config init   start a config file, where tgradish reads it",
+        "  tgradish config init   start a config file where tgradish reads it",
     )])
 }
 
@@ -103,8 +104,8 @@ const ASEPRITE: &str = "Aseprite files";
 /// Telegram video, static and animated stickers and emoji from videos,
 /// images or pixel art.
 ///
-/// Video stickers can run past Telegram's 3 seconds by spoofing the
-/// duration they say they last.
+/// Video stickers longer than Telegram's 3-second limit can have their
+/// container duration spoofed so Telegram accepts them.
 #[derive(Debug, Parser)]
 #[command(version, long_version = long_version(), max_term_width = 100,
           styles = crate::ui::help_styles(), after_help = top_help())]
@@ -117,39 +118,37 @@ pub struct Cli {
 
 #[derive(Debug, Args)]
 pub struct Global {
-    /// Print JSON Lines instead of text: one compact object per line.
-    /// `convert` and `watch` print an event a line, the same events for
-    /// every format, and `spoof` one event, which `tgradish describe` gives
-    /// the schemas of, `inspect` a file a line, `preset list` a preset a
-    /// line, `licenses` a notice a line, and the rest one line; an error is
-    /// an error event. Not for `gui`.
+    /// Print JSON Lines (one compact object per line) instead of text.
+    /// `convert` and `watch` emit one event per line, the same for every
+    /// format, and `spoof` emits one event (schemas: `tgradish describe`).
+    /// `inspect` emits one object per file, `preset list` one per preset,
+    /// `licenses` one per notice, and other commands one object. Errors are
+    /// emitted as error events. Not supported by `gui`.
     #[arg(long, global = true)]
     pub json: bool,
-    /// Show more output, including ffmpeg logs with -vv.
+    /// Show more output; use -vv to include ffmpeg logs.
     #[arg(short, long, global = true, action = clap::ArgAction::Count, conflicts_with = "quiet")]
     pub verbose: u8,
-    /// Only print errors and warnings, on stderr, and each file made, its
-    /// path alone, a line on stdout each, as `tgradish convert -q *.png |
-    /// xargs …` reads them.
+    /// Print only errors and warnings on stderr, and output file paths (one
+    /// per line) on stdout.
     #[arg(short, long, global = true)]
     pub quiet: bool,
-    /// The ffmpeg executable to use, or a directory with ffmpeg and
-    /// ffprobe. Without this or --ffmpeg-from, TGRADISH_FFMPEG can name
-    /// one, over the config file's.
+    /// Path to the ffmpeg executable or a directory containing ffmpeg and
+    /// ffprobe. Overrides TGRADISH_FFMPEG and the config file.
     #[arg(long, global = true, value_name = "PATH", conflicts_with = "ffmpeg_from")]
     pub ffmpeg: Option<PathBuf>,
-    /// Which ffmpeg to use: auto, built in if this build has it, otherwise
-    /// the system's on PATH; builtin; or system. Over TGRADISH_FFMPEG and
-    /// the config file. [default: the config's, or auto]
+    /// Choose which ffmpeg to use: auto (built-in if this build has it,
+    /// otherwise the one on PATH), builtin, or system. Overrides
+    /// TGRADISH_FFMPEG and the config file. [default: config file, or auto]
     #[arg(long, global = true, value_name = "WHERE", value_enum)]
     pub ffmpeg_from: Option<FfmpegFrom>,
-    /// Config file to use instead of the default one, which `tgradish
-    /// config path` prints. Over TGRADISH_CONFIG.
+    /// Path to a config file. Overrides TGRADISH_CONFIG and the default
+    /// path (`tgradish config path`).
     #[arg(long, global = true, value_name = "FILE")]
     pub config: Option<PathBuf>,
-    /// Colours, links on file names, progress in the terminal's tab or
-    /// taskbar and pictures of results, where the terminal shows them.
-    /// NO_COLOR and CLICOLOR_FORCE are heeded with auto. [default: auto]
+    /// Control colours, file hyperlinks, progress in the terminal's tab or
+    /// taskbar, and inline previews. Respects NO_COLOR and CLICOLOR_FORCE
+    /// when set to auto. [default: auto]
     #[arg(
         long = "colour",
         alias = "color",
@@ -192,74 +191,75 @@ impl From<FfmpegFrom> for FfmpegChoice {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Convert videos or images into stickers or emoji.
+    /// Convert videos or images into stickers or custom emoji.
     #[command(after_help = convert_help())]
     Convert(ConvertArgs),
-    /// Convert every video or image that appears in a directory.
+    /// Watch a directory and convert new videos and images automatically.
     #[command(after_help = exit_status_help())]
     Watch(WatchArgs),
-    /// Spoof the duration of an existing WebM so Telegram accepts it.
+    /// Spoof the duration of an existing WebM file so Telegram accepts it.
     #[command(after_help = exit_status_help())]
     Spoof(SpoofArgs),
-    /// Show properties of WebM, WebP and TGS files and check them against
-    /// Telegram's limits.
+    /// Show the properties of WebM, WebP, TGS or source media files and
+    /// check them against Telegram's limits.
     #[command(after_help = exit_status_help())]
     Inspect(InspectArgs),
     /// Print a JSON description of options, presets and events for
     /// front-ends.
     Describe,
-    /// List and show presets.
+    /// List and inspect presets.
     #[command(subcommand)]
     Preset(PresetCommand),
-    /// Show the config file, where it is, or an example of one.
+    /// Show, locate or create the config file.
     #[command(subcommand, after_help = config_help())]
     Config(ConfigCommand),
-    /// Show which ffmpeg is used and whether it can make video stickers.
+    /// Show which ffmpeg is active and whether it supports video stickers.
     ///
-    /// `tgradish ffmpeg` alone runs `status`.
+    /// Running `tgradish ffmpeg` without a subcommand runs `status`.
     Ffmpeg {
         #[command(subcommand)]
         command: Option<FfmpegCommand>,
     },
-    /// Print the licences of tgradish and of what it is built from, which
-    /// every copy carries.
+    /// Print the licences of tgradish and everything built into it.
     #[command(alias = "licences")]
     Licenses,
-    /// Print the script that completes tgradish's commands and flags in a
-    /// shell.
+    /// Print a shell completion script for tgradish.
     ///
-    /// For bash, as `tgradish completions bash >
-    /// ~/.local/share/bash-completion/completions/tgradish`; for nushell,
-    /// as `tgradish completions nushell | save -f
-    /// ($nu.user-autoload-dirs.0 | path join tgradish.nu)`. Packages
-    /// install them for every shell but PowerShell.
+    /// For bash: `tgradish completions bash >
+    /// ~/.local/share/bash-completion/completions/tgradish`.
+    /// For nushell: `tgradish completions nushell | save -f
+    /// ($nu.user-autoload-dirs.0 | path join tgradish.nu)`.
+    /// Packages (.deb, .rpm, AUR and Nix) install completions for every
+    /// shell except PowerShell.
     Completions {
-        /// The shell to complete in.
+        /// Target shell.
         shell: ShellArg,
     },
 
-    /// Open the GUI, with FILES in it, or add them to the one running.
+    /// Open the GUI, optionally loading FILES (or adding them to a running
+    /// window).
     ///
-    /// It also opens when tgradish is started without arguments outside a
-    /// terminal.
+    /// The GUI also opens automatically when tgradish is launched without
+    /// arguments outside a terminal.
     #[cfg(feature = "gui")]
     Gui {
-        /// Pictures, videos or folders of frames to open
+        /// Images, videos or frame directories to open.
         #[arg(value_name = "FILES")]
         files: Vec<PathBuf>,
     },
 }
 
 impl Cli {
-    /// What clap can't tell is wrong with the command line: `--json` for
-    /// the GUI, which prints nothing to read, and an input named true
-    /// or false that isn't there, as `--watermark false` gives one.
+    /// Checks for CLI misuse that clap cannot catch: `--json` with `gui`
+    /// (which prints no output), `-` for stdin/stdout, legacy `-i`, or a
+    /// non-existent input named `true` or `false` after a boolean flag (such
+    /// as `--watermark false`).
     pub fn misused(&self) -> Option<String> {
         if self.command.is_gui() && self.global.json {
-            return Some("--json can't be used with gui, which prints nothing to read".into());
+            return Some("--json is not supported by gui".into());
         }
-        // `-`, which other tools read as stdin or stdout, would be a file
-        // named so here
+        // `-` (used for stdin/stdout in other tools) would otherwise be treated
+        // as a literal filename.
         let dash = |path: &Option<PathBuf>| path.as_deref() == Some(std::path::Path::new("-"));
         let paths: Vec<Option<PathBuf>> = match &self.command {
             Command::Convert(args) => args
@@ -277,7 +277,10 @@ impl Cli {
             _ => Vec::new(),
         };
         if paths.iter().any(dash) {
-            return Some("reading stdin or writing stdout isn't supported: name a file".into());
+            return Some(
+                "reading from stdin or writing to stdout via '-' is not supported; pass a file path"
+                    .into(),
+            );
         }
         let Command::Convert(args) = &self.command else { return None };
         if !args.old_input.is_empty() {
@@ -292,7 +295,7 @@ impl Cli {
                 })
                 .collect();
             return Some(format!(
-                "2.0 takes inputs without -i: tgradish convert {}",
+                "tgradish 2.0 takes input paths without -i: tgradish convert {}",
                 inputs.join(" ")
             ));
         }
@@ -301,16 +304,16 @@ impl Cli {
             .iter()
             .find(|input| matches!(input.to_str(), Some("true" | "false")) && !input.exists())?;
         Some(format!(
-            "there is no input {}: switches take no value, --watermark turns one on and \
-             --no-watermark off",
+            "no such input '{}': boolean flags take no value (use --watermark or --no-watermark)",
             word.display()
         ))
     }
 }
 
 impl Command {
-    /// Whether it reads the config file: only what uses it does, so that a
-    /// mistake in it never stops the rest. The GUI reads its own.
+    /// Returns whether this command uses the config file. Commands that do not
+    /// need it skip loading it so a broken config never blocks them (the GUI
+    /// loads its own config).
     pub fn reads_config(&self) -> bool {
         match self {
             Command::Convert(_)
@@ -330,8 +333,8 @@ impl Command {
         }
     }
 
-    /// Whether it opens the GUI, which takes Ctrl-C by closing its window,
-    /// and sets the front-end written into its stickers itself.
+    /// Returns whether this command launches the GUI (which handles Ctrl-C by
+    /// closing its window and sets its own client marker in output stickers).
     pub fn is_gui(&self) -> bool {
         #[cfg(feature = "gui")]
         {
@@ -346,32 +349,30 @@ impl Command {
 
 #[derive(Debug, Args)]
 pub struct ConvertArgs {
-    /// Videos or images to convert.
+    /// Videos or images to convert (directories only with --sequence).
     #[arg(required_unless_present_any = ["clipboard", "old_input"])]
     pub inputs: Vec<PathBuf>,
-    /// 1.x's way of naming an input, which is said to have changed.
+    /// Legacy 1.x input flag, kept hidden to give a clear error message.
     #[arg(short = 'i', hide = true, value_name = "FILE")]
     pub old_input: Vec<PathBuf>,
-    /// Convert what is on the clipboard: copied files, a copied path, or an
-    /// image.
+    /// Convert files, a file path or an image from the clipboard.
     #[arg(long, conflicts_with = "inputs")]
     pub clipboard: bool,
-    /// Output file, for a single input or with --sequence. [default: named
+    /// Output file path (single input or --sequence only). [default: named
     /// after the input, beside it or in --output-dir]
     #[arg(short, long, value_name = "FILE", conflicts_with = "output_dir")]
     pub output: Option<PathBuf>,
-    /// Join the inputs (images, or directories of them) into one animation,
-    /// in name order with numbers counted as numbers. Unless -o names it,
-    /// the result is named after the first input: walk/ makes
-    /// walk.sticker.webm beside the directory, walk/1.png walk/2.png makes
-    /// walk/1.sticker.webm.
+    /// Join input images (or directories of images) into one animation in
+    /// natural filename order. Without -o, the output is named after the
+    /// first input (walk/ produces walk.sticker.webm; walk/1.png walk/2.png
+    /// produces walk/1.sticker.webm).
     #[arg(long, conflicts_with = "clipboard")]
     pub sequence: bool,
-    /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
-    /// video or picture), tgs (animated sticker or emoji: TGS, meant for
-    /// pixel art, or a video of it) or webp (static sticker or emoji, from
-    /// any picture or the frame at --start; static or image work too).
-    /// [default: by the -o file's extension, then webm]
+    /// Output format: webm (VP9 video sticker or emoji, from any video or
+    /// image), tgs (animated vector sticker or emoji, for pixel art or a
+    /// video of it) or webp (static sticker or emoji from an image or the
+    /// frame at --start; aliases: static, image). [default: inferred from
+    /// -o extension, or webm]
     #[arg(short, long, value_enum)]
     pub format: Option<FormatArg>,
     #[command(flatten)]
@@ -382,22 +383,20 @@ pub struct ConvertArgs {
 pub struct WatchArgs {
     /// Directory to watch.
     pub dir: PathBuf,
-    /// Also watch subdirectories.
+    /// Watch subdirectories as well.
     #[arg(short, long)]
     pub recursive: bool,
-    /// Also convert files that are already there and have no result yet.
+    /// Convert existing files that do not already have an output.
     #[arg(long)]
     pub existing: bool,
-    /// Seconds between looks at the directory, from 0.05 to a day.
-    /// [default: 1]
+    /// Polling interval in seconds (0.05 to 86400). [default: 1]
     #[arg(long, value_name = "SECONDS", default_value_t = 1.0, hide_default_value = true,
           value_parser = parse_interval)]
     pub interval: f64,
-    /// What to make: webm (video sticker or emoji: VP9 in WebM, from any
-    /// video or picture), tgs (animated sticker or emoji: TGS, meant for
-    /// pixel art, or a video of it) or webp (static sticker or emoji, from
-    /// any picture or the frame at --start; static or image work too).
-    /// [default: webm]
+    /// Output format: webm (VP9 video sticker or emoji, from any video or
+    /// image), tgs (animated vector sticker or emoji, for pixel art or a
+    /// video of it) or webp (static sticker or emoji from an image or the
+    /// frame at --start; aliases: static, image). [default: webm]
     #[arg(short, long, value_enum)]
     pub format: Option<FormatArg>,
     #[command(flatten)]
@@ -407,37 +406,36 @@ pub struct WatchArgs {
 /// Flags shared by `convert` and `watch`.
 #[derive(Debug, Args)]
 pub struct ConversionArgs {
-    /// Directory for results, named NAME.sticker.webm, NAME.emoji.webm or
-    /// the same with .tgs or .webp. [default: beside each input]
+    /// Directory for output files (named NAME.sticker.EXT or
+    /// NAME.emoji.EXT). [default: beside each input]
     #[arg(short = 'O', long, value_name = "DIR")]
     pub output_dir: Option<PathBuf>,
-    /// Replace existing output files.
+    /// Overwrite existing output files.
     #[arg(short = 'y', long)]
     pub overwrite: bool,
-    /// Preset to start from: fast, balanced, best or one of your own, see
-    /// `tgradish preset list`. [default: balanced for webm and webp, best
-    /// for tgs, unless the config's preset or tgs-preset names another]
+    /// Base preset: fast, balanced, best or a custom preset (see `tgradish
+    /// preset list`). [default: balanced for webm and webp, best for tgs,
+    /// unless the config's preset or tgs-preset names another]
     #[arg(short, long)]
     pub preset: Option<String>,
-    /// Options as a JSON object, applied after the preset and before other
-    /// flags. Keys are the flag names, see `tgradish describe`.
+    /// JSON object of options applied after the preset and before CLI
+    /// flags. Keys match flag names (see `tgradish describe`).
     #[arg(long, value_name = "JSON")]
     pub options_json: Option<String>,
-    /// Keep WebM's intermediate files (first-pass statistics) and print
-    /// where they are.
+    /// Keep intermediate WebM files (such as first-pass logs) and print
+    /// their directory.
     #[arg(long)]
     pub keep_temp: bool,
-    /// How many threads a conversion uses at once, at most: ffmpeg's to
-    /// read, scale and encode, and those trying a .tgs's reductions; or
-    /// auto, as many as each makes use of. Files are converted one at a
-    /// time either way. Over the config file's. [default: the config's, or
+    /// Maximum threads per conversion (for ffmpeg and TGS fitting), or
+    /// auto (as many as each part makes use of). Files are still converted
+    /// one at a time. Overrides the config file. [default: config file, or
     /// auto]
     #[arg(long, value_name = "N|auto", value_parser = |text: &str| text.parse::<Threads>())]
     pub threads: Option<Threads>,
-    /// Stop, as Ctrl-C does, when a line reading `cancel` comes on stdin:
-    /// for front-ends, which can't always send Ctrl-C. A line reading
+    /// Stop, as Ctrl-C does, when stdin receives a line reading `cancel`
+    /// (for front-ends, which cannot always send Ctrl-C). A line reading
     /// `settle` stops fitting a WebM once an encode fits and keeps the best
-    /// so far. Without it stdin is left alone, for a script's loop to read.
+    /// so far. Without this flag stdin is left untouched for caller scripts.
     #[arg(long)]
     pub cancel_on_stdin: bool,
     #[command(flatten)]
@@ -447,167 +445,168 @@ pub struct ConversionArgs {
 /// One flag per [`Options`] and [`tgs::Options`] field, with the same name.
 #[derive(Debug, Args)]
 pub struct OptionArgs {
-    /// Sticker or emoji, which sets the size and the size limit: a sticker
-    /// is 512 pixels on its longer side, within 256 KiB as WebM; an emoji
-    /// is 100×100, within 64 KiB as WebM. Pictures have 512 KiB either way,
-    /// and TGS are 512×512 within 64 KiB either way. [default: sticker]
+    /// Sticker or custom emoji. Sets dimensions and size limits: stickers
+    /// are 512 px on the longer side (256 KiB max as WebM), emoji are
+    /// 100×100 (64 KiB max as WebM), WebP is 512 KiB max either way, and
+    /// TGS is 512×512 (64 KiB max) either way. [default: sticker]
     #[arg(long, value_enum, help_heading = "Output")]
     pub target: Option<TargetArg>,
-    /// The part of the input to use, in its pixels: WIDTHxHEIGHT+X+Y from
-    /// the top left, for example 640x360+100+50. [default: all of it]
+    /// Region of the input to keep, in source pixels: WIDTHxHEIGHT+X+Y from
+    /// the top-left corner (for example, 640x360+100+50). [default: full
+    /// frame]
     #[arg(long, value_name = "WxH+X+Y", help_heading = "Output")]
     pub crop: Option<Crop>,
-    /// How to scale into the target size. TGS must be square: pad the
-    /// pixel art, crop its middle or stretch it, or contain where the crop,
-    /// or the input without one, is square already. [default: contain for
-    /// stickers, pad for emoji and TGS]
+    /// How to fit the input into the target dimensions. TGS requires a
+    /// square output (pad, crop, stretch, or contain if the input or crop
+    /// is already square). [default: contain for stickers, pad for emoji
+    /// and TGS]
     #[arg(long, value_enum, help_heading = "Output")]
     pub resize: Option<ResizeArg>,
-    /// How pixels are scaled: smooth, sharp blocks for pixel art, or
-    /// integer, whole multiples with transparent margins. [default: auto,
-    /// sharp for pixel art made at least twice as large]
+    /// Scaling algorithm: smooth, sharp (nearest-neighbour for pixel art),
+    /// or integer (whole-number multiples with transparent padding).
+    /// [default: auto (sharp for pixel art upscaled 2x or more)]
     #[arg(long, value_enum, help_heading = "Output")]
     pub scaling: Option<ScalingArg>,
-    /// Scale by a whole N (or 1/N), so input pixels line up with the
-    /// result's; transparent margins fill the rest. The crop must fit: with
-    /// 3, at most 170 pixels on the longer side for stickers, 33 for emoji.
-    /// --integer-scale= with nothing after sets none, over a preset's.
+    /// Scale by an exact integer N (or 1/N) so input pixels line up with
+    /// output pixels, with transparent padding. The crop must fit within
+    /// the target size (at 3x: max 170 px on the longer side for stickers,
+    /// 33 px for emoji). Pass --integer-scale= to clear a preset value.
     /// [default: none]
     #[arg(long, value_name = "N", alias = "exact-scale", help_heading = "Output")]
     pub integer_scale: Option<IntegerScale>,
-    /// Seconds to skip at the start of the input; for WebP, the time of the
-    /// frame to use. [default: 0]
+    /// Start offset in seconds (or the timestamp of the frame to extract
+    /// for WebP). [default: 0]
     #[arg(short = 's', long, value_name = "SECONDS", value_parser = checked("start"),
           help_heading = "Output")]
     pub start: Option<f64>,
-    /// Seconds of the input to use. [default: the rest of it]
+    /// Maximum duration in seconds to read from the input. [default: full
+    /// remaining duration]
     #[arg(short = 't', long, value_name = "SECONDS", value_parser = checked("length"),
           help_heading = "Output")]
     pub length: Option<f64>,
-    /// How many times as fast as the input the result plays, 0.1 to 10.
-    /// [default: 1 for WebM; for TGS, as fast as fits a long input into 3
-    /// seconds; what still lasts longer is cut]
+    /// Playback speed multiplier (0.1 to 10). [default: 1 for WebM; for
+    /// TGS, sped up to fit within 3 seconds and trimmed if still longer]
     #[arg(long, value_name = "TIMES", value_parser = checked("tempo"), help_heading = "Output")]
     pub tempo: Option<f64>,
-    /// Frame rate of WebM results, at most 60; more than the input's only
-    /// repeats frames. Also how fast image sequences, and sprite sheets for
-    /// TGS, play. [default: the input's, or 12 for sequences]
+    /// Output frame rate for WebM (max 60; values above the input rate only
+    /// duplicate frames), or playback frame rate for image sequences and
+    /// TGS sprite sheets. [default: input frame rate, or 12 for sequences]
     #[arg(long, value_parser = checked("fps"), help_heading = "Output")]
     pub fps: Option<f64>,
 
-    /// What to tune to get close to the file size limit: 256 KiB for
-    /// stickers, 64 KiB for emoji. [default: auto]
+    /// Parameter to adjust to get close to the WebM size limit (256 KiB for
+    /// stickers, 64 KiB for emoji). [default: auto]
     #[arg(long, value_enum, help_heading = "Size fitting")]
     pub fit: Option<FitArg>,
-    /// Most encodes while fitting, 1 to 50. [default: 8]
+    /// Maximum encoding attempts during size fitting (1 to 50). [default:
+    /// 8]
     #[arg(long, value_name = "N",
           value_parser = clap::value_parser!(u32).range(1..=i64::from(webm::MAX_ATTEMPTS)),
           help_heading = "Size fitting")]
     pub attempts: Option<u32>,
-    /// Range to search in the unit of the fitted value: kbit/s, CRF, fps or
-    /// seconds. [default: by --fit]
+    /// Search range for size fitting, in the units of --fit (kbit/s, CRF,
+    /// fps or seconds). [default: depends on --fit]
     #[arg(long, value_name = "MIN..MAX", help_heading = "Size fitting")]
     pub fit_range: Option<Range>,
 
-    /// Target bitrate in kbit/s, when not fitting bitrate. [default: from
-    /// the size limit]
+    /// Target video bitrate in kbit/s when not fitting bitrate. [default:
+    /// calculated from the size limit]
     #[arg(short, long, value_name = "KBPS", value_parser = checked("bitrate"),
           help_heading = "Encoding")]
     pub bitrate: Option<f64>,
-    /// Constant quality, 0 (best) to 63 (worst), when fitting fps or length
-    /// or with --fit off. [default: 32]
+    /// Constant quality level, 0 (best) to 63 (worst), used when fitting
+    /// fps or length or with --fit off. [default: 32]
     #[arg(long, value_parser = clap::value_parser!(u8).range(0..=63), help_heading = "Encoding")]
     pub crf: Option<u8>,
-    /// How hard the encoder works. Less effort is faster, but looks worse
-    /// at the same size for WebM, and comes out larger for TGS. [default:
-    /// the preset's: balanced for WebM, best for TGS]
+    /// Encoder effort. Lower effort is faster, but reduces WebM quality at
+    /// the same size and produces larger TGS files. [default: preset value
+    /// (balanced for WebM, best for TGS)]
     #[arg(long, value_enum, alias = "speed", help_heading = "Encoding")]
     pub effort: Option<EffortArg>,
-    /// Lossless encoding, only small for tiny or still pictures;
-    /// --no-lossless turns a preset's off. [default: off]
+    /// Enable lossless encoding (only practical for small or static
+    /// inputs); use --no-lossless to override a preset. [default: off]
     #[arg(long, overrides_with = "no_lossless", help_heading = "Encoding")]
     pub lossless: bool,
     #[arg(long, overrides_with = "lossless", hide = true)]
     pub no_lossless: bool,
-    /// libvpx-vp9 option for tuning; repeat for more. For example
+    /// Pass a libvpx-vp9 encoder option (repeatable), such as
     /// tune-content=screen (flat graphics), aq-mode=2, sharpness=4,
-    /// arnr-strength=3, g=60 (keyframe interval) or qmax=50. `ffmpeg -h
-    /// encoder=libvpx-vp9` lists them all. These replace the preset's;
-    /// --encoder-options= with nothing after sets none.
+    /// arnr-strength=3, g=60 (keyframe interval) or qmax=50. Run `ffmpeg -h
+    /// encoder=libvpx-vp9` for the full list. Replaces preset options; pass
+    /// --encoder-options= to clear them.
     #[arg(long = "encoder-options", visible_alias = "encoder-option",
           value_name = "NAME=VALUE", value_parser = parse_option_pair,
           help_heading = "Encoding")]
     pub encoder_options: Vec<Option<(String, String)>>,
-    /// Raw ffmpeg output arguments, split as a shell would. Only with ffmpeg
-    /// as a separate program: --ffmpeg-from system or --ffmpeg PATH.
+    /// Extra raw ffmpeg output arguments, split using shell quoting rules.
+    /// Requires an external ffmpeg (--ffmpeg-from system or --ffmpeg PATH).
     #[arg(long, value_name = "ARGS", allow_hyphen_values = true, help_heading = "Encoding")]
     pub ffmpeg_args: Option<ShellWords>,
 
-    /// When to spoof the duration so Telegram accepts videos longer than 3
+    /// When to spoof WebM duration so Telegram accepts videos longer than 3
     /// seconds. [default: auto, only when needed]
     #[arg(long, value_enum, help_heading = "Metadata")]
     pub spoof: Option<SpoofArg>,
-    /// Duration to write into the metadata when spoofing. [default: a short
-    /// one Telegram accepts]
+    /// Container duration in seconds written when spoofing. [default: a
+    /// short duration accepted by Telegram]
     #[arg(long, value_name = "SECONDS", value_parser = checked("fake-duration"),
           help_heading = "Metadata")]
     pub fake_duration: Option<f64>,
-    /// Title to store in the file.
+    /// Title metadata to store in the output file.
     #[arg(long, help_heading = "Metadata")]
     pub title: Option<String>,
-    /// Mark the file as made by tgradish in its metadata, which for TGS is
-    /// the sticker's Lottie name; --no-watermark leaves it out. [default:
-    /// on]
+    /// Write tgradish metadata into the output (the Lottie name for TGS);
+    /// use --no-watermark to omit it. [default: on]
     #[arg(long, overrides_with = "no_watermark", help_heading = "Metadata")]
     pub watermark: bool,
     #[arg(long, overrides_with = "watermark", hide = true)]
     pub no_watermark: bool,
 
-    /// Never change the pixel art to make it fit, but report a sticker
-    /// that is too large; --no-exact lets fitting change it. [default: on]
+    /// Never alter pixel art to fit; report a sticker that stays too large.
+    /// Use --no-exact to allow lossy reductions. [default: on]
     #[arg(long, overrides_with = "no_exact", help_heading = TGS)]
     pub exact: bool,
     #[arg(long, overrides_with = "exact", hide = true)]
     pub no_exact: bool,
-    /// Reductions that may make a sticker fit, comma-separated. [default:
-    /// all]
+    /// Comma-separated list of reductions allowed when fitting a TGS file.
+    /// [default: all]
     #[arg(long, value_enum, value_delimiter = ',', help_heading = TGS)]
     pub reductions: Vec<KindArg>,
-    /// What fitting gives up first: motion (frames merged and dropped, full
-    /// detail), detail (smooth motion, a coarser picture), or auto, whatever
-    /// changes the pixel art least. [default: auto]
+    /// What TGS fitting sacrifices first: motion (merge or drop frames,
+    /// keep detail), detail (coarser image, smooth motion), or auto (least
+    /// visible change). [default: auto]
     #[arg(long, value_enum, help_heading = TGS)]
     pub compromise: Option<CompromiseArg>,
-    /// Keep the input's canvas instead of cropping to the visible pixels;
-    /// --no-keep-canvas crops over a preset that keeps it. [default: off]
+    /// Keep the full input canvas instead of cropping transparent margins;
+    /// use --no-keep-canvas to override a preset. [default: off]
     #[arg(long, overrides_with = "no_keep_canvas", help_heading = TGS)]
     pub keep_canvas: bool,
     #[arg(long, overrides_with = "keep_canvas", hide = true)]
     pub no_keep_canvas: bool,
-    /// Size of one art pixel in input pixels; pixels off its grid move onto
-    /// it. [default: detected]
+    /// Size of one art pixel in source pixels; misaligned edges are snapped
+    /// to this grid. [default: auto-detected]
     #[arg(long, value_name = "N", value_parser = clap::value_parser!(u32).range(1..),
           help_heading = TGS)]
     pub pixel_scale: Option<u32>,
-    /// Read the input as a sprite sheet of equal cells, frames row by row.
-    /// [default: not a sheet]
+    /// Treat the input as a sprite sheet of equal cells, read row by row.
+    /// [default: off]
     #[arg(long, value_name = "COLUMNSxROWS", help_heading = TGS)]
     pub sheet: Option<options::Sheet>,
-    /// How many sprite sheet cells hold frames. [default: all but
-    /// transparent ones at the end]
+    /// Number of frames to read from a sprite sheet. [default: all cells
+    /// except trailing empty ones]
     #[arg(long, value_name = "N", help_heading = TGS)]
     pub sheet_frames: Option<u32>,
 
-    /// Tag to use. [default: all frames]
+    /// Aseprite tag to export. [default: all frames]
     #[arg(long, help_heading = ASEPRITE)]
     pub tag: Option<String>,
-    /// Layer to show, hidden ones too; repeat for more. [default: those the
-    /// file shows]
+    /// Aseprite layer to show (including hidden layers; repeatable).
+    /// [default: visible layers in the file]
     #[arg(long = "show-layers", visible_alias = "show-layer", value_name = "NAME",
           help_heading = ASEPRITE)]
     pub show_layers: Vec<String>,
-    /// Layer to hide; repeat for more. A hidden group hides the layers in
-    /// it. [default: those the file hides]
+    /// Aseprite layer to hide (repeatable; hiding a group hides its
+    /// children). [default: hidden layers in the file]
     #[arg(long = "hide-layers", visible_alias = "hide-layer", value_name = "NAME",
           help_heading = ASEPRITE)]
     pub hide_layers: Vec<String>,
@@ -720,22 +719,21 @@ impl std::str::FromStr for ShellWords {
     }
 }
 
-/// Seconds for `watch --interval`: no shorter than watching wakes to see
-/// if it was stopped, and no longer than a day, beyond which it may as
-/// well not watch, and far below where seconds stop being a duration.
+/// Parses `watch --interval` seconds: at least 0.05 s (the cancellation poll
+/// period) and at most 86400 s (one day, well within `Duration` limits).
 fn parse_interval(text: &str) -> Result<f64, String> {
-    let seconds: f64 = text.parse().map_err(|_| format!("{text} isn't a number"))?;
+    let seconds: f64 = text.parse().map_err(|_| format!("{text:?} is not a number"))?;
     if !(0.05..=86_400.0).contains(&seconds) {
         return Err("must be from 0.05 to 86400 seconds".into());
     }
     Ok(seconds)
 }
 
-/// A parser of the number the option `key` takes, which refuses what
-/// conversions would, in their words.
+/// Builds a numeric value parser for option `key` using core's validation
+/// rules and error messages.
 fn checked(key: &'static str) -> impl Fn(&str) -> Result<f64, String> + Clone + Send + Sync {
     move |text| {
-        let value: f64 = text.parse().map_err(|_| format!("{text} isn't a number"))?;
+        let value: f64 = text.parse().map_err(|_| format!("{text:?} is not a number"))?;
         match options::wrong_value(key, value) {
             Some(reason) => Err(reason),
             None => Ok(value),
@@ -743,7 +741,7 @@ fn checked(key: &'static str) -> impl Fn(&str) -> Result<f64, String> + Clone + 
     }
 }
 
-/// `NAME=VALUE`, or nothing, which says there are none.
+/// Parses `NAME=VALUE`, or an empty string to clear all options.
 fn parse_option_pair(text: &str) -> Result<Option<(String, String)>, String> {
     if text.is_empty() {
         return Ok(None);
@@ -779,8 +777,8 @@ value_enum!(FitArg => options::Fit { Auto, Bitrate, Crf, Fps, Length, Off });
 value_enum!(EffortArg => options::Effort { Fast, Balanced, Best });
 value_enum!(SpoofArg => options::Spoof { Auto, Always, Never });
 
-/// [`Format`] for clap, which also takes `static`, and `image` as it once
-/// did, for WebP: the kind of sticker it makes.
+/// Clap value enum for [`Format`], accepting `static` and legacy `image` as
+/// aliases for WebP.
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum FormatArg {
     Webm,
@@ -812,28 +810,28 @@ value_enum!(CompromiseArg => reduce::Compromise { Auto, Motion, Detail });
 pub struct SpoofArgs {
     /// WebM file to spoof.
     pub input: PathBuf,
-    /// Output file, as -o names it, where cp would take it.
+    /// Output file path (alternative to -o).
     #[arg(value_name = "OUTPUT", conflicts_with_all = ["output", "in_place"])]
     pub to: Option<PathBuf>,
-    /// Output file. [default: NAME.spoofed.webm beside the input]
+    /// Output file path. [default: NAME.spoofed.webm beside the input]
     #[arg(short, long, value_name = "FILE", conflicts_with = "in_place")]
     pub output: Option<PathBuf>,
-    /// Modify the input file.
+    /// Modify the input file in place.
     #[arg(short, long)]
     pub in_place: bool,
-    /// Replace an existing output file.
+    /// Overwrite an existing output file.
     #[arg(short = 'y', long)]
     pub overwrite: bool,
-    /// Duration to write into the metadata, as convert's --fake-duration.
-    /// [default: a short one Telegram accepts]
+    /// Container duration in seconds to write. [default: a short duration
+    /// accepted by Telegram]
     #[arg(short = 'd', long, value_name = "SECONDS",
           default_value_t = webm::DEFAULT_FAKE_DURATION, hide_default_value = true)]
     pub fake_duration: f64,
-    /// Title to store in the file.
+    /// Title metadata to store in the file.
     #[arg(long)]
     pub title: Option<String>,
-    /// Mark the file as modified by tgradish; --no-watermark leaves it as
-    /// it is. [default: on]
+    /// Mark the file as modified by tgradish; use --no-watermark to leave
+    /// metadata unchanged. [default: on]
     #[arg(long, overrides_with = "no_watermark")]
     pub watermark: bool,
     #[arg(long, overrides_with = "watermark", hide = true)]
@@ -841,7 +839,7 @@ pub struct SpoofArgs {
 }
 
 impl SpoofArgs {
-    /// The output file, by `-o` or after the input.
+    /// Returns the explicit output path from `-o` or positional `OUTPUT`.
     pub fn output(&self) -> Option<PathBuf> {
         self.output.clone().or_else(|| self.to.clone())
     }
@@ -849,52 +847,50 @@ impl SpoofArgs {
 
 #[derive(Debug, Args)]
 pub struct InspectArgs {
-    /// Stickers to inspect, WebM, WebP or TGS; or what stickers are made
-    /// of, which convert reads: pictures, animations, Aseprite files and
-    /// videos, these read by ffmpeg, as --ffmpeg, --ffmpeg-from,
-    /// TGRADISH_FFMPEG or the config file name it. Those are no stickers
-    /// yet, which Telegram refuses, so they are said to be refused, with
-    /// what a sticker that kept their size, length and frame rate would be
-    /// refused for.
+    /// Sticker files (WebM, WebP or TGS) or source media (images,
+    /// animations, Aseprite files or videos; videos require ffmpeg). Source
+    /// media is reported as rejected by Telegram along with any size,
+    /// duration or frame-rate issues a sticker keeping those properties
+    /// would have.
     #[arg(required = true)]
     pub files: Vec<PathBuf>,
-    /// What to check WebM and WebP files as, and what stickers are made
-    /// of; TGS stickers and emoji have the same limits. [default: guessed
-    /// from the size, and a sticker for what isn't one yet]
+    /// Check WebM, WebP and source media as a sticker or custom emoji (TGS
+    /// limits are identical for both). [default: inferred from dimensions,
+    /// or sticker for source media]
     #[arg(long, value_enum)]
     pub target: Option<TargetArg>,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum PresetCommand {
-    /// List all presets.
+    /// List all available presets.
     List,
-    /// Show the options of a preset, with everything it extends applied.
+    /// Show the resolved options of a preset.
     Show {
-        /// Preset to show, as preset list names it.
+        /// Preset name (see `tgradish preset list`).
         name: String,
     },
-    /// Print the directory for user presets.
+    /// Print the user presets directory.
     Path,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum ConfigCommand {
-    /// Print the config file's path.
+    /// Print the config file path.
     Path,
-    /// Show the config in effect: the file's, with the defaults it leaves
-    /// out.
+    /// Print the effective configuration (config file values merged with
+    /// defaults).
     Show,
-    /// Print an example config, each setting explained, to start one from.
+    /// Print an annotated example config file.
     Example,
-    /// Write the example config where tgradish reads it, unless there is
-    /// a config file there already.
+    /// Write the example config to the config path (see `config path`),
+    /// creating its directory; never overwrites an existing file.
     Init,
 }
 
 #[derive(Debug, Subcommand)]
 pub enum FfmpegCommand {
-    /// Show which ffmpeg is used and whether it can make video stickers.
+    /// Show which ffmpeg is active and whether it supports video stickers.
     Status,
 }
 
@@ -909,7 +905,7 @@ mod tests {
         Cli::command().debug_assert();
     }
 
-    /// `-V` is the version alone, and `--version` how it was built.
+    /// `-V` prints only the version; `--version` includes build features.
     #[test]
     fn says_how_it_was_built() {
         let version = |flag: &str| {
@@ -921,14 +917,15 @@ mod tests {
         let long = version("--version");
         let gui = if cfg!(feature = "gui") { "with the GUI" } else { "no GUI" };
         assert!(long.trim_end().ends_with(&format!("; {gui})")), "{long}");
-        // as core has it, whichever feature built it in
+        // Matches core's built-in backend availability regardless of feature
+        // flag.
         let built_in = tgradish_core::backend::Backend::select(FfmpegChoice::Builtin, None).is_ok();
         assert_eq!(long.contains("ffmpeg built in"), built_in, "{long}");
         assert_eq!(long.contains("system ffmpeg"), !built_in, "{long}");
     }
 
-    /// Every default is said once, at the end of its option's help, and
-    /// every argument says what it is.
+    /// Every option states its default at most once (at the end of its help),
+    /// and every visible argument has non-empty help text.
     #[test]
     fn says_each_default_once_at_the_end() {
         fn check(command: &clap::Command, path: &str) {
@@ -950,16 +947,16 @@ mod tests {
         check(&Cli::command(), "tgradish");
     }
 
-    /// The help's first line is what the manifests and packages say
-    /// tgradish is, which xtask holds them to.
+    /// Top-level help `about` matches `Cargo.toml`'s description (enforced
+    /// across packages by xtask).
     #[test]
     fn says_what_tgradish_is_as_its_manifest_does() {
         let about = Cli::command().get_about().unwrap().to_string();
         assert_eq!(about, env!("CARGO_PKG_DESCRIPTION"));
     }
 
-    /// Every help page, as `--help` prints it, into
-    /// `$TGRADISH_STRINGS/cli.json`, for `cargo xtask strings`.
+    /// Dumps every `--help` page into `$TGRADISH_STRINGS/cli.json` for
+    /// `cargo xtask strings`.
     #[test]
     #[ignore]
     fn help_pages() {
@@ -1020,7 +1017,7 @@ mod tests {
             }
         }
         let err = threads("convert", "0").unwrap_err().to_string();
-        assert!(err.contains("0 threads: expected at least 1, or auto"), "{err}");
+        assert!(err.contains(r#"0 threads: expected at least 1, or "auto""#), "{err}");
         // left to the config without it
         let cli = Cli::parse_from(["tgradish", "convert", "a.gif"]);
         let Command::Convert(args) = cli.command else { panic!() };
@@ -1079,7 +1076,7 @@ mod tests {
             let Command::Convert(args) = cli.command else { panic!() };
             args.conversion.options
         };
-        // lossless VP9 is WebM's, keeping the art exact is .tgs's
+        // Lossless VP9 is WebM-only; keeping art exact is TGS-only.
         assert_eq!(options("--lossless").unused(Format::Tgs, None), ["--lossless"]);
         assert!(options("--lossless").unused(Format::Webm, None).is_empty());
         for format in [Format::Webm, Format::Webp] {
@@ -1088,8 +1085,7 @@ mod tests {
         assert_eq!(options("--no-exact").to_tgs_options().exact, Some(false));
     }
 
-    /// -f is the format, as anyone who knows ffmpeg reads it; fitting has
-    /// no short flag.
+    /// `-f` selects `--format` (matching ffmpeg); `--fit` has no short flag.
     #[test]
     fn reads_f_as_the_format() {
         let cli = Cli::parse_from(["tgradish", "convert", "a.png", "-f", "tgs"]);
@@ -1118,8 +1114,8 @@ mod tests {
         assert!(Cli::try_parse_from(["tgradish", "spoof", "a.webm", "--duration=1"]).is_err());
     }
 
-    /// What 1.x took: spoof's output after its input, as cp takes it, and
-    /// convert's -i, which is said to be gone.
+    /// Supports 1.x's positional `spoof INPUT OUTPUT` syntax and gives a clear
+    /// migration hint for `convert -i`.
     #[test]
     fn takes_or_explains_what_1x_took() {
         let cli = Cli::parse_from(["tgradish", "spoof", "a.webm", "b.webm"]);
@@ -1131,7 +1127,10 @@ mod tests {
         }
         let cli = Cli::parse_from(["tgradish", "convert", "-i", "my clip.mp4"]);
         let said = cli.misused().unwrap();
-        assert_eq!(said, "2.0 takes inputs without -i: tgradish convert 'my clip.mp4'");
+        assert_eq!(
+            said,
+            "tgradish 2.0 takes input paths without -i: tgradish convert 'my clip.mp4'"
+        );
     }
 
     #[test]

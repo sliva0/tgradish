@@ -1,5 +1,5 @@
-//! From frames to a finished `.tgs`: normalise, encode, lay out, check,
-//! and when it is too large, reduce until it fits.
+//! End-to-end `.tgs` sticker pipeline: normalise, encode, lay out, compress,
+//! validate, and apply lossy reductions until it fits if needed.
 
 use std::cell::RefCell;
 use std::num::NonZeroUsize;
@@ -23,47 +23,45 @@ mod tracker;
 use fit::{Fitting, Quick, RETARGET, ZOPFLI_BEST, ZOPFLI_SHARE, fit, likely_scale, quick};
 use tracker::{Part, Tracker};
 
-/// What to do when the lossless result is too large.
+/// How [`make`] handles lossless output that is too large (over `max_bytes` or
+/// Telegram's other limits).
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Fit {
-    /// Lossless when it fits, otherwise the least visible reductions that
-    /// make it fit.
+    /// Keep lossless when it fits; otherwise apply minimal lossy reductions
+    /// until it fits.
     #[default]
     Auto,
-    /// Never reduce, keeping the art exactly as it is; a result that is
-    /// too large is reported.
+    /// Never reduce; return the oversized lossless sticker with its issues.
     Exact,
 }
 
-/// How [`make`] makes a sticker. Built as `Options { fit,
-/// ..Options::default() }`, so that what is added later keeps its default.
+/// Options for [`make`]. Construct with `Options { fit, ..Options::default() }`
+/// so future fields retain defaults.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
-    /// How the animation is read as pixel art.
+    /// Normalisation options.
     pub normalise: normalise::Options,
-    /// How hard the encoder looks for a small sticker.
+    /// Encoder search effort level.
     pub effort: Effort,
     /// Whether the art may change to fit.
     pub fit: Fit,
-    /// The reductions fitting may use.
+    /// Allowed reduction kinds when `fit` is [`Fit::Auto`].
     pub reductions: Vec<Kind>,
-    /// Which of them fitting uses first.
+    /// Quality dimension sacrificed first when reducing.
     pub compromise: Compromise,
-    /// The largest `.tgs` to make.
+    /// Target compressed `.tgs` size limit in bytes.
     pub max_bytes: usize,
-    /// Written into the sticker as its name.
+    /// Optional Lottie animation name (`nm`).
     pub name: Option<String>,
-    /// Bytes written as the order of the sticker's rectangles, or as its
-    /// first layer's name when they have too few; tgradish-core sets them,
-    /// and `None` writes none.
+    /// Optional payload bytes embedded via rectangle order (or first layer
+    /// `ln`); set by `tgradish-core`, `None` disables embedding.
     pub mark: Option<Vec<u8>>,
-    /// How many of a round's candidates fitting tries at once, at most,
-    /// with the `threads` feature: `None` for as many as
-    /// [`std::thread::available_parallelism`] says the machine runs, and
-    /// one for each in turn, in the calling thread. The sticker is the
-    /// same whatever it is.
+    /// Maximum worker threads for parallel candidate fitting when the
+    /// `threads` feature is enabled (`None` uses
+    /// [`std::thread::available_parallelism`], `1` runs on the calling
+    /// thread). Output is identical regardless of thread count.
     pub threads: Option<NonZeroUsize>,
 }
 
@@ -83,132 +81,127 @@ impl Default for Options {
     }
 }
 
-/// A reduction fitting applied.
+/// A lossy reduction step applied during fitting.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Step {
-    /// The reduction, at the strength applied.
+    /// Reduction and strength applied.
     #[serde(flatten)]
     pub reduction: Reduction,
-    /// The estimated size after it, in bytes.
+    /// Estimated `.tgs` size in bytes after this step.
     pub bytes: usize,
-    /// How much the animation differs from the lossless one after it (see
+    /// Perceptual distortion relative to the lossless animation (see
     /// [`crate::reduce::distortion`]).
     pub distortion: f64,
 }
 
 impl Step {
-    /// A step of `reduction`, which fitting estimated to come to `bytes`
-    /// and `distortion`: for front-ends to show one made up, as in tests.
+    /// Constructs a [`Step`] (for front-end display or tests).
     pub fn new(reduction: Reduction, bytes: usize, distortion: f64) -> Step {
         Step { reduction, bytes, distortion }
     }
 }
 
-/// Progress, for front-ends to show.
+/// Progress events emitted by [`make`].
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "stage", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Progress {
-    /// The animation is read as pixel art.
+    /// Input animation has been normalised onto its pixel grid.
     Normalised {
-        /// What normalising found and did.
+        /// Normalisation summary.
         report: Box<Report>,
     },
-    /// The lossless result, estimated, is too large.
+    /// Estimated lossless output exceeds the size limit.
     TooLarge {
-        /// The estimate, in bytes.
+        /// Estimated compressed size in bytes.
         bytes: usize,
     },
-    /// Fitting applied a reduction.
+    /// Fitting applied a lossy reduction step.
     Reduced {
-        /// Which, and what it came to.
+        /// Applied step and resulting estimate.
         step: Step,
     },
-    /// The result is being packed, the longest step at best effort.
+    /// Compressing final Lottie JSON with zopfli (the longest step at
+    /// [`Effort::Best`]).
     Packing,
-    /// The result missed the limit all the same, as fitting's estimates
-    /// were off: fitting tries again, aiming lower, and encodes and packs
-    /// what that comes to.
+    /// Final output still exceeded the limit because fitting's estimates were
+    /// off; fitting retries with a lower target estimate and re-encodes and
+    /// packs the result.
     Missed {
-        /// How large it came to packed; `None` where it was far too large,
-        /// or over Telegram's other limits, to be worth packing.
+        /// Actual compressed size in bytes, or `None` if skipped as too large
+        /// or over structural limits.
         bytes: Option<usize>,
-        /// The estimate fitting now aims at, in bytes.
+        /// New lower byte target for fitting.
         aim: usize,
     },
-    /// How far making the sticker got, estimated: each part of the work
-    /// has a share of the whole measured as about the time it takes, and
-    /// moves through it as it goes, by colours drawn, orders tried,
-    /// rounds of reductions, or the time packing takes against how long
-    /// it usually does. Said often, never less than before; 1 once done.
+    /// Monotonic overall and per-stage progress estimate (`0.0..=1.0`),
+    /// reaching `1.0` when done. Each phase is weighted by its typical runtime
+    /// share and advances by colours drawn, orders tried, reduction rounds, or
+    /// elapsed zopfli packing time relative to typical duration.
     Advanced {
-        /// Of all of it, from 0 to 1.
+        /// Overall progress fraction (`0.0..=1.0`).
         fraction: f64,
-        /// Of the stage at work, from 0 to 1: since the art was read
-        /// ([`Progress::Normalised`]), fitting started (after
-        /// [`Progress::TooLarge`], unless the art is kept exactly as it
-        /// is) or packing did ([`Progress::Packing`]); and once the result
-        /// missed, of each try again, all of it, from its
-        /// [`Progress::Missed`].
+        /// Current stage progress fraction (`0.0..=1.0`), resetting on
+        /// [`Progress::Normalised`], fitting start (after
+        /// [`Progress::TooLarge`], unless `fit` is [`Fit::Exact`]),
+        /// [`Progress::Packing`], and each [`Progress::Missed`] retry.
         stage_fraction: f64,
     },
 }
 
-/// A finished sticker, and what went into it.
+/// Built `.tgs` sticker and its metadata.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Sticker {
-    /// The `.tgs` file's bytes.
+    /// Gzipped `.tgs` bytes.
     #[serde(skip)]
     pub tgs: Vec<u8>,
-    /// How many there are.
+    /// Compressed `.tgs` size in bytes.
     pub bytes: usize,
-    /// Size of the Lottie JSON inside.
+    /// Uncompressed Lottie JSON size in bytes.
     pub json_bytes: usize,
-    /// What normalising found and did.
+    /// Normalisation report.
     pub report: Report,
-    /// Reductions applied, in order; empty when lossless.
+    /// Lossy reduction steps applied (empty when lossless).
     pub steps: Vec<Step>,
-    /// Lottie layers.
+    /// Number of Lottie layers.
     pub layers: usize,
-    /// Paint groups in all layers, each a colour.
+    /// Total paint groups across all layers.
     pub groups: usize,
-    /// Rectangles in all groups.
+    /// Total rectangles across all groups.
     pub rectangles: usize,
-    /// Problems the finished sticker has, from [`check::check`].
+    /// Validation issues reported by [`check::check`].
     pub issues: Vec<Issue>,
-    /// What checking it found it holds, as [`check::check`] counts it,
-    /// which tells what its issues are about.
+    /// Validation statistics from [`check::check`].
     #[serde(skip)]
     pub stats: check::Stats,
-    /// What the sticker shows, cell for cell: the animation after any
-    /// reductions.
+    /// Final normalised animation after any reductions.
     #[serde(skip)]
     pub anim: PixelAnim,
 }
 
 impl Sticker {
-    /// Whether anything visible was given up: fitting reductions, a forced
-    /// pixel scale, or the end of a long input.
+    /// Returns true if any visual loss occurred (reductions, forced pixel
+    /// snapping, or 3-second trimming).
     pub fn lossy(&self) -> bool {
         !self.steps.is_empty() || self.report.snapped_pixels > 0 || self.report.trimmed
     }
 
-    /// Whether Telegram takes it.
+    /// Returns true if the sticker has no validation errors and Telegram will
+    /// accept it.
     pub fn fits(&self) -> bool {
         self.issues.iter().all(|issue| issue.severity != Severity::Error)
     }
 }
 
-/// Asked between steps of the work: when it says yes, the work stops, as
-/// [`make`] and the painter do. It may be asked from several threads at
-/// once.
+/// Cancellation predicate polled between work steps; may be called from
+/// multiple threads simultaneously.
 pub type Cancelled<'a> = &'a (dyn Fn() -> bool + Sync);
 
 /// An animation encoded and laid out: its scene, its Lottie JSON, and
@@ -281,26 +274,19 @@ fn share_of_limits(scene: &Scene, json: &str) -> f64 {
     )
 }
 
-/// Makes a sticker of `animation`, which it lets go once it is read as
-/// pixel art, reporting `progress`. `cancelled` is asked between steps,
-/// and while encoding between colours; when it says yes, this stops with
-/// [`Error::Cancelled`](crate::Error::Cancelled).
+/// Builds a `.tgs` [`Sticker`] from `animation` (consuming it once normalised)
+/// while reporting [`Progress`] events. Polls `cancelled` between steps and
+/// colours, returning [`crate::Error::Cancelled`] if triggered.
 ///
-/// With the `threads` feature, fitting tries each round's candidates in
-/// as many threads at once as [`Options::threads`] says, and zopfli packs
-/// in one while this call waits for it, which has two effects past this
-/// call:
+/// With the `threads` feature enabled (no-op on wasm), candidate fitting runs
+/// across up to [`Options::threads`] worker threads and zopfli runs on a
+/// background thread so cancellation returns immediately:
 ///
-/// - zopfli can't be stopped, so a stop while it packs returns at once
-///   and leaves its thread to finish alone, at work for as long as packing
-///   the sticker takes;
-/// - at most two such threads run in the whole process, counting those
-///   left behind, so that stopping and starting again doesn't pile them
-///   up. However many stickers are made at once, two are packed at a
-///   time, and after two stops the next waits for one to end, still
-///   answering to `cancelled`.
-///
-/// On wasm, which has no threads to start, the feature does nothing.
+/// - zopfli itself cannot be interrupted, so a cancelled pack thread continues
+///   until finished in the background;
+/// - at most two zopfli threads run process-wide (including abandoned ones) so
+///   repeated cancellations cannot accumulate threads; additional calls wait
+///   for a slot while still polling `cancelled`.
 pub fn make(
     animation: Animation,
     options: &Options,
@@ -603,7 +589,7 @@ fn parallel<T: Sync, R: Send>(
 const POLL: std::time::Duration = std::time::Duration::from_millis(50);
 
 internal! {
-/// How many zopfli iterations stickers are packed with at `effort`.
+/// Returns the zopfli iteration count used for `effort`.
 pub fn zopfli_iterations(effort: Effort) -> u64 {
     match effort {
         Effort::Fast => 5,

@@ -1,4 +1,4 @@
-# The GUI's translations, see src/l10n.rs
+# GUI localisation settings (see src/l10n.rs).
 fallback_language = "en-GB"
 
 [fluent]

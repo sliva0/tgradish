@@ -1,20 +1,19 @@
 name: release
 
-# Builds single-file tgradish binaries with ffmpeg linked statically, for
-# Linux (x86-64 and aarch64, for glibc and for musl) and Windows
-# (cross-compiled with mingw-w64), the glibc ones also as .deb and .rpm
-# packages and the Windows one also alone, and glibc binaries that use the
-# system's ffmpeg instead, all named without the version, once the
-# version is checked to be written alike everywhere. Tests them, and on a
-# version tag drafts a GitHub release with them and the ffmpeg sources the
-# LGPL asks for, its notes the changelog's. Pull requests that touch the
-# ffmpeg build run it too.
+# Builds single-file tgradish binaries, archives, and packages for Linux
+# (x86-64 and aarch64, glibc and musl) and Windows (x86-64 via mingw-w64), all
+# named without the version:
+# - Static ffmpeg builds for all targets (plus .deb/.rpm for glibc and a
+#   standalone .exe for Windows).
+# - System-ffmpeg tarballs for Linux glibc.
+# Verifies version consistency, tests all packages, and on version tags drafts a
+# GitHub release with the LGPL ffmpeg sources and changelog notes. Also runs on
+# PRs that touch the ffmpeg or release build.
 on:
   push:
     tags: ["v*"]
-  # changes to what the release jobs build with, which CI alone doesn't
-  # catch: the ffmpeg build and the filters it must have, the binary's
-  # resources and the notices it carries
+  # Trigger on PRs touching files that regular CI does not fully exercise
+  # (ffmpeg build, linked backend, resources, licences, packaging).
   pull_request:
     paths:
       - xtask/**
@@ -26,9 +25,9 @@ on:
       - crates/cli/tgradish.rc
       - crates/cli/tgradish.exe.manifest
       - crates/cli/assets/**
-      # the AUR packages, which test-aur builds
+      # AUR packages tested by test-aur.
       - packaging/aur/**
-      # features, dependencies and profiles
+      # Features, dependencies, and release profiles.
       - Cargo.toml
       - crates/core/Cargo.toml
       - crates/cli/Cargo.toml
@@ -37,13 +36,12 @@ on:
       - .github/workflows/release.yml
   workflow_dispatch:
 
-# a newer push makes an older run of the same pull request moot; a tag's run
-# is never cut short
+# Cancel superseded PR runs, but never cancel a tag run.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
-# only the job that drafts the release writes to the repository
+# Only the final `publish` job requests write permissions.
 permissions:
   contents: read
 
@@ -51,12 +49,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # the version written alike everywhere, with a dated section in the
-  # changelog, and on a tag the tag's: the release is named after the tag,
-  # and the AUR packages download it by their pkgver, while the folders in
-  # the archives, the packages and the binaries take Cargo.toml's version
-  # as they are built. A version not raised everywhere fails here, before
-  # the builds
+  # Verify versions match everywhere, with a dated changelog section, and match
+  # the tag on tag runs: the release is named after the tag and AUR packages
+  # download by pkgver, while archive folders, packages, and binaries take
+  # Cargo.toml's version at build time. Fail here before long builds.
   version:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -71,11 +67,10 @@ jobs:
             cargo xtask release check
           fi
 
-  # every crate packaged as crates.io would get it, and built from that
-  # package against the others', in the order `cargo xtask release crates`
-  # publishes them: on a tag, before they are published by hand, and when
-  # started by hand. CI does the libraries alone on every push, as the
-  # GUI and the command line take minutes more
+  # Dry-run crates.io packaging and builds for all four publishable crates, in
+  # the order `cargo xtask release crates` publishes them: runs on tags (before
+  # publishing by hand) and manual runs. Regular CI only checks the two library
+  # crates because the GUI and CLI take several minutes longer.
   crates:
     needs: version
     if: github.event_name != 'pull_request'
@@ -90,22 +85,19 @@ jobs:
 
   build:
     needs: version
-    # the Rust releases are built with, over rust-toolchain.toml's newest
-    # stable, so that building a tag again makes the same binaries; `cargo
-    # xtask release prepare` raises it, see CONTRIBUTING.md
+    # Pin Rust for reproducible release builds (overrides rust-toolchain.toml).
+    # Updated by `cargo xtask release prepare`; see CONTRIBUTING.md.
     env:
       RUSTUP_TOOLCHAIN: "1.100.0"
     strategy:
       fail-fast: false
       matrix:
         include:
-          # Linux builds run in manylinux containers (AlmaLinux 8, glibc
-          # 2.28) so they start on older distributions too. The images are
-          # pinned by digest, here those tagged 2026.11.07-1, so a release
-          # is built in the image its pull request was, and the cache of
-          # ffmpeg builds below is keyed by it. To renew them, take the
-          # digests of a newer tag from quay.io/pypa/manylinux_2_28_x86_64
-          # and _aarch64
+          # Build Linux glibc binaries in manylinux_2_28 (AlmaLinux 8, glibc
+          # 2.28) for broad distro compatibility. Images are pinned by digest
+          # (tag 2026.11.07-1) so builds match PR tests and ffmpeg cache keys
+          # stay valid. To update, take a newer tag's digests from
+          # quay.io/pypa/manylinux_2_28_{x86_64,aarch64}.
           - target: linux-x86_64
             triple: x86_64-unknown-linux-gnu
             runner: ubuntu-24.04
@@ -114,7 +106,8 @@ jobs:
             triple: aarch64-unknown-linux-gnu
             runner: ubuntu-24.04-arm
             container: quay.io/pypa/manylinux_2_28_aarch64@sha256:cb37f0d66c8a75abb93cf6085cad1f1427cd7208f0c0fc48359bb1eea9924f21
-          # for Alpine and other musl distributions, with Ubuntu's musl-gcc
+          # Build musl binaries for Alpine and other musl distros using
+          # Ubuntu's musl-gcc.
           - target: linux-musl-x86_64
             triple: x86_64-unknown-linux-musl
             runner: ubuntu-24.04
@@ -123,9 +116,8 @@ jobs:
             triple: aarch64-unknown-linux-musl
             runner: ubuntu-24.04-arm
             container: ""
-          # MinGW-w64 before 12 (Ubuntu 24.04 has 11) lacks d3d12video.h,
-          # which ffmpeg-sys-next's bindings include: xtask/mingw-stubs has
-          # an empty one
+          # MinGW-w64 < 12 (Ubuntu 24.04 ships 11) lacks d3d12video.h, which
+          # ffmpeg-sys-next includes; xtask/mingw-stubs supplies an empty stub.
           - target: windows-x86_64
             triple: x86_64-pc-windows-gnu
             runner: ubuntu-24.04
@@ -141,8 +133,7 @@ jobs:
         run: |
           dnf install -y clang perl zip xz pkgconf-pkg-config
           if [ "$(uname -m)" = x86_64 ]; then dnf install -y nasm; fi
-          # dav1d's build tools, pinned like everything else a release is
-          # built with
+          # Pin dav1d build tools for reproducible releases.
           pipx install meson==1.12.1
           pipx install ninja==1.13.2
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
@@ -152,7 +143,7 @@ jobs:
       - name: Install build tools (Windows and musl)
         if: ${{ !matrix.container }}
         run: |
-          # a stalled download fails and is tried again, rather than hanging
+          # Retry stalled apt downloads instead of hanging.
           sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
           sudo apt-get update
           sudo apt-get install -y nasm meson ninja-build pkg-config clang libclang-dev zip
@@ -164,25 +155,22 @@ jobs:
       - run: |
           rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal
           rustup target add ${{ matrix.triple }}
-      # ffmpeg-sys-next packs the static libraries into its rlib, and
-      # `xtask ffmpeg` only makes cargo build it again in a run that builds
-      # them: a build cache from before a new ffmpeg recipe, beside a cache
-      # of the new libraries, would link the old ones
+      # Include ffmpeg.rs in the cache key: ffmpeg-sys-next embeds static libs
+      # in its rlib, so a stale Rust cache could otherwise link old ffmpeg
+      # libraries.
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: ${{ matrix.triple }}-${{ hashFiles('xtask/src/ffmpeg.rs') }}
 
-      # the archives of ffmpeg and its libraries alone: they are built in
-      # target/ffmpeg/build-<triple>
+      # Cache downloaded source tarballs only; builds happen in
+      # target/ffmpeg/build-<triple>, which is not cached.
       - uses: actions/cache@v6
         with:
           path: target/ffmpeg/sources
           key: ffmpeg-sources-${{ hashFiles('xtask/src/ffmpeg.rs') }}
-      # the libraries built, which `xtask ffmpeg` keeps when they were made
-      # from its recipe; the key changes with it, and with the manylinux
-      # image they were built in, by its digest, or the runner's release of
-      # Ubuntu. A tag's run only finds those main's runs saved, as one
-      # started by hand there
+      # Cache built ffmpeg libraries and licences, keyed by target, container
+      # digest or Ubuntu runner, and ffmpeg.rs. A tag run only finds caches
+      # saved on main (for example from a run started by hand there).
       - uses: actions/cache@v6
         with:
           path: |
@@ -192,7 +180,8 @@ jobs:
 
       - run: cargo xtask ffmpeg --target ${{ matrix.target }}
 
-      # with the settings of xtask/src/build.rs, which local-release shares
+      # Uses shared build settings from xtask/src/build.rs (also used by
+      # local-release).
       - name: Build tgradish with ffmpeg linked in
         run: cargo xtask build --target ${{ matrix.target }}
 
@@ -200,8 +189,8 @@ jobs:
         if: ${{ !matrix.container }}
         run: cargo xtask package --target ${{ matrix.target }}
 
-      # the system-ffmpeg build replaces the linked one, packaged first, also
-      # as a .deb and an .rpm
+      # Package the static-ffmpeg build (tarball, .deb, .rpm) before overwriting
+      # the binary with the system-ffmpeg build.
       - name: Package, then build and package without ffmpeg
         if: matrix.container
         run: |
@@ -220,7 +209,7 @@ jobs:
             target/release-artifacts/*.exe
             target/release-artifacts/*.sha256
 
-  # runs the Linux builds on a current Ubuntu, with and without ffmpeg
+  # Smoke-test both Linux glibc variants (built-in and system ffmpeg) on Ubuntu.
   test-linux:
     needs: build
     strategy:
@@ -241,13 +230,13 @@ jobs:
 
       - name: Convert with each build
         run: |
-          # a stalled download fails and is tried again, rather than hanging
+          # Retry stalled apt downloads instead of hanging.
           sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
           sudo apt-get update && sudo apt-get install -y ffmpeg
           cd artifacts
           for archive in tgradish-*.tar.gz; do tar -xzf "$archive"; done
           ffmpeg -v error -f lavfi -i testsrc2=s=320x240:d=4 -pix_fmt yuv420p input.mp4
-          # a 16 x 16 PNG: a red square in a transparent border
+          # 16x16 PNG: red square with transparent border.
           echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
           for bin in tgradish-*/tgradish; do
             echo "== $bin"
@@ -258,11 +247,11 @@ jobs:
             "$bin" convert input.png -o out.webp --overwrite
             "$bin" inspect out.webm out.tgs out.webp
           done
-          # the system-ffmpeg build really uses the system's
+          # Confirm the system-ffmpeg variant actually uses /usr/bin/ffmpeg.
           tgradish-*-system-ffmpeg/tgradish --json ffmpeg status | grep -q /usr/bin/ffmpeg
 
-  # runs the musl builds on Alpine: converting, and opening the GUI on
-  # virtual X11 and Wayland displays, drawn by Mesa's software renderer
+  # Smoke-test musl builds on Alpine: conversions plus launching the GUI under
+  # headless X11 (Xvfb) and Wayland (weston) with Mesa software rendering.
   test-musl:
     needs: build
     strategy:
@@ -281,8 +270,8 @@ jobs:
           name: release-${{ matrix.target }}
           path: artifacts
 
-      # in a container started here, as the runner's actions don't run in
-      # Alpine's
+      # Run Alpine inside Docker because GitHub Actions steps cannot run
+      # directly on musl.
       - name: Convert and open the GUI on Alpine
         run: |
           cat > artifacts/test.sh <<'EOF'
@@ -294,20 +283,22 @@ jobs:
           bin=$(echo "$PWD"/tgradish-*/tgradish)
           "$bin" --version
           "$bin" ffmpeg status
-          # the man pages and completions, which packaging leaves out of a
-          # musl archive where it can't run the build: a release's has them
+          # Verify man pages and completions are present: packaging omits them
+          # from a musl archive when it cannot run the binary, but release
+          # archives must include them.
           test -f "${bin%/tgradish}/man/tgradish.1.gz"
           test -f "${bin%/tgradish}/completions/tgradish.nu"
-          # a 16 x 16 PNG: a red square in a transparent border
+          # 16x16 PNG: red square with transparent border.
           echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
           "$bin" convert input.png -o still.webm --length 1 --preset fast
-          # VP9 with alpha in, which needs the libvpx decoder
+          # Decode VP9 with alpha to verify the libvpx decoder works.
           "$bin" convert still.webm -o out.webm --preset fast
           "$bin" convert input.png -o out.tgs
           "$bin" convert input.png -o out.webp
           "$bin" inspect out.webm out.tgs out.webp
           export XDG_RUNTIME_DIR=/tmp
-          # still open after a while: it found the system's libraries and drew
+          # Confirm the GUI stays alive for 10s (libraries loaded and window
+          # rendered).
           gui() {
             env "$1" "$bin" gui & pid=$!
             sleep 10
@@ -323,16 +314,16 @@ jobs:
           EOF
           docker run --rm -v "$PWD/artifacts:/test" -w /test alpine:latest sh test.sh
 
-  # installs the .deb and .rpm on the distributions they are for, which
-  # resolves their dependencies, and converts with what they installed
+  # Install the .deb and .rpm packages on their target distros (which resolves
+  # their dependencies) and run conversions with the installed binary.
   test-packages:
     needs: build
     strategy:
       fail-fast: false
       matrix:
         include:
-          # the oldest supported and the newest of each family, roughly;
-          # AlmaLinux 8 has glibc 2.28, the oldest the packages are for
+          # Cover roughly the oldest and newest supported releases per family
+          # (AlmaLinux 8 provides our minimum supported glibc 2.28).
           - { target: linux-x86_64, runner: ubuntu-24.04, image: "almalinux:8" }
           - { target: linux-x86_64, runner: ubuntu-24.04, image: "ubuntu:22.04" }
           - { target: linux-x86_64, runner: ubuntu-24.04, image: "ubuntu:24.04" }
@@ -352,7 +343,7 @@ jobs:
       - name: Install
         run: |
           if command -v apt-get >/dev/null; then
-            # a stalled download fails and is tried again, rather than hanging
+            # Retry stalled apt downloads instead of hanging.
             echo 'Acquire::Retries "3"; Acquire::http::Timeout "30"; Acquire::https::Timeout "30";' > /etc/apt/apt.conf.d/80-stalls
             apt-get update
             DEBIAN_FRONTEND=noninteractive apt-get install -y ./artifacts/*.deb
@@ -367,23 +358,23 @@ jobs:
           tgradish --version
           tgradish ffmpeg status
           test -f /usr/share/applications/tgradish.desktop
-          # a 16 x 16 PNG: a red square in a transparent border
+          # 16x16 PNG: red square with transparent border.
           echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
           tgradish convert input.png -o out.webm --length 1 --preset fast
           tgradish convert input.png -o out.tgs
           tgradish convert input.png -o out.webp
           tgradish inspect out.webm out.tgs out.webp
 
-  # builds each AUR package as makepkg would, from the archives just built
-  # and, for the source package, a git archive of this commit, then installs
-  # it and converts with it. x86-64 alone, the only Arch Linux image
+  # Build each AUR package with makepkg from the just-built archives (and a git
+  # archive of this commit for the source package), install it, and test
+  # conversions. Runs on x86-64 only (the only Arch Linux container image).
   test-aur:
     needs: build
     runs-on: ubuntu-24.04
     container: archlinux:base-devel
     timeout-minutes: 60
     steps:
-      # git first, so the checkout is a repository to archive
+      # Install git before checkout so git archive can package HEAD.
       - run: pacman -Syu --noconfirm git
 
       - uses: actions/checkout@v7
@@ -400,13 +391,14 @@ jobs:
           version=$(sed -n 's/^pkgver=//p' packaging/aur/tgradish/PKGBUILD)
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
           git archive --prefix="tgradish-$version/" -o /tmp/source.tar.gz HEAD
-          # makepkg won't run as root
+          # makepkg refuses to run as root.
           useradd -m builder
           for package in tgradish-bin tgradish-static-bin tgradish; do
             dir=/tmp/aur/$package
             mkdir -p "$dir"
             cp "packaging/aur/$package/PKGBUILD" "$dir"
-            # a file of the name a source downloads to is taken in its place
+            # Stage local archives under the filenames makepkg expects so it
+            # skips downloading.
             case $package in
               tgradish) cp /tmp/source.tar.gz "$dir/tgradish-$version.tar.gz" ;;
               tgradish-bin)
@@ -415,25 +407,23 @@ jobs:
                 cp artifacts/tgradish-linux-x86_64.tar.gz "$dir/$package-$version-x86_64.tar.gz" ;;
             esac
             chown -R builder "$dir"
-            # its dependencies, as root, since builder can't install them
+            # Install dependencies as root before running makepkg as builder.
             (cd "$dir" && runuser -u builder -- makepkg --printsrcinfo > .SRCINFO)
             pacman -S --noconfirm --needed $(sed -n 's/^\t\(make\)\?depends = //p' "$dir/.SRCINFO")
             (cd "$dir" && runuser -u builder -- makepkg --noconfirm)
             pacman -U --noconfirm "$dir"/*.pkg.tar.zst
             tgradish --version
             tgradish ffmpeg status
-            # a 16 x 16 PNG: a red square in a transparent border
+            # 16x16 PNG: red square with transparent border.
             echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > /tmp/input.png
             tgradish convert /tmp/input.png -o /tmp/out.tgs --overwrite
             tgradish convert /tmp/input.png -o /tmp/out.webm --length 1 --preset fast --overwrite
             pacman -R --noconfirm "$package"
           done
 
-      # the source package's check() runs the pure Rust crate's tests only:
-      # every crate's, ffmpeg's and the signals' among them, run here on
-      # Arch, in the tree makepkg built, as its builder, as the tests of
-      # unreadable files can't fail for root; every test binary, so that
-      # one failing hides none of the others'
+      # The PKGBUILD's check() runs only tgradish-tgs; run the full suite here
+      # as non-root `builder` (permission tests fail under root) with
+      # --no-fail-fast.
       - name: Run every crate's tests
         shell: bash
         run: |
@@ -444,7 +434,7 @@ jobs:
           runuser -u builder -- env TGRADISH_REQUIRE_FFMPEG=1 cargo test --locked --no-fail-fast \
             -p tgradish-tgs -p tgradish-core -p tgradish
 
-  # runs the Windows build on Windows
+  # Smoke-test the Windows build on Windows.
   test-windows:
     needs: build
     runs-on: windows-latest
@@ -455,8 +445,8 @@ jobs:
           name: release-windows-x86_64
           path: artifacts
 
-      # made here instead of with a downloaded ffmpeg, so the test needs
-      # nothing but the release
+      # Generate a test PNG with System.Drawing so this job has no external
+      # dependencies.
       - name: Draw a test image with alpha
         shell: powershell
         run: |
@@ -474,30 +464,31 @@ jobs:
           cd artifacts
           unzip -q tgradish-*.zip
           bin=$(ls tgradish-*/tgradish.exe)
-          # opens the GUI without a console when started from Explorer
+          # Verify the embedded manifest suppresses the console window when
+          # launched from Explorer.
           grep -q consoleAllocationPolicy "$bin"
           "$bin" ffmpeg status
           "$bin" convert input.png -o still.webm --length 1 --preset fast
-          # VP9 with alpha in, which needs the libvpx decoder
+          # Decode VP9 with alpha to verify the libvpx decoder works.
           "$bin" convert still.webm -o out.webm --preset fast
           "$bin" convert input.png -o out.tgs --preset fast
           "$bin" convert input.png -o out.webp
           "$bin" inspect out.webm out.tgs out.webp
-          # Windows paths and an output that already exists
+          # Verify Windows paths and refusal to overwrite an existing file.
           "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
-          # the executable published alone is the archive's, with ffmpeg's
-          # licence and where its sources are in it
+          # Verify standalone tgradish.exe matches the zip copy and embeds LGPL
+          # notices.
           cmp tgradish.exe "$bin"
-          # into a file, as grep -q stopping early would break the pipe
+          # Redirect to a file first so `grep -q` does not trigger a broken
+          # pipe.
           ./tgradish.exe licenses > licenses.txt
           grep -q "GNU LESSER GENERAL PUBLIC LICENSE" licenses.txt
           grep -q -- "-sources.tar, published with each tgradish release" licenses.txt
 
-  # gathers what the release holds: every build, and ffmpeg's sources. It
-  # runs every time, so a tag isn't the first time it does, and so only
-  # reads, as on a pull request it runs the pull request's code. A tag
-  # whose crates don't package drafts no release; on a pull request crates
-  # is skipped, which mustn't skip this too, as a skipped need would
+  # Gather all release builds and the LGPL ffmpeg sources. Runs on PRs too
+  # (read-only) so packaging is exercised before tagging. A tag whose crates
+  # fail to package drafts no release; on PRs `crates` is skipped, so use
+  # `!cancelled() && !failure()` to avoid skipping this job too.
   assemble:
     needs: [crates, build, test-linux, test-musl, test-packages, test-aur, test-windows]
     if: ${{ !cancelled() && !failure() }}
@@ -517,15 +508,14 @@ jobs:
           path: artifacts
           merge-multiple: true
 
-      # fails without the archive of ffmpeg's sources
+      # Fail if the ffmpeg source archive is missing.
       - name: Put ffmpeg's sources beside the builds
         run: |
           cp target/ffmpeg/ffmpeg-*-sources.tar artifacts/
           ls -l artifacts
 
-      # one list to check everything by, `sha256sum -c SHA256SUMS`, beside
-      # each file's own; written elsewhere first, as the list being written
-      # in the folder would be among the files listed
+      # Write a combined SHA256SUMS file alongside per-file .sha256 files.
+      # Write to $RUNNER_TEMP first so SHA256SUMS does not hash itself.
       - name: Sum every file in one list
         working-directory: artifacts
         run: |
@@ -535,7 +525,7 @@ jobs:
           cat SHA256SUMS
           sha256sum -c SHA256SUMS
 
-      # archives already, which compressing again only slows
+      # Disable re-compression since artifacts are already compressed.
       - uses: actions/upload-artifact@v7
         with:
           name: draft
@@ -543,8 +533,8 @@ jobs:
           compression-level: 0
           if-no-files-found: error
 
-      # the release's notes: CHANGELOG.md's section for Cargo.toml's
-      # version, which the tag is; fails where there is none
+      # Extract release notes from CHANGELOG.md for Cargo.toml's version (which
+      # matches the tag); fails if there is no section for that version.
       - name: Take the notes from the changelog
         run: |
           mkdir notes
@@ -556,8 +546,8 @@ jobs:
           path: notes/notes.md
           if-no-files-found: error
 
-  # drafts the release from what assemble gathered, on a tag pushed: the
-  # one job that may write to the repository, which runs none of its code
+  # Create a draft GitHub release on tag pushes. Isolated as the only job with
+  # contents:write and executes no repository code.
   publish:
     needs: assemble
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
@@ -575,9 +565,9 @@ jobs:
           name: notes
           path: notes
 
-      # the changelog's section, then what GitHub lists of the changes; a
-      # draft, which a person publishes. The run's summary links it and says
-      # what follows
+      # Combine the changelog section with GitHub's generated change list into
+      # a draft release for a person to publish. The run summary links the
+      # draft and lists the remaining release steps.
       - name: Draft the release
         env:
           GH_TOKEN: ${{ github.token }}

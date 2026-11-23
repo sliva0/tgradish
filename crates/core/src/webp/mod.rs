@@ -1,16 +1,17 @@
-//! Static stickers and emoji: one frame of a video, or a picture, as a
-//! WebP, which @Stickers takes for its static sets as it takes PNG:
-//! lossless where that fits the size limit, otherwise lossy at the best
-//! quality that does.
+//! Static WebP stickers and custom emoji: encodes an image or single video
+//! frame as WebP (which `@Stickers` accepts for static sets alongside PNG),
+//! losslessly when it fits Telegram's 512 KiB limit, or lossy at the highest
+//! quality that fits.
 //!
-//! The picture is planned like a WebM sticker's, from the options a still
-//! picture has: target, crop, resize, scaling and integer scale, `start`,
-//! where the frame is, and an Aseprite file's tag and layers.
+//! Uses the still-image subset ([`PICTURE_OPTIONS`]) of
+//! [`crate::webm::Options`]
+//! (target, crop, resize, scaling, integer scale, start timestamp, Aseprite
+//! tag/layers, title and watermark).
 
 mod encode;
 mod inspect;
 
-/// An image takes WebM's options, of which it uses [`PICTURE_OPTIONS`].
+/// WebP reuses [`crate::webm::Options`], honouring [`PICTURE_OPTIONS`].
 pub use crate::webm::Options;
 pub use encode::Encoding;
 #[cfg(test)]
@@ -31,41 +32,41 @@ use crate::presets::Format;
 use crate::telegram;
 use crate::webm::{self, Plan};
 
-/// A picture to make.
+/// Parameters for a static WebP conversion.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
-    /// What to make it of.
+    /// Input file or image sequence.
     pub input: Input,
-    /// Where the result goes: by default [`Input::default_output`], as
-    /// [`Request::output`] gives it.
+    /// Destination path; defaults to [`Input::default_output`] (see
+    /// [`Request::output`]).
     pub output: Option<PathBuf>,
-    /// How to make it: WebM's options, of which a picture uses some.
+    /// Conversion options (subset [`PICTURE_OPTIONS`] applies).
     pub options: Options,
-    /// Replace the output if it exists.
+    /// Replace an existing output file if present.
     pub overwrite: bool,
-    /// How many threads ffmpeg reads the frame in; the picture is
-    /// encoded in one.
+    /// Maximum threads for ffmpeg frame decoding (`libwebp` encodes
+    /// single-threaded).
     pub threads: Threads,
 }
 
 impl Request {
-    /// A picture of `input` with the default options, beside it, not
-    /// replacing one there.
+    /// Creates a request with default options writing beside `input`, without
+    /// overwriting existing files.
     pub fn new(input: Input) -> Self {
         let threads = Threads::Auto;
         Self { input, output: None, options: Options::default(), overwrite: false, threads }
     }
 
-    /// Where the result goes, as asked or by default.
+    /// Returns the explicit output path, or the default path beside the input.
     pub fn output(&self) -> PathBuf {
         let target = self.options.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Webp, target))
     }
 }
 
-/// The options a still picture has, of WebM's: what to make, what is read
-/// and where, how it is squared and scaled, and its metadata. The rest are
-/// about time and encoding video, which a picture has none of.
+/// Keys of [`Options`] that a still picture has (what to make, what is read
+/// and where, how it is fitted and scaled, and metadata); the rest concern
+/// time and video encoding.
 pub const PICTURE_OPTIONS: [&str; 11] = [
     "target",
     "tag",
@@ -80,17 +81,18 @@ pub const PICTURE_OPTIONS: [&str; 11] = [
     "watermark",
 ];
 
-/// The options of `options` a still picture has, [`PICTURE_OPTIONS`].
+/// Returns a copy of `options` keeping only [`PICTURE_OPTIONS`].
 pub fn picture_options(options: &Options) -> Options {
     let mut table = toml::Table::try_from(options).expect("options serialise to a table");
     table.retain(|key, _| PICTURE_OPTIONS.contains(&key));
     table.try_into().expect("options read back with fewer set")
 }
 
-/// Where to start reading for the frame that shows at `time`, or that
-/// starts within [`webm::edge_leeway`] after it, as a time written with a
-/// few digits is meant. `starts` are where frames start, in order; without
-/// them, frames come every `1 / fps` seconds.
+/// Computes the seek timestamp for the frame displayed at `time` (snapping to
+/// frames starting within [`webm::edge_leeway`], and seeking slightly early via
+/// [`webm::read_from`] so ffmpeg does not skip past the target frame). Uses
+/// explicit packet `starts` when available, or assumes uniform `1 / fps`
+/// spacing.
 pub fn frame_start(time: f64, starts: &[f64], fps: f64) -> f64 {
     let (start, previous) = if starts.is_empty() {
         let nearest = (time * fps).round();
@@ -107,17 +109,17 @@ pub fn frame_start(time: f64, starts: &[f64], fps: f64) -> f64 {
     if start <= 0.0 { 0.0 } else { webm::read_from(start, previous) }
 }
 
-/// Plans the picture: its frame, a sticker's or emoji's size, and the
-/// output, `.webp` unless `request` names one. `starts` are where the
-/// input's frames start, when they are known.
+/// Plans a static WebP conversion (resolving frame seek time, dimensions and
+/// `.webp` output path). `starts` supplies packet timestamps when known (from
+/// the caller's preview or probe; pass `&[]` to use `source.fps`).
 pub fn plan(
     request: &Request,
     source: crate::ffmpeg::Probe,
     starts: &[f64],
 ) -> Result<(Plan, Vec<String>)> {
     let mut options = picture_options(&request.options);
-    // the frame that shows at `start`, as previews show it; before the
-    // start or past the end, planning says so
+    // Resolve the seek timestamp for the frame displayed at `start` (matching
+    // preview); out-of-range timestamps are rejected later by `webm::plan_for`.
     if let (Some(start), Some(fps)) = (options.start, source.fps.filter(|_| !source.still_image))
         && start >= 0.0
         && source.duration.is_none_or(|duration| start < duration)
@@ -133,12 +135,12 @@ pub fn plan(
         threads: request.threads,
     };
     let (mut plan, warnings) = webm::plan_for(Format::Webp, &request, source)?;
-    // one frame
+    // Single frame duration.
     plan.length = 1.0 / plan.fps;
     Ok((plan, warnings))
 }
 
-/// Makes a static sticker or emoji from the frame at `start`.
+/// Converts a single frame at `start` into a static WebP sticker or emoji.
 pub fn convert(
     backend: &Backend,
     request: &Request,
@@ -146,16 +148,17 @@ pub fn convert(
     on_event: &mut dyn FnMut(Event),
 ) -> Result<Outcome> {
     request.input.check_output(&request.output(), request.overwrite)?;
-    // pixel art, drawn for ffmpeg with what a picture has: a sequence's
-    // frames timed as by default, as frames are picked by time
+    // Render pixel-art inputs for ffmpeg using picture-only options (keeping
+    // default frame timing for sequences because frame selection is
+    // time-based).
     let drawing = picture_options(&request.options);
     let mut readable = crate::drawn::readable(&request.input, &drawing, cancel)?;
-    // ffmpeg reads them from the file: not kept while it does
+    // Drop the in-memory raster frames since ffmpeg reads from disk.
     drop(readable.take_drawn());
     let input = readable.path();
     let source = readable.probe(backend, cancel)?;
-    // where frames start, to find the one that shows at a time; without
-    // them, frames count as coming evenly, as before they were read
+    // Probe packet start timestamps to locate the frame shown at `start`,
+    // falling back to uniform frame spacing if unavailable.
     let starts = match request.options.start {
         Some(_) if !source.still_image => match backend.frame_starts(input, &source, cancel) {
             Err(Error::Cancelled) => return Err(Error::Cancelled),
@@ -187,7 +190,8 @@ pub fn convert(
         None => webp,
     };
     let (webp, encoding) = fit(&rgba, plan.width, plan.height, finish)?;
-    // encoding can't stop part of the way, but a stopped one isn't kept
+    // WebP encoding cannot be interrupted mid-frame, so check cancellation
+    // before writing the output file.
     cancel.check()?;
     crate::fsutil::write_output(&plan.output, &webp, request.overwrite)?;
     let bytes = webp.len() as u64;
@@ -213,12 +217,12 @@ mod tests {
     #[test]
     fn finds_where_to_read_for_a_frame() {
         let close = |found: f64, expected: f64| (found - expected).abs() < 1e-9;
-        // evenly, 10 a second: a millisecond before the frame showing
+        // Uniform 10 fps: seeks 1 ms before the start of the active frame.
         assert_eq!(frame_start(0.0, &[], 10.0), 0.0);
         assert_eq!(frame_start(0.05, &[], 10.0), 0.0);
         assert!(close(frame_start(0.25, &[], 10.0), 0.199));
-        // on a frame's start, which float error or few digits leave a
-        // hair short of
+        // Snaps to a frame boundary when float rounding or truncated decimals
+        // land just before it.
         assert!(close(frame_start(0.3 - 1e-9, &[], 10.0), 0.299));
         assert!(close(frame_start(0.29996, &[], 10.0), 0.299));
         assert!(close(frame_start(0.2998, &[], 10.0), 0.199));
@@ -226,15 +230,15 @@ mod tests {
         assert!(close(frame_start(0.33333, &thirds, 3.0), 1.0 / 3.0 - 1e-3));
         assert!(close(frame_start(0.33333, &[], 3.0), 1.0 / 3.0 - 1e-3));
         assert!(close(frame_start(0.3332, &thirds, 3.0), 0.0));
-        // where frames start: the first, and short and long frames
+        // Explicit packet starts: first frame, very short gap, and long frame.
         let starts = [0.0, 0.1, 0.1002, 0.7];
         assert_eq!(frame_start(0.05, &starts, 10.0), 0.0);
         assert!(close(frame_start(0.1, &starts, 10.0), 0.099));
-        // a quarter of a gap shorter than four milliseconds
+        // Quarter of a gap shorter than 4 ms.
         assert!(close(frame_start(0.5, &starts, 10.0), 0.10015));
         assert!(close(frame_start(9.0, &starts, 10.0), 0.699));
-        // the first of the frames known is read from the start, unlike
-        // the second of frames counted evenly
+        // The first known packet always seeks from 0.0, whereas uniform fps
+        // seeks to the second frame interval at 0.04 s.
         assert_eq!(frame_start(0.05, &[0.04], 25.0), 0.0);
         assert_eq!(frame_start(0.05, &[], 25.0), 0.04 - 1e-3);
     }

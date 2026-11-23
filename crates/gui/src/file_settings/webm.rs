@@ -1,6 +1,6 @@
-//! Size and quality for WebM: what fitting changes to get under the size
-//! limit, and the values the encoder works from. Most of it only matters
-//! for some ways of fitting, so the rest is greyed out rather than hidden.
+//! WebM size and quality settings: fitting mode, search range, attempts, CRF,
+//! encoder effort, lossless mode, and bitrate. Options that do not apply to the
+//! active fitting mode are disabled rather than hidden.
 
 use eframe::egui;
 use tgradish_core::options::{Effort, Fit, FitUnit, Range};
@@ -45,12 +45,10 @@ pub(crate) fn fit_of(choices: &Choices, presets: &Presets, config: &Config) -> F
     base.merged(&choices.webm).fit_or_default()
 }
 
-/// Drops the item's own range to search once fitting goes from `before`
-/// to `after`, a way that counts in another unit: a range of bitrates is
-/// no range of qualities, and kept it would be cut to the ends of the new
-/// unit's, as 63 to 63. Fitting then searches its own for the new way. A
-/// preset's range under the item's own way of fitting core drops itself,
-/// as it merges them.
+/// Clears `options.fit_range` when switching from `before` to `after` changes
+/// the fitting unit (e.g. from bitrates to CRF), so an old bitrate range is not
+/// clamped into a degenerate CRF range like `63..=63`. Preset ranges with a
+/// mismatched unit are dropped by `tgradish-core` during option merging.
 pub(crate) fn follow_fit(options: &mut Options, before: Fit, after: Fit) {
     if before.unit() != after.unit() {
         options.fit_range = None;

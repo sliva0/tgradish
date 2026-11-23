@@ -1,13 +1,13 @@
-//! Bringing the window forward on Wayland, for files another GUI handed
-//! over.
+//! Wayland window activation via `xdg_activation_v1` when a second GUI instance
+//! hands over files.
 //!
-//! A Wayland window comes forward only with a token from the compositor,
-//! which winit spends on a window as it opens and not on one already open.
-//! This asks with the xdg-activation protocol itself, on winit's
-//! connection: with the token the launcher gave the GUI started second,
-//! or without one, a token of the window's own, which compositors take as
-//! the window asking for attention. It works from the listener's thread,
-//! as a minimised window draws no frames until it is shown again.
+//! Wayland compositors only raise a window when presented with an activation
+//! token, and winit only consumes the startup token when creating a new
+//! window. This module binds `xdg_activation_v1` directly on winit's Wayland
+//! connection and activates the surface using either the token forwarded by
+//! the second instance or a self-minted token (which compositors treat as an
+//! attention request). It runs on the instance listener thread because a
+//! minimised window renders no egui frames until restored.
 
 use raw_window_handle::{HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle};
 use wayland_client::backend::{Backend, ObjectId};
@@ -20,7 +20,8 @@ use wayland_protocols::xdg::activation::v1::client::xdg_activation_token_v1::{
 };
 use wayland_protocols::xdg::activation::v1::client::xdg_activation_v1::XdgActivationV1;
 
-/// Brings the window forward. It must be let go of before the window is.
+/// Wayland `xdg_activation_v1` client handle. Must be dropped before the
+/// window is destroyed.
 pub(crate) struct Raiser {
     connection: Connection,
     activation: XdgActivationV1,
@@ -29,8 +30,8 @@ pub(crate) struct Raiser {
 }
 
 impl Raiser {
-    /// For `window`, where it is on Wayland and the compositor has the
-    /// protocol.
+    /// Creates a [`Raiser`] for `window` if running on Wayland and the
+    /// compositor advertises `xdg_activation_v1`.
     pub(crate) fn new(window: &winit::window::Window) -> Option<Raiser> {
         let RawDisplayHandle::Wayland(display) = window.display_handle().ok()?.as_raw() else {
             return None;
@@ -38,9 +39,8 @@ impl Raiser {
         let RawWindowHandle::Wayland(handle) = window.window_handle().ok()?.as_raw() else {
             return None;
         };
-        // SAFETY: winit keeps its display open as long as the window is,
-        // and the window's surface with it, which the raiser is let go of
-        // before
+        // SAFETY: winit keeps the display and surface alive for the lifetime
+        // of the window, and Raiser is dropped before the window closes.
         #[allow(unsafe_code)]
         let (backend, surface) = unsafe {
             let backend = Backend::from_foreign_display(display.display.as_ptr().cast());
@@ -56,8 +56,8 @@ impl Raiser {
         Some(Raiser { connection, activation, surface, queue })
     }
 
-    /// Brings the window forward with `token`, or without one, asks for
-    /// attention with a token of its own: whether it could ask.
+    /// Activates the window using `token` (or a self-minted token if `None`).
+    /// Returns true if the request was flushed to the compositor.
     pub(crate) fn raise(&mut self, token: Option<&str>) -> bool {
         let token = match token {
             Some(token) => token.to_owned(),
@@ -70,7 +70,9 @@ impl Raiser {
         self.connection.flush().is_ok()
     }
 
-    /// A token for the window, which isn't one the user's input asked for.
+    /// Requests a fresh activation token from the compositor for our surface
+    /// (one no user input asked for, so compositors treat it as an attention
+    /// request).
     fn own_token(&mut self) -> Option<String> {
         let handle = self.queue.handle();
         let request = self.activation.get_activation_token(&handle, ());

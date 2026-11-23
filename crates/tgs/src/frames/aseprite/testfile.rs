@@ -1,5 +1,4 @@
-//! Aseprite files written byte by byte, for the tests of every part of
-//! reading them.
+//! Synthetic Aseprite binary builders for decoder unit tests.
 
 use std::io::Write;
 

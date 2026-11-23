@@ -1,8 +1,5 @@
-//! What a conversion converts, and where its result goes unless it is
-//! told: [`Input`], one file or the pictures of one animation, named for
-//! its result by [`Input::default_output`]. Which files tgradish takes as
-//! input, by their extension, is here too, so the GUI's dialogues,
-//! folders of frames and watched folders agree.
+//! Conversion inputs, default output naming, file-kind sniffing, and shared
+//! supported-extension lists used by the GUI, image sequences and watch mode.
 
 use std::path::{Path, PathBuf};
 
@@ -10,20 +7,20 @@ use crate::error::{Error, FileAction, Result};
 use crate::presets::Format;
 use crate::telegram::Target;
 
-/// What a conversion converts.
+/// Input to a conversion.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Input {
-    /// A video, a picture, an animation or an Aseprite file. A folder is
-    /// refused: its pictures are converted as a [`Input::Sequence`].
+    /// A single video, image, animation or Aseprite file. Directories are
+    /// rejected (pass them via [`Input::Sequence`]).
     File(PathBuf),
-    /// The frames of one animation in several files: pictures, or folders
-    /// of them, played in name order with numbers counted as numbers.
+    /// Image files, or directories of them, as the frames of one animation,
+    /// ordered naturally by name (`2.png` before `10.png`).
     Sequence(Vec<PathBuf>),
 }
 
 impl Input {
-    /// The file, or the first of the sequence's files and folders, as it
-    /// was given: what names the result. Empty for a sequence of nothing.
+    /// Returns the input file, or the first entry of a sequence (empty path if
+    /// the sequence is empty). Used to derive default output filenames.
     pub fn first(&self) -> &Path {
         match self {
             Input::File(path) => path,
@@ -31,28 +28,30 @@ impl Input {
         }
     }
 
-    /// Where the result goes unless a conversion is told: beside the input,
-    /// named after it, with `.sticker` or `.emoji` and the format's
-    /// extension, as `pig.mp4` makes `pig.sticker.webm`. A file is named
-    /// without its extension, a folder by its whole name, and a sequence
-    /// after its first file or folder, so a folder of frames and a
-    /// sequence of the frames in it are named alike only when given as the
-    /// folder: `walk/` makes `walk.sticker.tgs` beside it, `walk/1.png
-    /// walk/2.png` makes `walk/1.sticker.tgs`. A result, by its name, isn't
-    /// given `.sticker` or `.emoji` again: `pig.sticker.webm` makes
-    /// `pig.sticker.webp`, but `pig.sticker.sticker.webm` of itself, which
-    /// would otherwise be its own name. Only a result's name, as
-    /// [`is_result_name`] tells it: `pig.sticker.mp4` makes
-    /// `pig.sticker.sticker.webm`, apart from `pig.mp4`'s. Front-ends
-    /// writing results into a folder of their own keep the name.
+    /// Computes the default output path beside the input:
+    /// `<stem>.<target>.<ext>`
+    /// (for example `pig.mp4` -> `pig.sticker.webm`).
+    ///
+    /// - Files drop their extension; directories keep their full name.
+    /// - Sequences take the name of their first entry (`walk/` ->
+    ///   `walk.sticker.tgs`, `walk/1.png walk/2.png` -> `walk/1.sticker.tgs`).
+    /// - Converting an existing output (matching [`is_result_name`]) to a
+    ///   different format keeps one suffix (`pig.sticker.webm` ->
+    ///   `pig.sticker.webp`), while converting to the same format adds another
+    ///   (`pig.sticker.sticker.webm`) to avoid overwriting itself.
+    /// - Non-result inputs ending in `.sticker` or `.emoji` (such as
+    ///   `pig.sticker.mp4`) still get the suffix (`pig.sticker.sticker.webm`)
+    ///   so their output stays distinct from `pig.mp4`'s.
+    ///
+    /// Front-ends that write into their own output folder keep this file name.
     pub fn default_output(&self, format: Format, target: Target) -> PathBuf {
         let first = self.first();
         let stem = first.file_stem().and_then(|stem| stem.to_str()).map(str::to_lowercase);
         let named = !first.is_dir()
             && is_result_name(first)
             && stem.is_some_and(|stem| stem.ends_with(&format!(".{}", target.name())));
-        // its own name, whatever the extension's case, which names the
-        // same file where names ignore case
+        // Case-insensitive extension check avoids colliding with the input on
+        // case-insensitive filesystems.
         let itself = extension(first) == format.extension();
         let suffix = match named && !itself {
             true => format.extension().to_owned(),
@@ -61,7 +60,8 @@ impl Input {
         crate::fsutil::beside(first, &suffix)
     }
 
-    /// Fails with [`Error::IsFolder`] for a folder given as a file.
+    /// Returns [`Error::IsFolder`] if this is a single-file input pointing to
+    /// a directory.
     pub(crate) fn refuse_folder(&self) -> Result<()> {
         match self {
             Input::File(path) if path.is_dir() => Err(Error::IsFolder(path.clone())),
@@ -69,8 +69,8 @@ impl Input {
         }
     }
 
-    /// The files read: the file, or the sequence's pictures in the order
-    /// they play, its folders' found in them.
+    /// Resolves all input files in playback order (expanding sequence
+    /// directories).
     pub(crate) fn files(&self) -> Result<Vec<PathBuf>> {
         self.refuse_folder()?;
         match self {
@@ -79,14 +79,13 @@ impl Input {
         }
     }
 
-    /// Fails before anything is read when writing `output` would lose a
-    /// file: when it is one of the files read, even through `..` or a
-    /// link, or, unless `overwrite`, when it exists; or when it couldn't
-    /// be written at all, its folder being read-only. Every conversion
-    /// asks this first.
+    /// Runs pre-flight checks before reading: ensures all inputs exist,
+    /// rejects overwriting any input (resolving symlinks and `..`), rejects
+    /// existing outputs when `overwrite` is false, and checks that the output
+    /// directory is writable.
     pub(crate) fn check_output(&self, output: &Path, overwrite: bool) -> Result<()> {
         let files = self.files()?;
-        // as each reader would say, ffmpeg in its own words otherwise
+        // Report missing files consistently rather than using ffmpeg's wording.
         if let Some(missing) = files.iter().find(|file| !file.exists()) {
             return Err(Error::NoSuchFile(missing.clone()));
         }
@@ -100,8 +99,9 @@ impl Input {
     }
 }
 
-/// Whether `output` is the same file as `input`, following `..` and links;
-/// where either doesn't exist, whether they are the same path.
+/// Returns true if `input` and `output` refer to the same file (following
+/// symlinks and `..`, falling back to path equality when either does not
+/// exist).
 fn same_file(input: &Path, output: &Path) -> bool {
     match (std::fs::canonicalize(input), std::fs::canonicalize(output)) {
         (Ok(input), Ok(output)) => input == output,
@@ -109,15 +109,14 @@ fn same_file(input: &Path, output: &Path) -> bool {
     }
 }
 
-/// What [`Input::default_output`] puts after a result's name, as
-/// `sticker.webm`.
+/// Builds the default output suffix, e.g. `"sticker.webm"`.
 fn result_suffix(format: Format, target: Target) -> String {
     format!("{}.{}", target.name(), format.extension())
 }
 
-/// Whether `path` is named as a result is by default, as
-/// `pig.sticker.webm` or `walk.emoji.tgs`, of any format and target: what
-/// a watched folder fills with, which isn't converted again.
+/// Returns true if `path` matches tgradish's default output naming
+/// (`*.sticker.{webm,webp,tgs}` or `*.emoji.{webm,webp,tgs}`). Used by watch
+/// mode to avoid re-converting outputs.
 pub fn is_result_name(path: &Path) -> bool {
     let Some(name) = path.file_name().and_then(|name| name.to_str()) else { return false };
     let name = name.to_lowercase();
@@ -129,42 +128,41 @@ pub fn is_result_name(path: &Path) -> bool {
     })
 }
 
-/// What a file is, as tgradish tells kinds of file apart: what results
-/// are for inspecting, and what reads an input.
+/// Detected file category used to pick a reader or inspector.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum FileKind {
-    /// WebM, or other Matroska: a video sticker, or a video.
+    /// WebM or Matroska container.
     Webm,
-    /// A WebP picture, still or animated.
+    /// Static or animated WebP image.
     Webp {
-        /// Whether its extended header says it is animated.
+        /// True if the `VP8X` extended header sets the animation flag.
         animated: bool,
     },
-    /// A `.tgs` sticker: gzip, or Lottie JSON named `.tgs`.
+    /// `.tgs` sticker (gzipped or plain Lottie JSON named `.tgs`).
     Tgs,
-    /// An Aseprite file.
+    /// Aseprite sprite file.
     Aseprite,
-    /// A picture or animation both ffmpeg and the pixel art reader read:
-    /// PNG and APNG, GIF, JPEG or BMP.
+    /// Image or animation supported by both ffmpeg and the pixel-art reader
+    /// (PNG/APNG, GIF, JPEG, BMP).
     Picture,
-    /// Anything else, which only ffmpeg might read: other videos, TIFF.
+    /// Any other format that only ffmpeg might read (such as MP4, MOV, TIFF).
     Other,
 }
 
 impl FileKind {
-    /// Whether tgradish's own pixel art reader reads it, as `.tgs`
-    /// stickers are made of it; the rest are read through ffmpeg.
+    /// Returns true if the built-in pixel-art reader can decode this kind
+    /// without ffmpeg.
     pub fn reads_as_art(self) -> bool {
         matches!(self, FileKind::Webp { .. } | FileKind::Aseprite | FileKind::Picture)
     }
 
-    /// The kind of a file starting with `start`, if they tell.
+    /// Detects the file kind from leading magic bytes.
     fn of_start(start: &[u8]) -> Option<FileKind> {
         use tgradish_tgs::frames::Format;
         Some(match Format::detect(start) {
             Some(Format::WebP) => {
-                // the extended header's animation flag
+                // Check the animation bit in the VP8X extended header.
                 let animated = start.get(12..16) == Some(b"VP8X")
                     && start.get(20).is_some_and(|flags| flags & 0x02 != 0);
                 FileKind::Webp { animated }
@@ -177,9 +175,9 @@ impl FileKind {
         })
     }
 
-    /// The kind a file named `path` is by its extension, as [`sniff`]
-    /// takes it where the content tells nothing: what a file is taken
-    /// for until it can be read, as the GUI does.
+    /// Guesses the file kind from its extension alone (used as a fallback when
+    /// content is unreadable or lacks magic bytes; also what the GUI assumes
+    /// until the file can be read).
     pub fn of_name(path: &Path) -> FileKind {
         match extension(path).as_str() {
             "webm" | "mkv" => FileKind::Webm,
@@ -192,15 +190,14 @@ impl FileKind {
     }
 }
 
-/// What the file at `path` is: by its first bytes, or where they tell
-/// nothing, as of plain Lottie JSON, or the file can't be read, by its
-/// extension.
+/// Detects the kind of file at `path` from its magic bytes, falling back to
+/// its extension if magic bytes are inconclusive or the file cannot be read.
 pub fn sniff(path: &Path) -> FileKind {
     sniff_readable(path).unwrap_or_else(|_| FileKind::of_name(path))
 }
 
-/// [`sniff`] of a file that must be readable: one that can't be opened is
-/// [`Error::Unreadable`].
+/// Like [`sniff`], but returns [`Error::NoSuchFile`] or [`Error::Unreadable`]
+/// if the file cannot be opened.
 pub(crate) fn sniff_readable(path: &Path) -> Result<FileKind> {
     let mut start = Vec::with_capacity(START_BYTES as usize);
     std::fs::File::open(path)
@@ -211,30 +208,29 @@ pub(crate) fn sniff_readable(path: &Path) -> Result<FileKind> {
     Ok(FileKind::of_start(&start).unwrap_or_else(|| FileKind::of_name(path)))
 }
 
-/// How much of a file [`sniff`] reads: enough for a WebP's extended
-/// header.
+/// Number of leading bytes read by [`sniff`] (enough to cover a WebP `VP8X`
+/// header).
 const START_BYTES: u64 = 32;
 
-/// Videos, and TIFF pictures, which only ffmpeg reads: for any sticker,
-/// animated ones from the frames ffmpeg reads.
+/// Video and TIFF extensions decoded only by ffmpeg.
 pub const VIDEOS: &[&str] =
     &["mp4", "m4v", "mov", "mkv", "webm", "avi", "flv", "ts", "mts", "ogv", "tif", "tiff"];
 
-/// Pictures and animations both ffmpeg and the pixel art reader read: for
-/// any sticker.
+/// Image and animation extensions decoded by both ffmpeg and the pixel-art
+/// reader.
 pub const IMAGES: &[&str] = &["png", "apng", "gif", "webp", "jpg", "jpeg", "bmp"];
 
-/// Aseprite files, which only the pixel art reader reads: for any sticker,
-/// drawn for ffmpeg for video and image ones.
+/// Aseprite extensions decoded by the pixel-art reader (and rendered to PNG
+/// for ffmpeg).
 pub const ASEPRITE: &[&str] = &["ase", "aseprite"];
 
-/// The extension of `path`, in lower case; empty without one.
+/// Returns the lowercase extension of `path`, or an empty string if none.
 pub fn extension(path: &Path) -> String {
     path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()
 }
 
-/// Whether `path` can be a frame of an animation made of several files: a
-/// picture the pixel art reader reads.
+/// Returns true if `path` has an image or Aseprite extension usable as a
+/// sequence frame.
 pub fn is_frame(path: &Path) -> bool {
     let extension = extension(path);
     IMAGES.contains(&extension.as_str()) || ASEPRITE.contains(&extension.as_str())

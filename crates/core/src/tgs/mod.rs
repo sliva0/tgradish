@@ -1,8 +1,7 @@
-//! Animated stickers (`.tgs`): options and the reading and
-//! writing of files around `tgradish-tgs`, which works on frames in
-//! memory only. Pixel art is read by tgradish itself; videos, read
-//! through ffmpeg, are taken as pixel art too, their frames at the rate
-//! a sticker can play. Previews of what was made are drawn here as well.
+//! Animated vector stickers (`.tgs`): file I/O, option resolution, preview
+//! rendering and conversion wrapping `tgradish-tgs` (which operates in memory).
+//! Pixel art is decoded directly; videos are read via ffmpeg at sticker frame
+//! rates and treated as pixel art.
 
 mod inspect;
 mod options;
@@ -33,47 +32,47 @@ use crate::options::Resize;
 use crate::presets::Format;
 use crate::telegram;
 
-/// Frame rate of still images, sprite sheets and image sequences unless
-/// `fps` says otherwise.
+/// Default frame rate for still images, sprite sheets and image sequences when
+/// `fps` is unset.
 pub const DEFAULT_FPS: f64 = 12.0;
 
-/// Largest `.tgs` Telegram accepts, in bytes.
+/// Maximum `.tgs` file size accepted by Telegram, in bytes.
 pub const MAX_BYTES: u64 = tgradish_tgs::limits::telegram::MAX_BYTES as u64;
 
-/// A sticker to make.
+/// Parameters for a `.tgs` conversion.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
-    /// What to make it of.
+    /// Input file or image sequence.
     pub input: Input,
-    /// Where the result goes: by default [`Input::default_output`], as
-    /// [`Request::output`] gives it.
+    /// Destination path; defaults to [`Input::default_output`] (see
+    /// [`Request::output`]).
     pub output: Option<PathBuf>,
-    /// How to make it.
+    /// `.tgs` conversion options.
     pub options: Options,
-    /// Replace the output if it exists.
+    /// Replace an existing output file if present.
     pub overwrite: bool,
-    /// How many threads it uses: ffmpeg reading a video, and fitting.
+    /// Maximum threads used for ffmpeg video decoding and `.tgs` fitting.
     pub threads: Threads,
 }
 
 impl Request {
-    /// A sticker of `input` with the default options, beside it, not
-    /// replacing one there.
+    /// Creates a request with default options writing beside `input`, without
+    /// overwriting existing files.
     pub fn new(input: Input) -> Self {
         let threads = Threads::Auto;
         Self { input, output: None, options: Options::default(), overwrite: false, threads }
     }
 
-    /// Where the result goes, as asked or by default.
+    /// Returns the explicit output path, or the default path beside the input.
     pub fn output(&self) -> PathBuf {
         let target = self.options.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Tgs, target))
     }
 }
 
-/// Converts pixel art into a `.tgs` sticker. `backend` is ffmpeg, which
-/// only a video needs, as [`needs_ffmpeg`] tells: pixel art is read
-/// without it.
+/// Converts pixel art or video into a `.tgs` sticker. `backend` is only needed
+/// for video inputs (see [`needs_ffmpeg`]); pixel art is decoded without
+/// ffmpeg.
 pub fn convert(
     backend: Option<&Backend>,
     request: &Request,
@@ -94,8 +93,8 @@ pub fn convert(
         };
         if width != height {
             let reason = format!(
-                "contain keeps the shape of the part used, {width}×{height}, and TGS stickers \
-                 are square: crop it to a square, or use pad, crop or stretch"
+                "contain keeps the {width}×{height} aspect ratio, but TGS stickers must be \
+                 square; crop to a square or use pad, crop or stretch"
             );
             return Err(Error::invalid("resize", reason));
         }

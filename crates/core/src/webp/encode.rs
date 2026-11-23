@@ -29,7 +29,7 @@ pub(crate) fn encode(
         let mut config = MaybeUninit::<webp::WebPConfig>::zeroed();
         let preset = webp::WebPPreset::WEBP_PRESET_DEFAULT;
         if webp::WebPConfigInitInternal(config.as_mut_ptr(), preset, 100.0, abi) == 0 {
-            return Err(failed("libwebp's version doesn't match"));
+            return Err(failed("libwebp ABI version mismatch"));
         }
         let mut config = config.assume_init();
         match quality {
@@ -43,11 +43,11 @@ pub(crate) fn encode(
             }
         }
         if webp::WebPValidateConfig(&config) == 0 {
-            return Err(failed("invalid settings"));
+            return Err(failed("invalid libwebp encoder settings"));
         }
         let mut picture = MaybeUninit::<webp::WebPPicture>::zeroed();
         if webp::WebPPictureInitInternal(picture.as_mut_ptr(), abi) == 0 {
-            return Err(failed("libwebp's version doesn't match"));
+            return Err(failed("libwebp ABI version mismatch"));
         }
         let mut picture = picture.assume_init();
         picture.use_argb = i32::from(quality.is_none());
@@ -68,7 +68,7 @@ pub(crate) fn encode(
         };
         webp::WebPMemoryWriterClear(&mut writer);
         if bytes.is_empty() {
-            return Err(failed("libwebp couldn't encode the picture"));
+            return Err(failed("libwebp failed to encode image"));
         }
         Ok(bytes)
     }
@@ -78,23 +78,23 @@ pub(crate) fn encode(
 /// fraction of 9's time.
 const LOSSLESS_EFFORT: i32 = 6;
 
-/// How a picture was made to fit the size limit.
+/// WebP encoding mode chosen to fit within Telegram's size limit.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Encoding {
-    /// Lossless, which fitted.
+    /// Lossless, which fitted the 512 KiB limit.
     Lossless,
-    /// Lossy at this quality, from 0 to 100, as lossless didn't fit.
+    /// Lossy WebP used because lossless exceeded the limit.
     Lossy {
-        /// libwebp's quality.
+        /// libwebp quality level (0 to 100).
         quality: u8,
     },
 }
 
-/// [`encode`]d within the size limit, as `finish` makes the file of it:
-/// lossless, or lossy at the highest quality that fits, which photos need.
-/// Returns the smallest try if none fits.
+/// Encodes `rgba` losslessly if `finish(bytes)` fits within
+/// [`telegram::MAX_STILL_BYTES`], otherwise binary-searches for the highest
+/// lossy quality (0..=100) that fits (returning quality 0 if none fits).
 pub(super) fn fit(
     rgba: &[u8],
     width: u32,

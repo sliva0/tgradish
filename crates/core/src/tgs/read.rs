@@ -1,5 +1,5 @@
-//! Reading what a `.tgs` is made of: pixel art, read by tgradish itself,
-//! or a video, read through ffmpeg and taken as pixel art.
+//! Reads inputs for `.tgs` conversion: decodes pixel art directly or reads
+//! video frames via ffmpeg, treated as pixel art.
 
 use std::path::Path;
 use std::time::Duration;
@@ -15,25 +15,25 @@ use crate::error::{Error, Result};
 use crate::input::{Input, sniff, sniff_readable};
 use crate::telegram;
 
-/// What the inputs hold, as [`convert`](super::convert) reads them.
+/// Decoded frames and metadata loaded for [`convert`](super::convert).
 pub(super) struct Loaded {
     pub(super) animation: frames::Animation,
-    /// Tags and layers of an Aseprite file, which the options choose from.
+    /// Tags and layers from an Aseprite input, which the options choose from.
     pub(super) tags: Vec<frames::aseprite::Tag>,
     pub(super) layers: Vec<frames::aseprite::LayerInfo>,
-    /// How long each frame of an Aseprite file shows, in seconds, its
-    /// tags' or not.
+    /// Frame durations (in seconds) of all frames in an Aseprite input.
     pub(super) durations: Vec<f64>,
-    /// A video, read through ffmpeg from where `start` says.
+    /// Present when decoded from a video via ffmpeg starting at
+    /// `options.start`.
     pub(super) video: Option<VideoPart>,
-    /// What reading gave up, worth saying.
+    /// Non-fatal warnings produced during decoding.
     pub(super) warnings: Vec<String>,
 }
 
-/// What of a video was read, from where `start` says.
+/// Portion of a video read via ffmpeg starting at `options.start`.
 pub(super) struct VideoPart {
-    /// How long the part used lasts, where that is known: what was read
-    /// can go on to the end of its last frame, or past what plays.
+    /// Duration of the used clip (`min(requested, available)`), when known;
+    /// decoded frames may extend to the end of the last frame or past playback.
     pub(super) length: Option<Duration>,
 }
 
@@ -50,19 +50,15 @@ impl Loaded {
     }
 }
 
-/// What pixel art or a video read for a `.tgs` may take: half of
-/// [`Limits::default`], since making the sticker holds as much again
-/// beside it, as normalising's palette-indexed copy and fitting's
-/// candidates.
+/// Decode memory limits for `.tgs` inputs: half of [`Limits::default`] so room
+/// remains for palette-indexed normalisation and size-fitting candidates.
 fn limits() -> Limits {
     let all = Limits::default();
     Limits { max_bytes: all.max_bytes / 2, ..all }
 }
 
-/// Pixel art as [`convert`](super::convert) reads it, with the tags and
-/// layers of an Aseprite file, read from the same bytes; or a video, read
-/// through `backend` in as many `threads`. `cancel` is asked between
-/// files.
+/// Loads pixel art (including Aseprite tags/layers) directly, or decodes video
+/// inputs via `backend`. Checks `cancel` between files.
 pub(super) fn load(
     backend: Option<&Backend>,
     input: &Input,
@@ -111,8 +107,8 @@ pub(super) fn load(
     Ok(Loaded { tags, layers, durations, ..Loaded::art(animation) })
 }
 
-/// Whether converting `input` into a `.tgs` reads a video through ffmpeg,
-/// which [`convert`](super::convert) then needs a backend for.
+/// Returns true if converting `input` to `.tgs` requires ffmpeg (true for
+/// video inputs, false for images, Aseprite files and image sequences).
 pub fn needs_ffmpeg(input: &Input) -> bool {
     match input {
         Input::File(path) => !sniff(path).reads_as_art(),
@@ -120,13 +116,13 @@ pub fn needs_ffmpeg(input: &Input) -> bool {
     }
 }
 
-/// Most frames a second a sticker shows.
+/// Maximum frame rate of a `.tgs` sticker (60 fps).
 const STICKER_FPS: f64 = tgradish_tgs::limits::telegram::FPS as f64;
 
-/// The part of a video a sticker can show, read through ffmpeg: from
-/// `start`, for as long as `length` says and the tempo lets play in 3
-/// seconds, at most as many frames a second as the sticker shows at that
-/// tempo, and no more than fit in memory.
+/// Decodes the portion of a video that a `.tgs` sticker can show via ffmpeg:
+/// from `start`, for as long as `length` and `tempo` fit within 3 seconds, at
+/// most `STICKER_FPS / tempo` frames per second, and bounded by the memory
+/// limit.
 fn read_video(
     backend: &Backend,
     input: &Path,
@@ -140,14 +136,14 @@ fn read_video(
         return Err(err);
     }
     if options.sheet.is_some() {
-        return Err(Error::invalid("sheet", "reads a picture, not a video"));
+        return Err(Error::invalid("sheet", "only applies to images, not videos"));
     }
     let start = options.start.unwrap_or(0.0);
     if start.is_nan() || start < 0.0 {
-        return Err(Error::invalid("start", format!("{start} is not valid")));
+        return Err(Error::invalid("start", format!("{start} is not a valid start time")));
     }
     if let Some(length) = options.length.filter(|length| length.is_nan() || *length <= 0.0) {
-        return Err(Error::invalid("length", format!("{length} is not more than 0")));
+        return Err(Error::invalid("length", format!("{length} must be greater than 0")));
     }
     let probe = backend.probe(input, cancel)?;
     let unreadable = |message: String| Error::Unreadable { path: input.to_path_buf(), message };
@@ -159,12 +155,14 @@ fn read_video(
     let fit = frame_bytes.map_or(0, |bytes| limits.max_bytes / bytes.max(1));
     if fit == 0 {
         let (width, height) = (probe.width, probe.height);
-        return Err(unreadable(format!("its frames, {width}×{height}, are too large to read")));
+        return Err(unreadable(format!(
+            "frames ({width}×{height}) are too large to read into memory"
+        )));
     }
     let available = probe.duration.filter(|_| !probe.still_image).map(|whole| whole - start);
     if let Some(available) = available.filter(|&available| available <= 0.0) {
         let reason =
-            format!("{start} is past the end of the video, {:.3} s long", start + available);
+            format!("{start} s is past the end of the video ({:.3} s long)", start + available);
         return Err(Error::invalid("start", reason));
     }
     // what is used: as long as asked, as far as the video goes
@@ -201,7 +199,7 @@ fn read_video(
     let mut warnings = Vec::new();
     if wanted > fit {
         warnings.push(format!(
-            "read at {:.1} frames a second, as more of {}×{} wouldn't fit in memory",
+            "read at {:.1} fps because more {}×{} frames would exceed the memory limit",
             decoded.fps, decoded.width, decoded.height
         ));
     }
@@ -220,7 +218,7 @@ fn read_video(
     Ok(Loaded { video: Some(VideoPart { length }), warnings, ..Loaded::art(animation) })
 }
 
-/// Pixel art as it is read, before anything is cropped or reduced.
+/// Raw decoded pixel art before cropping, normalising or reduction.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Art {
@@ -228,22 +226,19 @@ pub struct Art {
     pub width: u32,
     /// Height in pixels.
     pub height: u32,
-    /// Straight RGBA, each frame with how long it shows, in seconds.
+    /// Straight-RGBA frames paired with their display duration in seconds.
     pub frames: Vec<(Vec<u8>, f64)>,
-    /// Tags of an Aseprite file, which `tag` can choose from.
+    /// Tags present in an Aseprite input.
     pub tags: Vec<frames::aseprite::Tag>,
-    /// Layers of an Aseprite file, as its Layers panel lists them, which
-    /// `show-layers` and `hide-layers` choose from.
+    /// Layers present in an Aseprite input, in Layers-panel order.
     pub layers: Vec<frames::aseprite::LayerInfo>,
-    /// How long each frame of an Aseprite file shows, in seconds, its
-    /// tags' or not.
+    /// Duration (in seconds) of every frame in an Aseprite input.
     pub durations: Vec<f64>,
 }
 
-/// Reads pixel art the way [`convert`](super::convert) does, with the
-/// options that choose what is read: `tag`, the layers, `sheet`,
-/// `sheet_frames` and `fps`; or a video through `backend`, as much as a
-/// sticker can show. `cancel` is asked between files.
+/// Decodes an input using the same read options as [`convert`](super::convert)
+/// (`tag`, layer filters, `sheet`, `sheet_frames`, `fps`), or decodes a video
+/// through `backend`. Checks `cancel` between files.
 pub fn read_art(
     backend: Option<&Backend>,
     input: &Input,
@@ -298,7 +293,7 @@ mod tests {
         };
         let input = Input::File(path.clone());
         let refused = load(None, &input, &sheet, Threads::Auto, &CancelToken::new()).err().unwrap();
-        assert!(refused.to_string().contains("must be a single picture"), "{refused}");
+        assert!(refused.to_string().contains("must be a single image"), "{refused}");
         let gif = dir.path().join("walker.gif");
         std::fs::write(&gif, tgradish_corpus::encode::gif(&ase.sprite)).unwrap();
         assert!(load(None, &Input::File(gif), &sheet, Threads::Auto, &CancelToken::new()).is_err());

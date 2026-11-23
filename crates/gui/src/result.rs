@@ -1,6 +1,6 @@
-//! What the last conversion of an item made, or what the one under way is
-//! doing, beside the preview: its size against Telegram's limit, the
-//! progress of each part, and how it was made to fit.
+//! Conversion progress and result summary shown in the side column beside the
+//! preview: output size against Telegram's limit, per-stage or per-encode
+//! progress bars, and fitting steps or encode tables.
 
 use eframe::egui::{self, Color32, RichText, vec2};
 
@@ -9,9 +9,8 @@ use crate::jobs::{self, Job, Status};
 use crate::l10n::fl;
 use crate::{theme, widgets};
 
-/// The last result of an item in short: its size and what Telegram would
-/// say, beside the preview, and, where it is `copyable` as the bar's Copy
-/// copies it, that it is pasted into Telegram so.
+/// Draws the conversion progress or last result summary for `item` in the side
+/// column (size gauge, Telegram validation, and a paste hint when `copyable`).
 pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, copyable: bool) {
     if let Some(conversion) = &item.job {
         progress_column(ui, &conversion.job, queued);
@@ -21,7 +20,7 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, cop
         match &failed.job.status {
             Status::Failed(message) => {
                 let said = ui.colored_label(theme::bad(ui.visuals()), message);
-                // as the bar, which says it in short, asked
+                // Scroll to the full error message when clicked in the bottom bar.
                 let id = egui::Id::new(crate::actions::POINT_AT_FAILURE);
                 if ui.data_mut(|data| data.remove_temp::<bool>(id)).unwrap_or(false) {
                     said.scroll_to_me(Some(egui::Align::Center));
@@ -40,7 +39,7 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, cop
         ui,
         &if item.result_is_current() { fl!("result") } else { fl!("result", "stale") },
     );
-    // a result is only kept once it is done
+    // `item.made` only stores completed conversions.
     let Status::Done(done) = &made.job.status else { return };
     widgets::gauge(
         ui,
@@ -50,15 +49,15 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, cop
     );
     ui.add_space(4.0);
     widgets::problems(ui, &done.problems);
-    // the way on, once converting is done, with a result Telegram takes
+    // Hint how to copy and paste into Telegram when the result is current and valid.
     let refused = done.problems.iter().any(|problem| problem.refused);
     if copyable && item.job.is_none() && item.result_is_current() && !refused {
         let keys = crate::keys::keys_text(crate::keys::Command::CopyResult);
         widgets::note(ui, fl!("result-copy", keys = keys));
     }
     if let Some(plan) = &made.job.progress.webm {
-        // the encode kept, which fitting may have made at a lower
-        // frame rate or shorter than planned
+        // Use the kept attempt's actual frame rate and duration (fitting may
+        // have lowered fps or trimmed duration compared to the initial plan).
         let progress = &made.job.progress;
         let kept = progress.attempts.iter().find(|attempt| Some(attempt.number) == done.attempt);
         let (fps, length) =
@@ -81,7 +80,8 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, cop
             },
         );
     }
-    // stopped early, as asked: which encode is kept, as the table ticks it
+    // When stopped early by Keep best so far, note which encode was kept
+    // (ticked in the table below).
     if let (true, Some(kept)) = (done.settled, done.attempt) {
         widgets::note(ui, decision_text(&tgradish_core::webm::Decision::Settled { attempt: kept }));
     }
@@ -93,16 +93,17 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, cop
     }
 }
 
-/// How one try at fitting went, for its bar: under way, as far as `fill`
-/// says; done and fitting; or done too large, its size said from `from`.
+/// State of a single fitting attempt or `.tgs` compression pass for
+/// [`tried_bar`]: still running, fits under the limit, or oversized (`from` is
+/// the byte offset in the label where the warning-coloured size starts).
 enum Tried {
     Working(widgets::Fill),
     Fits,
     TooLarge { from: usize },
 }
 
-/// The bar of one try at fitting, a WebM's encode or a `.tgs`'s stages or
-/// try again: `text`, as tall as `widest`, the most it says, needs.
+/// Draws a progress bar for one fitting attempt (a WebM encode or a `.tgs`
+/// compression/retry pass), sized to fit `widest`.
 fn tried_bar(ui: &mut egui::Ui, tried: Tried, text: &str, widest: &str) {
     match tried {
         Tried::Working(fill) => widgets::steady_bar(ui, fill, text, widest, running_colour(ui)),
@@ -110,16 +111,14 @@ fn tried_bar(ui: &mut egui::Ui, tried: Tried, text: &str, widest: &str) {
             let done = theme::POSITIVE.gamma_multiply(0.45);
             widgets::steady_bar(ui, widgets::Fill::Share(1.0), text, widest, done);
         }
-        // too large is how fitting goes on, not a failure: a plain bar,
-        // only its size and verdict a warning
+        // Oversized attempts are normal search steps rather than errors: draw
+        // a neutral spent bar with only the size/verdict suffix in warning colour.
         Tried::TooLarge { from } => widgets::bar_spent(ui, text, widest, from),
     }
     ui.add_space(2.0);
 }
 
-/// What a conversion is doing, a bar for each part of it: the stages of a
-/// `.tgs` and each try again where the result missed the limit, or each
-/// encode of a WebM.
+/// Draws per-stage or per-encode progress bars for an active conversion job.
 fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     widgets::section(ui, &fl!("converting"));
     if job.is_waiting() {
@@ -138,8 +137,8 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     if let Some(stage) = progress.tgs {
         for (each, text) in stages(progress) {
             use widgets::Fill;
-            // the first try missed: compressed too large, as a try again
-            // that misses says
+            // If the initial compression pass exceeded the limit, render it as
+            // TooLarge just like a missed retry.
             if let (jobs::TgsStage::Compressing, Some(&bytes)) = (each, progress.missed.first()) {
                 let from = missed_from(&text, bytes);
                 tried_bar(ui, Tried::TooLarge { from }, &text, &widest_stage(each));
@@ -170,7 +169,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
         let rate = rate_text(attempt);
         let (number, fps) = (attempt.number, widgets::trimmed(attempt.params.fps));
         let text = fl!("encode", number = number, fps = fps.as_str(), rate = rate.as_str());
-        // as it says once done, too large, the most it says
+        // Reserve height for the longest completion string ("too-large").
         let widest = widgets::zeros(&fl!(
             "encode-done",
             "too-large",
@@ -215,20 +214,20 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
     }
 }
 
-/// The accent, half let through, or less where the text over it wouldn't
-/// read on that.
+/// Returns the accent fill at 50% opacity (or lower if needed to keep text
+/// readable).
 fn running_colour(ui: &egui::Ui) -> Color32 {
     theme::fill(ui.visuals(), 0.5)
 }
 
-/// What each stage of a `.tgs` conversion says, a bar each. Fitting has
-/// one only once the sticker is found too large and fitting starts: one
-/// that fits, or one kept exactly as it is, is never fitted, and a bar for
-/// it would stand for nothing.
+/// Returns the `.tgs` stages to display as progress bars. The `Fitting` stage
+/// is included only when the initial sticker exceeded the limit and reduction
+/// actually ran (stickers that already fit or use exact mode skip fitting).
 fn stages(progress: &jobs::Progress) -> Vec<(jobs::TgsStage, String)> {
     use jobs::TgsStage;
     let hopeless = progress.tgs_exact && progress.unchanged_bytes.is_some();
-    // the first try's, which tries again after it missed don't change
+    // Show only the initial fitting pass's steps on the Fitting bar (later
+    // retries have their own bars).
     let first = progress.first_steps.unwrap_or(usize::MAX).min(progress.steps.len());
     let steps = &progress.steps[..first];
     let fitting = match (progress.unchanged_bytes, steps.last()) {
@@ -256,7 +255,7 @@ fn stages(progress: &jobs::Progress) -> Vec<(jobs::TgsStage, String)> {
     .collect()
 }
 
-/// The most the bar of `stage` of a `.tgs` conversion says as it goes on.
+/// Returns the longest text that `stage` of a `.tgs` conversion can display.
 fn widest_stage(stage: jobs::TgsStage) -> String {
     use jobs::TgsStage;
     let size = "1000.0 KiB";
@@ -277,8 +276,8 @@ fn widest_stage(stage: jobs::TgsStage) -> String {
     texts.into_iter().max_by_key(String::len).unwrap_or_default()
 }
 
-/// What the compressing of a `.tgs`'s first try says once it missed,
-/// compressed to `bytes` or too large to be worth it.
+/// Formats the `Compressing` bar label when the first pass missed the size
+/// limit (either compressed to `bytes` or skipped as far too large).
 fn missed_text(bytes: Option<u64>) -> String {
     match bytes {
         Some(bytes) => fl!("stage-compressing", "missed", size = widgets::kib(bytes)),
@@ -286,8 +285,8 @@ fn missed_text(bytes: Option<u64>) -> String {
     }
 }
 
-/// Where what a try that missed came to starts in its bar's `text`, to be
-/// said as a warning: its size, or all of it where it has none.
+/// Returns the byte offset in `text` where the warning-coloured size/verdict
+/// suffix begins for a missed attempt.
 fn missed_from(text: &str, bytes: Option<u64>) -> usize {
     match bytes {
         Some(bytes) => text.rfind(&widgets::kib(bytes)).unwrap_or(text.len()),
@@ -295,9 +294,8 @@ fn missed_from(text: &str, bytes: Option<u64>) -> usize {
     }
 }
 
-/// What the bar of a `.tgs`'s try again says, the `index`th, aiming at
-/// `aim`: under way, or what it came to once it `missed` too, and the
-/// most it says.
+/// Returns the current and widest label strings for the `index`-th `.tgs`
+/// retry aiming at `aim` bytes.
 fn retry_texts(index: usize, aim: u64, missed: Option<Option<u64>>) -> (String, String) {
     let (number, aim) = (index + 2, widgets::kib(aim));
     let came_to = |bytes: Option<u64>| match bytes {
@@ -315,8 +313,8 @@ fn retry_texts(index: usize, aim: u64, missed: Option<Option<u64>>) -> (String, 
     (text, widgets::zeros(&widest.unwrap_or_default()))
 }
 
-/// How far the stage at work has got, as converting says: reading the art
-/// says nothing until it is read.
+/// Returns the fill state for the active `.tgs` `stage` (`Reading` has no
+/// incremental progress).
 fn stage_fill(progress: &jobs::Progress, stage: jobs::TgsStage) -> widgets::Fill {
     match stage {
         jobs::TgsStage::Reading => widgets::Fill::Unknown,
@@ -324,7 +322,7 @@ fn stage_fill(progress: &jobs::Progress, stage: jobs::TgsStage) -> widgets::Fill
     }
 }
 
-/// The rate an encode runs at.
+/// Formats an encode attempt's rate control mode.
 fn rate_text(attempt: &jobs::Attempt) -> String {
     match attempt.params.rate {
         tgradish_core::webm::Rate::Bitrate(kbps) => format!("{kbps:.0} kbit/s"),
@@ -334,10 +332,10 @@ fn rate_text(attempt: &jobs::Attempt) -> String {
     }
 }
 
-/// The step a conversion is at and how far it has got. Only that step,
-/// as the column of every step beside the preview shows them: how many
-/// encodes fitting a WebM needs isn't known until it has them, and the
-/// list's bar shows how far all of a `.tgs` got.
+/// Returns the fill and label for the single active step of a conversion
+/// (shown in the bottom action bar next to Stop, while the side column shows
+/// all steps): how many encodes fitting a WebM needs is unknown in advance,
+/// and the list's bar already shows a `.tgs`'s overall progress.
 fn current_step(progress: &jobs::Progress) -> (widgets::Fill, String) {
     use widgets::Fill;
     if let Some(&aim) = progress.retries.last() {
@@ -359,26 +357,29 @@ fn current_step(progress: &jobs::Progress) -> (widgets::Fill, String) {
         }
         _ => fl!("encode", number = number, fps = fps, rate = rate),
     };
-    // done, it is being scored or the next is about to start
+    // Once an encode finishes, it is either being scored for SSIM or about to
+    // start the next attempt.
     let fill =
         if attempt.bytes.is_some() { Fill::Unknown } else { Fill::working(progress.fraction) };
     (fill, text)
 }
 
-/// A bar of `size` showing the step a conversion is at, for the bar beside
-/// Stop, which never scrolls away.
+/// Draws a progress bar of `size` for the current conversion step (used in the
+/// sticky bottom action bar beside Stop).
 pub(crate) fn step_bar(ui: &mut egui::Ui, job: &Job, size: egui::Vec2) {
     let (fill, text) = current_step(&job.progress);
     widgets::bar_sized(ui, size, fill, &text, running_colour(ui));
 }
 
-/// How the last result was made, under its size beside the preview.
+/// Draws detailed conversion breakdown under the result gauge: `.tgs` sprite
+/// stats, shape counts, and reduction steps, or the WebM encode attempts table
+/// and fitting decisions.
 pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
     let Some(made) = &item.made else { return };
     let Status::Done(done) = &made.job.status else { return };
     let progress = &made.job.progress;
     ui.add_space(6.0);
-    // as plain as the result's size above it
+    // As plain as the result's size above it.
     if let Some(report) = &progress.report {
         let (width, height) = (report.width, report.height);
         let size = match report.scale {
@@ -401,8 +402,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         let size = widgets::kib(json);
         ui.label(fl!("art-shapes", layers = layers, rectangles = rectangles, size = size));
     }
-    // kept as it is, or with nothing fitting could take off, it wasn't
-    // changed to fit, however large it was
+    // Show the pre-fitting size only when reduction steps actually ran.
     if let (Some(bytes), false) = (progress.unchanged_bytes, progress.steps.is_empty()) {
         ui.label(fl!("art-before-fitting", size = widgets::kib(bytes as u64)));
     }
@@ -411,14 +411,14 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         ui.label(format!("  • {}", fl!("art-step", change = change, size = size)));
     }
     if !progress.attempts.is_empty() {
-        // narrow, for the column beside the preview: units in the headers,
-        // and sideways where it still doesn't fit
-        // how like the input each looks, where any was scored
+        // Keep the table compact for the side column: put units in column
+        // headers and scroll horizontally if needed. Include the similarity
+        // column whenever any attempt was scored with SSIM.
         let scored = progress.attempts.iter().any(|attempt| attempt.ssim.is_some());
         egui::ScrollArea::horizontal().id_salt(("attempts", item.id)).show(ui, |ui| {
             let columns = if scored { 6 } else { 5 };
-            // the tick has a column of its own, headed by nothing, so the
-            // numbers stay in line under theirs
+            // Place the kept checkmark in its own unlabelled column so numeric
+            // columns stay right-aligned beneath their headers.
             let headers = [
                 (String::new(), String::new()),
                 ("#".to_owned(), fl!("column-number")),
@@ -427,7 +427,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                 (fl!("column-size"), fl!("column-size", "hint")),
                 (fl!("column-alike"), fl!("column-alike", "hint")),
             ];
-            // each cell's text, and what it says on hover
+            // Each cell's text, and what it says on hover.
             let mut rows: Vec<Vec<(RichText, String)>> = vec![
                 headers[..columns]
                     .iter()
@@ -472,8 +472,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                 }
                 rows.push(row);
             }
-            // numbers lined up by their last digit, in columns as wide as
-            // their widest
+            // Right-align numbers within columns sized to their widest cell.
             let width = |text: &RichText| {
                 let text = egui::WidgetText::from(text.clone());
                 let wrap = Some(egui::TextWrapMode::Extend);
@@ -486,9 +485,8 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                 }
             }
             let height = ui.text_style_height(&egui::TextStyle::Body);
-            // no wider than its columns, as a grid makes them at least
-            // the width of a field otherwise, and rows no taller than a
-            // line, so the headings sit right over what they head
+            // Override egui::Grid's default minimum column width and row height
+            // so columns hug their contents and headers sit close above the first row.
             let grid = egui::Grid::new(("attempts", item.id))
                 .num_columns(columns)
                 .min_col_width(0.0)
@@ -513,7 +511,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
             });
         });
     }
-    // settling is said with the result, above
+    // `Decision::Settled` is already shown in the result summary above.
     let said = |decision: &&tgradish_core::webm::Decision| {
         !matches!(decision, tgradish_core::webm::Decision::Settled { .. })
     };
@@ -525,18 +523,17 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
     }
 }
 
-/// `bytes` as a share of `limit`, as the attempts' sizes show.
+/// Formats `bytes` as a percentage of `limit`.
 fn share(bytes: u64, limit: u64) -> String {
     percent(bytes as f64 / limit.max(1) as f64)
 }
 
-/// A share, or SSIM, from 0 to 1, as the table shows it.
+/// Formats a `0.0..=1.0` ratio or SSIM score as a percentage with one decimal place.
 fn percent(share: f64) -> String {
     format!("{:.1}%", share * 100.0)
 }
 
-/// Why fitting stopped where it did, or tried a lower frame rate, in the
-/// GUI's words.
+/// Formats a WebM fitting [`Decision`](tgradish_core::webm::Decision) for the GUI.
 fn decision_text(decision: &tgradish_core::webm::Decision) -> String {
     use tgradish_core::webm::Decision;
     let fps = widgets::trimmed;
@@ -580,7 +577,7 @@ fn decision_text(decision: &tgradish_core::webm::Decision) -> String {
             kept_alike = percent(kept_ssim)
         ),
         Decision::Settled { attempt } => fl!("decided-settled", number = attempt),
-        // one added to core since, which the GUI has no words for
+        // Fallback for any future `#[non_exhaustive]` Decision variant.
         decision => decision.to_string(),
     }
 }
@@ -602,7 +599,7 @@ fn reduction(reduction: &tgradish_core::tgradish_tgs::reduce::Reduction) -> Stri
         Reduction::Downscale { factor } => {
             fl!("step-resolution", factor = format!("{:.0}", factor * 100.0))
         }
-        // one added to tgradish-tgs since, which the GUI has no words for
+        // Fallback for any future `#[non_exhaustive]` Reduction variant.
         other => format!("{other:?}"),
     }
 }

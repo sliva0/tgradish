@@ -1,6 +1,6 @@
-//! What the keyboard, the mouse wheel, the clipboard and dropped files ask
-//! for. Keys are shortcuts only while no text field or dialog has them,
-//! so typing is never taken for a command.
+//! Keyboard shortcuts, mouse wheel scrolling, clipboard paste, and file drops.
+//! Shortcuts are active only when no text field or modal dialog has focus, so
+//! typing is never intercepted as a command.
 
 use std::path::PathBuf;
 

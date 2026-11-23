@@ -1,41 +1,40 @@
-//! The painter's encoder: colours drawn one over another in layers that
-//! keep the seam invariant, as rectangle covers with lifetimes.
+//! Painter's-algorithm encoder: draws colours back to front as timed rectangle
+//! covers while preserving the seam invariant.
 //!
-//! Colours are drawn in one order for the whole animation. A colour's
-//! shape must hold its own cells and every 8-neighbour that shows a later
-//! opaque colour (the seam invariant), and may hold any other cell of a
-//! later opaque colour, which paints over it. Translucent cells are never
-//! drawn over, since renderers would blend them.
+//! One global colour drawing order is used across the whole animation. Each
+//! colour's shapes must cover its own cells plus every 8-neighbour that shows
+//! a later opaque colour (maintaining the seam invariant), and may also cover
+//! any cell of a later opaque colour that will paint over it. Translucent
+//! cells are never painted over because renderers would blend them.
 //!
-//! A colour keeps one shape for as long as one shape fits every frame,
-//! which becomes a layer's lifetime. So each frame still has exactly one
-//! group per colour, and the invariant holds in every frame.
+//! Each colour keeps one shape across consecutive frames whenever one cover
+//! satisfies all frames in that span, producing layer lifetimes. Each frame
+//! still has at most one group per colour, so the seam invariant holds in
+//! every frame.
 //!
-//! What a colour costs depends only on which colours are drawn after it,
-//! not on their order, so the cheapest order is found exactly over subsets
-//! for few colours, and greedily otherwise.
+//! Because a colour's cost depends only on the set of colours drawn after it
+//! (not their relative order), the optimal order is found via subset DP for
+//! small palettes and greedily for larger ones.
 //!
-//! How a colour is drawn, cheapest kept, by estimated cost in rectangles,
-//! groups and layers ([`RECT_COST`], [`GROUP_COST`], [`LAYER_ESTIMATE`]):
+//! Each colour is encoded with the cheapest of three strategies by estimated
+//! byte cost ([`RECT_COST`], [`GROUP_COST`], [`LAYER_ESTIMATE`]):
 //!
-//! - whole, one piece per lifetime ([`Painter::lifetime_pieces`]);
-//! - split, a core of the cells that stay over a stretch of frames above
-//!   a delta with the rest of each frame ([`Painter::split_pieces`]), for
-//!   colours that mostly stand still while their edges move;
-//! - tiled, in squares of the canvas with lifetimes of their own
-//!   ([`Painter::tiled_pieces`]), for large colours that change in one
-//!   place at a time, and for those too large for one group.
+//! - whole: one cover per lifetime ([`Painter::lifetime_pieces`]);
+//! - split: a static core over a frame span above per-frame deltas
+//!   ([`Painter::split_pieces`]), for mostly static colours with moving edges;
+//! - tiled: independent square canvas tiles ([`Painter::tiled_pieces`]), for
+//!   large regions changing locally or exceeding one group's rectangle limit.
 //!
-//! The order is then searched for by cost ([`order::EXACT_ORDER`],
-//! [`order::GREEDY_ORDER`], [`order::SEARCH_WORK`]), and with
-//! [`Effort::Best`] improved by real packed sizes. Its pieces are stacked
-//! into layers ([`stack`]).
-//! When lifetimes leave too many layers or rectangles for one group, every
-//! frame is drawn in full instead, which always fits for 180 frames.
+//! Colour order is searched using [`order::EXACT_ORDER`],
+//! [`order::GREEDY_ORDER`], and [`order::SEARCH_WORK`], and refined by real
+//! compressed sizes under [`Effort::Best`]. Pieces are then stacked into
+//! layers ([`stack`]). If lifetimes exceed layer or group limits, encoding
+//! falls back to drawing every frame whole (which always fits for up to 180
+//! frames).
 //!
-//! The weights here were measured on the corpus: tgs-lab's `bench --save`
-//! before a change to them and `bench --against` after shows what it did,
-//! and `--verify` that every result still draws its art.
+//! Cost weights were measured on the corpus: run tgs-lab `bench --save` before
+//! changing one and `bench --against` after, with `--verify` to check every
+//! result still draws its art.
 
 mod order;
 
@@ -48,46 +47,43 @@ use crate::normalise::PixelAnim;
 use crate::scene::{FillRule, Group, Layer, Scene, Shape};
 use crate::sticker::Cancelled;
 
-/// Estimated cost of a rectangle and of a group, in the same units: a
-/// group's fill and wrapping take about one and a half rectangles' bytes.
+/// Relative cost estimates for rectangles and groups: group overhead (fill and
+/// transform wrapper) costs about 1.5 rectangles.
 const RECT_COST: usize = 2;
 const GROUP_COST: usize = 3;
-/// What a layer of its own adds, in the same units, measured on the
-/// corpus. Not [`telegram::LAYER_COST`], which counts against the server's
-/// limit rather than bytes.
+/// Relative cost estimate for a separate layer, measured on the corpus (byte
+/// estimate; not [`telegram::LAYER_COST`], which counts towards the server's
+/// limit rather than bytes).
 const LAYER_ESTIMATE: usize = 10;
-/// Side of the tiles a colour can be cut into, in cells: 16 and 64 were
-/// both worse.
+/// Tile side length in cells (16 and 64 both performed worse on the corpus).
 const TILE: u32 = 32;
 
-/// How hard to look for a small encoding.
+/// Encoder search effort level.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Effort {
-    /// A quick guess at the drawing order: larger colours first.
+    /// Heuristic colour ordering only (largest bounding box first).
     Fast,
-    /// The order with the fewest rectangles and groups.
+    /// Searches colour order to minimise estimated rectangle and group count.
     #[default]
     Balanced,
-    /// Starting from that, swaps neighbouring colours in the order while
-    /// the size `gzip -9` packs the result to goes down.
+    /// Starts from `Balanced` and swaps adjacent colours while `gzip -9` size
+    /// keeps shrinking.
     Best,
 }
 
-/// What the painter may do, to compare encodings by.
+/// Painter strategy flags used to compare encodings.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Settings {
-    /// Keep shapes alive over frames where they don't change. Without it,
-    /// every frame is drawn in full.
+    /// Merge shapes across consecutive frames when unchanged; false draws
+    /// every frame whole.
     pub lifetimes: bool,
-    /// Keep the unchanged part of a colour alive over frames where the
-    /// rest changes, when that is cheaper.
+    /// Split colours into persistent cores and per-frame deltas when cheaper.
     pub split: bool,
-    /// Draw a shape that comes back later once, in a layer hidden in
-    /// between.
+    /// Reuse identical shapes that reappear later via opacity hold keyframes.
     pub reuse: bool,
-    /// How hard to look for a small encoding.
+    /// Search effort level.
     pub effort: Effort,
 }
 
@@ -101,37 +97,39 @@ const fn min(a: usize, b: usize) -> usize {
     if a < b { a } else { b }
 }
 
-/// Per layer: the stricter of tlottie's and Telegram's limits.
+/// Maximum shape items per layer: stricter of tlottie and Telegram limits.
 const MAX_SHAPES: usize = min(TLOTTIE.max_shapes_per_layer, telegram::MAX_SHAPES_PER_LAYER);
-// A layer of no more shapes is within tlottie's limits on fills and on the
-// rectangles they paint as well, each of which is a shape, so `stack`
-// counts shapes alone.
+// Staying within MAX_SHAPES automatically satisfies tlottie's fill and paint
+// source limits, so `stack` only needs to track total shape items.
 const _: () = assert!(
     MAX_SHAPES <= TLOTTIE.max_paints_per_layer
         && MAX_SHAPES <= TLOTTIE.max_paint_source_items_per_layer
 );
-/// Rectangles of one colour in one frame: a layer holding only them adds
-/// their group, its fill and its transform.
+/// Maximum rectangles per group (a minimal layer adds group, fill, transform).
 const MAX_GROUP_RECTS: usize = min(TLOTTIE.max_paint_source_items_per_layer, MAX_SHAPES - 3);
 const MAX_LAYERS: usize = min(TLOTTIE.max_painted_shape_layers, telegram::MAX_LAYERS);
 
-/// Why the encoder couldn't draw an animation.
+/// Error returned when encoding fails (exceeding Telegram's structural limits
+/// or cancelled).
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum EncodeError {
-    /// One colour in one frame takes more rectangles than one group holds.
-    #[error("a colour needs {rects} rectangles in one frame, Telegram allows {MAX_GROUP_RECTS}")]
+    /// A single colour in one frame needs more rectangles than a group allows.
+    #[error(
+        "a colour requires {rects} rectangles in one frame (Telegram allows up to {MAX_GROUP_RECTS})"
+    )]
     TooManyRects {
-        /// How many it takes.
+        /// Number of rectangles required.
         rects: usize,
     },
-    /// More layers than Telegram takes, even with every frame drawn whole.
-    #[error("the animation needs {layers} layers, Telegram allows {MAX_LAYERS}")]
+    /// Animation needs more layers than Telegram allows, even with every frame
+    /// drawn whole.
+    #[error("animation requires {layers} layers (Telegram allows up to {MAX_LAYERS})")]
     TooManyLayers {
-        /// How many it takes.
+        /// Number of layers required.
         layers: usize,
     },
-    /// Asked to stop.
+    /// Cancelled via [`Cancelled`].
     #[error("cancelled")]
     Cancelled,
 }
@@ -668,11 +666,10 @@ impl<'a> Painter<'a> {
     }
 }
 
-/// Encodes `anim`. [`Effort::Best`] compares candidates by `score`
-/// (smaller is better), typically the compressed size of their Lottie;
-/// without one it works like [`Effort::Balanced`]. `cancelled` is asked
-/// between colours; when it says yes, this ends with
-/// [`EncodeError::Cancelled`].
+/// Encodes `anim` into a [`Scene`]. Under [`Effort::Best`], candidates are
+/// compared by `score` (smaller is better, typically compressed Lottie size);
+/// if `score` is `None`, behaves like [`Effort::Balanced`]. Polls `cancelled`
+/// between colours and returns [`EncodeError::Cancelled`] if triggered.
 #[cfg(any(test, feature = "internals"))]
 pub fn painter(
     anim: &PixelAnim,

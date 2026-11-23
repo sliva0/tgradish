@@ -14,16 +14,15 @@ pub fn config_dir() -> Option<PathBuf> {
     Some(dirs()?.config_dir().to_path_buf())
 }
 
-/// Directory for what the GUI keeps between runs, like the files it
-/// had open: `$XDG_STATE_HOME/tgradish` (`~/.local/state/tgradish`) on
-/// Linux, which is kept unlike a cache, and the local application data
-/// directory elsewhere.
+/// Directory for persistent GUI state (such as open files) kept across runs:
+/// `$XDG_STATE_HOME/tgradish` (`~/.local/state/tgradish`) on Linux (preserved,
+/// unlike a cache), or the local application data directory elsewhere.
 pub fn state_dir() -> Option<PathBuf> {
     let dirs = dirs()?;
     Some(dirs.state_dir().unwrap_or(dirs.data_local_dir()).to_path_buf())
 }
 
-/// The user's pictures directory, or else their home directory.
+/// User's Pictures directory, falling back to their home directory.
 pub fn pictures_dir() -> Option<PathBuf> {
     let dirs = UserDirs::new()?;
     Some(dirs.picture_dir().unwrap_or(dirs.home_dir()).to_path_buf())

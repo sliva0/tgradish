@@ -1,7 +1,7 @@
 [package]
 name = "tgradish"
-# the one sentence saying what tgradish is: the packages, the flake and the
-# menu entry say the same, which an xtask test holds them to
+# The one-line description; packages, flake.nix and the .desktop file repeat it
+# (checked by an xtask test).
 description = "Telegram video, static and animated stickers and emoji from videos, images or pixel art"
 version.workspace = true
 edition.workspace = true
@@ -9,18 +9,18 @@ rust-version.workspace = true
 license.workspace = true
 authors.workspace = true
 repository.workspace = true
-# cargo packs it into the crate
+# Included by Cargo when packaging the crate.
 readme = "../../README.md"
 keywords = ["telegram", "sticker", "emoji", "webm", "pixel-art"]
 categories = ["command-line-utilities", "multimedia::video", "multimedia::images"]
 
 [features]
 default = ["gui"]
-# the GUI, `tgradish gui`
+# Desktop GUI (`tgradish gui`).
 gui = ["dep:tgradish-gui", "dep:windows-sys"]
-# ffmpeg linked into the binary instead of separate executables
+# Link ffmpeg libraries into the binary instead of running external processes.
 linked = ["tgradish-core/linked"]
-# link them statically, as release builds do
+# Link ffmpeg libraries statically, as release builds do.
 linked-static = ["linked", "tgradish-core/linked-static"]
 
 [dependencies]
@@ -37,21 +37,21 @@ console.workspace = true
 ctrlc.workspace = true
 indicatif.workspace = true
 serde.workspace = true
-# the order of fields in what `--json` prints
+# Preserve field order in `--json` output.
 serde_json = { workspace = true, features = ["preserve_order"] }
 shlex.workspace = true
 thiserror.workspace = true
 toml.workspace = true
 
-# SIGTERM and SIGHUP, which ctrlc can't tell from Ctrl-C
+# Handle SIGTERM and SIGHUP separately from Ctrl-C (ctrlc merges them).
 [target.'cfg(unix)'.dependencies]
 nix.workspace = true
 
-# closes the console Windows opens for the GUI
+# Detach the console window that Windows creates when launching the GUI.
 [target.'cfg(windows)'.dependencies]
 windows-sys = { workspace = true, features = ["Win32_System_Console"], optional = true }
 
-# in place of musl's malloc, for the whole program
+# Replace musl's allocator across the whole process (including C libraries).
 [target.'cfg(target_env = "musl")'.dependencies]
 libmimalloc-sys.workspace = true
 mimalloc.workspace = true
@@ -67,6 +67,6 @@ schemars.workspace = true
 tgradish-corpus.workspace = true
 tempfile.workspace = true
 
-# the signal tests keep the orphans of what they start, to see none is left
+# Signal tests become subreapers on Linux to verify no child processes leak.
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rustix = { workspace = true, features = ["process"] }

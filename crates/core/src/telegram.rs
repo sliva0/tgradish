@@ -22,18 +22,17 @@ pub const MAX_SECONDS: f64 = 3.0;
 /// The rules say 30 fps, but @Stickers accepted a 60 fps sticker.
 pub const MAX_FPS: f64 = 60.0;
 
-/// Whether `seconds` is longer than [`MAX_SECONDS`]. A millisecond over
-/// still passes, so that a result cut to exactly 3 seconds isn't taken
-/// for too long over float error or WebM's millisecond times.
+/// Returns true if `seconds` exceeds [`MAX_SECONDS`] (with a 1 ms tolerance
+/// for float rounding and WebM millisecond timestamps).
 pub fn too_long(seconds: f64) -> bool {
     seconds > MAX_SECONDS + 1e-3
 }
 
-/// What kind of Telegram media to make.
+/// Target Telegram media type.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Target {
-    /// Video sticker: one side exactly 512 px, the other at most 512 px.
+    /// Sticker: one side exactly 512 px, the other at most 512 px.
     #[default]
     Sticker,
     /// Custom emoji: exactly 100x100 px.
@@ -41,7 +40,7 @@ pub enum Target {
 }
 
 impl Target {
-    /// Size of the box the video has to fit, in pixels.
+    /// Target bounding box dimensions in pixels.
     pub fn box_size(self) -> (u32, u32) {
         match self {
             Target::Sticker => (512, 512),
@@ -49,13 +48,13 @@ impl Target {
         }
     }
 
-    /// Whether the video must fill the whole box instead of touching it with
-    /// one side.
+    /// Returns true if output must fill the exact box (emoji) rather than
+    /// merely matching one side (stickers).
     pub fn requires_exact_size(self) -> bool {
         matches!(self, Target::Emoji)
     }
 
-    /// Largest file Telegram accepts, in bytes.
+    /// Maximum WebM file size Telegram accepts for this target, in bytes.
     pub fn max_bytes(self) -> u64 {
         match self {
             Target::Sticker => MAX_STICKER_BYTES,
@@ -63,7 +62,7 @@ impl Target {
         }
     }
 
-    /// What `--target` and the JSON call it.
+    /// Canonical name used by `--target` and JSON output.
     pub fn name(self) -> &'static str {
         match self {
             Target::Sticker => "sticker",
@@ -72,76 +71,73 @@ impl Target {
     }
 }
 
-/// Something about a file that Telegram, or one of its apps, would have a
-/// problem with: of every format, one kind for each check the formats
-/// share, with what it found, and [`Issue::Lottie`] for what only a
-/// `.tgs` is checked for.
+/// Telegram validation issue shared across WebM, WebP and `.tgs` files
+/// (with `.tgs`-specific checks wrapped in [`Issue::Lottie`]).
 ///
-/// Serialised by its `kind`, with its `severity` and `message`, beside
-/// what it found, as `{"kind":"too-big","bytes":300000,"max":262144,
-/// "severity":"error","message":"293.0 KiB, over the 256 KiB limit"}`.
+/// Serialised with `kind`, `severity`, `message` and variant-specific fields,
+/// e.g. `{"kind":"too-big","bytes":300000,"max":262144,"severity":"error",
+/// "message":"293.0 KiB exceeds the 256 KiB limit"}`.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(into = "Reported")]
 #[non_exhaustive]
 pub enum Issue {
-    /// The container isn't WebM.
+    /// Container DocType is not `"webm"`.
     NotWebm {
-        /// What its EBML header says it is.
+        /// EBML DocType string found in the header.
         doc_type: String,
     },
-    /// There is no video track.
+    /// File contains no video track.
     NoVideo,
-    /// The video isn't VP9.
+    /// Video track is not VP9.
     NotVp9 {
-        /// Its Matroska codec ID, as `V_VP8`.
+        /// Matroska CodecID (for example `"V_VP8"`).
         codec_id: String,
     },
-    /// There is an audio track.
+    /// File contains an audio track.
     HasAudio,
-    /// Not a size Telegram takes: one side `side` pixels long and the
-    /// other at most that, or with `exact`, both that long.
+    /// Dimensions do not satisfy Telegram's size rules (`exact` means both
+    /// sides must equal `side`; otherwise one side must equal `side` and the
+    /// other must be at most `side`).
     WrongSize {
-        /// Its width in pixels.
+        /// Width in pixels.
         width: u64,
-        /// Its height in pixels.
+        /// Height in pixels.
         height: u64,
-        /// The side Telegram wants.
+        /// Required side length in pixels.
         side: u64,
-        /// Whether both sides must be `side`, as for emoji.
+        /// True for exact square dimensions (emoji and `.tgs`).
         exact: bool,
     },
-    /// Larger than `max` bytes.
+    /// File size exceeds Telegram's limit (`max` bytes).
     TooBig {
-        /// Its size in bytes.
+        /// Actual file size in bytes.
         bytes: u64,
-        /// The most Telegram takes.
+        /// Telegram size limit in bytes.
         max: u64,
     },
-    /// Its header says it lasts longer than `max` seconds.
+    /// Header duration exceeds Telegram's limit (`max` seconds).
     TooLong {
-        /// How long its header says it lasts.
+        /// Reported duration in seconds.
         seconds: f64,
-        /// The longest Telegram takes.
+        /// Maximum allowed duration in seconds.
         max: f64,
     },
-    /// More than `max` frames a second.
+    /// Frame rate exceeds Telegram's limit (`max` fps).
     TooManyFps {
-        /// Its frame rate.
+        /// Actual frame rate.
         fps: f64,
-        /// The most Telegram takes.
+        /// Maximum allowed frame rate.
         max: f64,
     },
-    /// An animated image, where static stickers are one picture.
+    /// Animated image passed where a static single-frame sticker is expected.
     Animated,
-    /// What checking a `.tgs` found that no other format is checked for,
-    /// as Lottie features or the limits of Telegram's renderer: named by
-    /// its own `kind`, and only frowned on where its severity says so.
+    /// `.tgs`-specific Lottie or renderer validation issue, tagged by its own
+    /// `kind` and treated as a warning only when its `severity` says so.
     Lottie(check::Issue),
 }
 
 impl Issue {
-    /// How bad it is: Telegram refuses a file with any of these, except a
-    /// [`Issue::Lottie`] one that says it only frowns on it.
+    /// Severity of this issue (`Severity::Error` for all non-Lottie issues).
     pub fn severity(&self) -> Severity {
         match self {
             Issue::Lottie(issue) => issue.severity,
@@ -150,9 +146,8 @@ impl Issue {
     }
 }
 
-/// Whether Telegram would refuse a file with `issues`: any of them an
-/// error. What every format's result, `inspect` and the GUI go by, and
-/// what makes the command line exit with 3.
+/// Returns true if any issue in `issues` has [`Severity::Error`], meaning
+/// Telegram will reject the file (and the CLI exits with status 3).
 pub fn refuses(issues: &[Issue]) -> bool {
     issues.iter().any(|issue| issue.severity() == Severity::Error)
 }
@@ -236,25 +231,28 @@ impl std::fmt::Display for Issue {
             Issue::NotWebm { doc_type } => write!(f, "container is {doc_type:?}, not WebM"),
             Issue::NoVideo => write!(f, "no video track"),
             Issue::NotVp9 { codec_id } => write!(f, "codec is {codec_id}, not VP9"),
-            Issue::HasAudio => write!(f, "has an audio track"),
+            Issue::HasAudio => write!(f, "contains an audio track"),
             Issue::WrongSize { width, height, side, exact: true } => {
                 write!(f, "size is {width}×{height}, expected {side}×{side}")
             }
             Issue::WrongSize { width, height, side, exact: false } => write!(
                 f,
-                "size is {width}×{height}, expected one side {side} px, the other at most {side} px"
+                "size is {width}×{height}, expected one side to be {side} px and the other at most \
+                 {side} px"
             ),
             Issue::TooBig { bytes, max } => {
                 let kib = |bytes: u64| bytes as f64 / 1024.0;
-                write!(f, "{:.1} KiB, over the {} KiB limit", kib(*bytes), kib(*max))
+                write!(f, "{:.1} KiB exceeds the {} KiB limit", kib(*bytes), kib(*max))
             }
             Issue::TooLong { seconds, max } => {
-                write!(f, "metadata duration is {seconds:.3} s, limit is {max} s")
+                write!(f, "metadata duration is {seconds:.3} s (limit is {max} s)")
             }
             Issue::TooManyFps { fps, max } => {
-                write!(f, "frame rate is {fps:.2} fps, limit is {max}")
+                write!(f, "frame rate is {fps:.2} fps (limit is {max})")
             }
-            Issue::Animated => write!(f, "it is animated; static stickers are one picture"),
+            Issue::Animated => {
+                write!(f, "image is animated; static stickers must be a single frame")
+            }
             Issue::Lottie(issue) => write!(f, "{}", issue.message),
         }
     }
@@ -303,10 +301,9 @@ pub fn check_input(info: &crate::inspect::InputInfo, target: Target) -> Vec<Issu
     issues
 }
 
-/// What checking a `.tgs` found, `found` of one that holds `stats`, as
-/// issues: of the kinds every format has, its canvas, size, length and a
-/// frame rate over the most, each with what it found; the rest, which no
-/// other format is checked for, as [`Issue::Lottie`].
+/// Converts `tgradish_tgs::check` issues into unified [`Issue`] values,
+/// mapping canvas size, file size, duration and high-fps errors to shared
+/// variants and keeping `.tgs`-specific checks under [`Issue::Lottie`].
 pub fn check_lottie(found: Vec<check::Issue>, stats: &Stats) -> Vec<Issue> {
     // a canvas a whole number of pixels on each side
     let whole = |value: f64| (value >= 0.0 && value.fract() == 0.0).then_some(value as u64);
@@ -438,7 +435,7 @@ mod tests {
     #[test]
     fn reports_issues_of_every_format_alike() {
         let issue = serde_json::to_value(Issue::TooBig { bytes: 300_000, max: 262_144 }).unwrap();
-        let message = "293.0 KiB, over the 256 KiB limit";
+        let message = "293.0 KiB exceeds the 256 KiB limit";
         let expected = serde_json::json!({
             "kind": "too-big", "severity": "error", "message": message,
             "bytes": 300_000, "max": 262_144,

@@ -1,6 +1,6 @@
-//! The big preview: the input with its crop, which is edited by dragging,
-//! or the result. The wheel zooms, the right or middle button pans. The
-//! small picture of the result beside the input is [`crate::inset`].
+//! Main preview canvas: shows the input (with draggable crop handles) or the
+//! converted result. Scroll wheel zooms; right or middle mouse button pans.
+//! The small result preview inset is in [`crate::inset`].
 
 use eframe::egui::{
     self, Color32, CursorIcon, PointerButton, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2,
@@ -192,11 +192,12 @@ const LEAST_MOST_LEVEL: f32 = 4.0;
 /// which Zoom out has room to say.
 pub(crate) const MOST_TIMES: f32 = 9999.0;
 
-/// How far a picture is zoomed in to at most, from where it fits, where a
-/// pixel of it takes `fit` of the screen's pixels: until a pixel takes
-/// [`MOST_PIXELS`], rather than so many times where it fits, which for a
-/// sprite would be pixels larger than the screen and for a photo would
-/// stop short of seeing its pixels.
+/// Maximum zoom level relative to the fitted size (`fit` screen pixels per
+/// image pixel). Caps zoom once an image pixel reaches [`MOST_PIXELS`] (or at
+/// least [`LEAST_MOST_LEVEL`]× fitted size for tiny sprites, up to
+/// [`MOST_TIMES`]), rather than using a fixed multiple of fitted size (which
+/// would make sprite pixels larger than the screen while stopping short of
+/// individual pixels on large photos).
 fn most_level(fit: f32) -> f32 {
     let most = MOST_PIXELS.max(fit * LEAST_MOST_LEVEL).min(MOST_TIMES);
     (most / fit).max(1.0)
@@ -214,11 +215,10 @@ pub(crate) fn layout(rect: Rect, size: (u32, u32), zoom: &Zoom) -> (Rect, f32) {
     (Rect::from_min_size(min, shown), scale)
 }
 
-/// How many points an input pixel takes where a `size` picture fits
-/// `rect`: for pixel art, whose pixels take `grid` of the screen's for
-/// each point an input pixel takes, a whole number of the screen's pixels
-/// to each of its own from two up, as nearest neighbour draws them, so
-/// that they are all as wide, rather than some a screen pixel wider.
+/// Points per input pixel when fitting a `size` picture into `rect`. For pixel
+/// art (`grid` screen pixels per art pixel at 1 point/input pixel), snaps to an
+/// integer number of screen pixels per art pixel whenever at least 2× fits, so
+/// nearest-neighbour scaling draws all art pixels at equal width.
 fn fit(rect: Rect, size: (u32, u32), grid: Option<f32>) -> f32 {
     let (width, height) = (size.0.max(1) as f32, size.1.max(1) as f32);
     let fit = ((rect.width() - 2.0 * MARGIN) / width).min((rect.height() - 2.0 * MARGIN) / height);

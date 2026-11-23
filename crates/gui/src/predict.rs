@@ -1,7 +1,6 @@
-//! What a result will look like, worked out on a frame of the input: the
-//! part used, scaled the way the conversion scales it, in its box. Shown
-//! small beside the input, so the effect of the crop and the scaling shows
-//! without converting.
+//! Live result preview rendering from an input frame: crops the part used,
+//! scales it as conversion does, and pads or crops it to the result's size, so
+//! the user can preview crop and scaling changes without running a conversion.
 
 use eframe::egui;
 use tgradish_core::options::{Crop, Resize, Scaling};

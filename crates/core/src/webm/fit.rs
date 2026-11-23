@@ -1,26 +1,24 @@
-//! Searching for encoder settings that land just under the size limit.
+//! Searches for WebM encoder parameters that land just below Telegram's file
+//! size limit.
 //!
-//! The search only talks to an [`Encoder`], so it can be tested without
-//! ffmpeg. It spends an encode only where the encodes so far say it can
-//! do better, and says why it stops, or tries a change or not, as a
-//! [`Decision`]:
+//! Operates purely through the [`Encoder`] trait so it can be unit-tested
+//! without ffmpeg. Spends an encode only when prior attempts show room to
+//! improve, and emits [`Decision`] values whenever it stops or changes
+//! strategy:
 //!
-//! - an encode that fits and uses at least [`IN_BAND`] of the limit, as a
-//!   share shown to a tenth of a percent, is the answer;
-//! - the next value is predicted from the encodes so far, size taken to
-//!   grow along a line with the value: between the largest that fits and
-//!   the smallest that doesn't, the line through them (regula falsi);
-//!   beyond them, the line through the two nearest far enough apart to
-//!   tell ([`SPREAD`]), or in proportion from one. An encode predicted to
-//!   use under [`MIN_GAIN`] more of the limit than the best that fits, or
-//!   to look no more like the input by more than [`ALIKE_NOISE`], isn't
-//!   made. Where nothing fits, the least of the range is encoded before
-//!   the search gives up, and at once where it is predicted not to fit:
-//!   a prediction never shows that nothing fits;
-//! - `fit = auto` lowers the frame rate only where nothing fits at it, or
-//!   the best that fits looks poor (under [`ALIKE_GOOD`]) and the encodes
-//!   don't show that looks hardly depend on bits, as fewer frames only
-//!   give each more of them.
+//! - Stops immediately when a fitting encode uses at least [`IN_BAND`] of the
+//!   size limit (rounded to 0.1%).
+//! - Predicts the next value linearly from prior attempts (regula falsi when
+//!   bracketed, secant through two points separated by at least [`SPREAD`], or
+//!   proportional scaling from one point). Skips attempts predicted to add less
+//!   than [`MIN_GAIN`] of the limit or less than [`ALIKE_NOISE`] SSIM. When
+//!   nothing fits yet, encodes the range minimum before giving up, and encodes
+//!   it immediately if predicted not to fit, because a prediction never proves
+//!   that nothing fits.
+//! - Under `fit = auto`, tries lower frame rates only when nothing fits at the
+//!   current rate, or when SSIM is below [`ALIKE_GOOD`] and the encodes so far
+//!   do not show that more bits hardly help (fewer frames only give each frame
+//!   more bits).
 
 use std::path::PathBuf;
 
@@ -612,9 +610,9 @@ fn fit_auto(f: &mut Fitter, plan: &Plan) -> Result<Search> {
     Ok(total)
 }
 
-/// What fitting encodes first: what it then changes depends on the sizes
-/// that come out. Found by running the search with an encoder that stops
-/// at its first attempt, so it always agrees with it.
+/// Returns the [`Params`] of the first encode attempt for `plan` by running
+/// the search against a stub encoder that stops immediately, keeping it in
+/// sync with `run`. Later attempts depend on the sizes that come out.
 pub fn first_params(plan: &Plan) -> Params {
     /// Notes the first attempt asked for, and stops the search there.
     struct First(Option<Params>);

@@ -1,7 +1,6 @@
-//! What converting will do to the input, step by step in the order it
-//! does them, beside the preview: worked out from the settings alone, the
-//! preset's included, so it never waits on a conversion, and saying
-//! nothing of how it encodes.
+//! Step-by-step summary of what conversion will do to the input, shown beside
+//! the preview. Computed directly from the current settings and preset without
+//! waiting for a conversion, and omits encoder internals.
 
 use eframe::egui;
 use tgradish_core::options::{Crop, Resize, Spoof};

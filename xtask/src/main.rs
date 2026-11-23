@@ -1,92 +1,70 @@
-//! Development tasks, run with `cargo xtask <task>`.
+//! Development and release tasks, run with `cargo xtask <task>`.
 //!
-//! `cargo xtask ffmpeg [--target TARGET] [--no-asm] [--force]` builds the
-//! minimal static ffmpeg libraries that release builds link in: only what
-//! tgradish needs to decode common inputs and encode VP9 WebM. Runs on
-//! Linux, for the machine's own architecture; Windows builds are
-//! cross-compiled with mingw-w64, and musl builds made with musl-gcc
-//! (musl-tools on Debian and Ubuntu, musl on Arch). Needs a C toolchain,
-//! make, pkg-config, nasm (x86-64, unless --no-asm), meson, ninja, curl and
-//! tar. Targets are `linux-x86_64` and `linux-aarch64` for glibc,
-//! `linux-musl-x86_64` and `linux-musl-aarch64` for musl, as on Alpine, and
-//! `windows-x86_64`.
-//!
-//! The static libraries end up in `target/ffmpeg/prefix-<triple>`, and the
-//! licences of everything in them in `target/ffmpeg/licenses-<triple>`; the
-//! archives downloaded in `target/ffmpeg/sources`, and the trees they are
-//! built in in `target/ffmpeg/build-<triple>`.
-//! Libraries already built from the same recipe, the sources and
-//! everything in `xtask/src/ffmpeg.rs`, are kept unless `--force` is given.
-//! ffmpeg is configured without GPL parts, so it is LGPL 2.1 or later.
-//!
-//! `cargo xtask build --target TARGET [--system-ffmpeg]` builds tgradish
-//! for release with those libraries linked in, or with `--system-ffmpeg`
-//! without them, into `target/<triple>/release`; Windows with mingw-w64,
-//! musl with musl-gcc. The release workflow and `local-release` both build
-//! with it.
-//!
-//! `cargo xtask package --target TARGET [--system-ffmpeg] [--max-glibc
-//! 2.28]` packs a built tgradish into a release archive. With
-//! `--system-ffmpeg` it is a build without ffmpeg, which uses the system's.
-//! glibc builds with ffmpeg built in are also packed as a .deb and an .rpm,
-//! with nfpm, which it downloads.
-//!
-//! `cargo xtask ffmpeg-sources` packs the exact source archives of the
-//! ffmpeg build into `target/ffmpeg/ffmpeg-<version>-sources.tar`, which
-//! the release workflow publishes with each release, as the LGPL asks.
-//!
-//! `cargo xtask local-release [--targets linux-x86_64,windows-x86_64]
-//! [--no-asm]` builds and packs every release variant for manual tests,
-//! like the release workflow: with ffmpeg built in, and for glibc also
-//! without. ffmpeg is built first where its libraries are missing or were
-//! built from another recipe. Windows needs mingw-w64, musl musl-gcc. The
-//! archives and binaries end up in `target/release-artifacts`.
-//!
-//! `cargo xtask release` makes a release, with CONTRIBUTING.md's steps:
-//! - `prepare X.Y.Z [--tgs X.Y.Z]` sets the version everywhere it is
-//!   written, and tgradish-tgs's where given, dates the changelog's
-//!   Unreleased as its section and refreshes both lock files, on a tree
-//!   with nothing uncommitted; it says whether tgradish-tgs changed since
-//!   the last release, and what to commit, tag and push;
-//! - `check [--tag vX.Y.Z]` fails unless every place agrees, with the tag
-//!   too where given, and the changelog has a dated section for the
-//!   version: CI runs it, and the release workflow before building;
-//! - `notes [X.Y.Z]` prints the changelog's section for a version,
-//!   Cargo.toml's unless given, which the release workflow drafts the
-//!   release with;
-//! - `aur [--push]`, once the release is published on GitHub, brings the
-//!   maintainer's clones of the AUR packages in `.aur/` up to
-//!   `packaging/aur`, cloning them where missing, with the checksums of
-//!   what they download, and commits there; `--push` pushes them;
-//! - `crates [--dry-run]` publishes to crates.io the crates whose version
-//!   it hasn't, in the order they depend on each other, once asked.
-//!
-//! `cargo xtask licenses [--check]` writes the licences of the Rust crates
-//! in tgradish to `crates/core/licenses/THIRD-PARTY-CRATES.txt`, which
-//! binaries carry, and copies `LICENSE.txt` into every crate that is
-//! published, as a crate is packaged without the repository around it;
-//! `--check` fails if either is out of date, as after dependencies change.
-//! Needs cargo-about 0.9.2, which CI uses too: other versions word the list
-//! differently, so it refuses them. cargo-about skips files a `.gitignore` above the crates'
-//! sources ignores, such as one of a home directory kept in git: then set
-//! `CARGO_HOME` to a directory outside it. `cargo xtask ffmpeg` keeps
-//! `crates/core/licenses/ffmpeg` up to date the same way.
-//!
-//! `cargo xtask man [DIR]` writes tgradish's man pages, `tgradish.1` and
-//! one for each command, into `target/man` or DIR, with clap_mangen, by
-//! `tgradish __man DIR`, which no help names; `tgradish completions SHELL` prints the
-//! shells' completion scripts. Release archives and packages for Linux
-//! have both (`package`).
-//!
-//! `cargo xtask icons [--check]` makes the icons for menus and the Windows
-//! executable from the GUI's own, `crates/gui/assets/icon.png`;
-//! `--check` fails if they are out of date.
-//!
-//! `cargo xtask strings [--no-pictures]` writes `target/strings/index.html`,
-//! a page of the words tgradish shows, to review them or translate the
-//! GUI's: each message beside pictures of where it shows, and the
-//! command line's help pages and messages. The pictures need a GPU wgpu can
-//! use and ffmpeg; `--no-pictures` keeps those made last time.
+//! - `ffmpeg [--target TARGET] [--no-asm] [--force]`: builds the minimal static
+//!   LGPL 2.1+ ffmpeg libraries linked into release builds (decoders for common
+//!   inputs and VP9 WebM encoding only, with no GPL components). Runs on Linux
+//!   for the host architecture, cross-compiles Windows with mingw-w64, and
+//!   builds musl with `musl-gcc` (`musl-tools` on Debian/Ubuntu, `musl` on
+//!   Arch). Requires a C toolchain, `make`, `pkg-config`, `nasm` (x86-64 unless
+//!   `--no-asm`), `meson`, `ninja`, `curl` and `tar`. Targets: `linux-x86_64`,
+//!   `linux-aarch64`, `linux-musl-x86_64`, `linux-musl-aarch64` (as on Alpine)
+//!   and `windows-x86_64`. Static libraries go to
+//!   `target/ffmpeg/prefix-<triple>`, licences to
+//!   `target/ffmpeg/licenses-<triple>` (and `crates/core/licenses/ffmpeg`),
+//!   downloaded tarballs to `target/ffmpeg/sources`, and build trees to
+//!   `target/ffmpeg/build-<triple>`. Cached builds from the same recipe and
+//!   `xtask/src/ffmpeg.rs` are reused unless `--force` is passed.
+//! - `build --target TARGET [--system-ffmpeg]`: builds a release binary into
+//!   `target/<triple>/release`, statically linking the built ffmpeg unless
+//!   `--system-ffmpeg` is passed (Windows uses mingw-w64, musl uses
+//!   `musl-gcc`). Used by both the release workflow and `local-release`.
+//! - `package --target TARGET [--system-ffmpeg] [--max-glibc 2.28]`: packages a
+//!   built binary into a release archive (`--system-ffmpeg` packages a build
+//!   that uses the system ffmpeg). For glibc builds with built-in ffmpeg, also
+//!   builds `.deb` and `.rpm` packages via `nfpm` (downloaded automatically).
+//! - `ffmpeg-sources`: packs the exact source tarballs of the static ffmpeg
+//!   build into `target/ffmpeg/ffmpeg-<version>-sources.tar`, which the release
+//!   workflow publishes with each release for LGPL compliance.
+//! - `local-release [--targets linux-x86_64,windows-x86_64] [--no-asm]`: builds
+//!   and packages all release variants locally for manual testing (with
+//!   built-in ffmpeg, plus `--system-ffmpeg` for glibc targets, building ffmpeg
+//!   first if missing or outdated; Windows requires mingw-w64, musl requires
+//!   `musl-gcc`). Outputs go to `target/release-artifacts`.
+//! - `release`: automates the release steps in `CONTRIBUTING.md`:
+//!   - `prepare X.Y.Z [--tgs X.Y.Z]`: bumps versions everywhere (including
+//!     `tgradish-tgs` when `--tgs` is given), dates `CHANGELOG.md`
+//!     `Unreleased`, refreshes both lock files (refusing unless the working
+//!     tree is clean), reports whether `tgradish-tgs` changed since the last
+//!     release, and prints the commit/tag/push commands.
+//!   - `check [--tag vX.Y.Z]`: verifies that all version references (and the
+//!     optional tag) agree and `CHANGELOG.md` has a dated section for the
+//!     version. Run by CI and by the release workflow before building.
+//!   - `notes [X.Y.Z]`: prints the changelog section for the given version (or
+//!     `Cargo.toml`'s version), used by the release workflow to draft the
+//!     GitHub release.
+//!   - `aur [--push]`: once the GitHub release is published, syncs `.aur/`
+//!     clones from `packaging/aur/` (cloning if missing), fills in download
+//!     checksums from the release, commits, and with `--push` pushes to the AUR.
+//!   - `crates [--dry-run]`: publishes unpublished crate versions to crates.io
+//!     in dependency order after interactive confirmation.
+//! - `licenses [--check]`: writes third-party Rust crate licences to
+//!   `crates/core/licenses/THIRD-PARTY-CRATES.txt` (embedded in binaries) using
+//!   pinned `cargo-about` 0.9.2 (other versions format the output differently
+//!   and are rejected) and copies `LICENSE.txt` into every published crate (as
+//!   crates are packaged without the workspace root); `--check` fails if either
+//!   is out of date. Because `cargo-about` skips files matched by any parent
+//!   `.gitignore` (such as a dotfile repo in `$HOME`), set `CARGO_HOME` outside
+//!   it if needed.
+//! - `man [DIR]`: generates `tgradish.1` and subcommand man pages into
+//!   `target/man` or `DIR` using `clap_mangen` via the hidden
+//!   `tgradish __man DIR` command (`tgradish completions SHELL` prints shell
+//!   completions; Linux release archives and packages include both).
+//! - `icons [--check]`: generates menu PNG icons and `tgradish.ico` from
+//!   `crates/gui/assets/icon.png`; `--check` fails if they are out of date.
+//! - `strings [--no-pictures]`: builds `target/strings/index.html` for string
+//!   review and GUI translation, pairing each GUI message with screenshots and
+//!   listing CLI help pages and source strings. Capturing screenshots requires
+//!   a wgpu-capable GPU and ffmpeg; `--no-pictures` reuses previous screenshots.
 
 mod build;
 mod ffmpeg;

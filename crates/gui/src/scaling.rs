@@ -1,15 +1,14 @@
-//! The GUI's scale as egui applies it, with the pointer kept where it
-//! is on the screen as the scale changes.
+//! egui UI zoom factor management that keeps the pointer position accurate
+//! across scale changes.
 //!
-//! egui-winit says where the pointer is in points, at the scale of the
-//! moment, and says that same place again with each press until the
-//! pointer moves; egui keeps it as well. As the scale changes, the pointer
-//! hasn't moved, so neither says anything new, and the place both keep is
-//! where the pointer would be at the old scale: what is under the pointer
-//! doesn't show it, and a button clicked again without moving the pointer
-//! isn't where egui looks, as with Settings' − and +, kept under the
-//! pointer. So each frame's input is said again at the scale egui reads it
-//! at, and where the scale changes, where the pointer is with it.
+//! `egui-winit` reports pointer positions in logical points at the current zoom
+//! factor and reuses the last position on button presses until the pointer
+//! moves; egui also caches the last pointer position. When the zoom factor
+//! changes without pointer movement, the cached logical coordinates would point
+//! to the old scale's position (breaking hover state and repeated clicks on
+//! stationary stepper buttons like Settings' `−` and `+`). This module rescales
+//! each frame's pointer events to the incoming zoom factor and injects a
+//! synthetic `PointerMoved` event when the zoom factor changes.
 
 use eframe::egui;
 

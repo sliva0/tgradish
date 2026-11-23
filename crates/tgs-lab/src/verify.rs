@@ -29,7 +29,7 @@ impl Renderer {
         let key = format!("tgs-lab-{}", LOADS.fetch_add(1, Ordering::Relaxed));
         rlottie::Animation::from_data(json, key, "")
             .map(Renderer::Rlottie)
-            .ok_or_else(|| anyhow!("rlottie can't parse the animation"))
+            .ok_or_else(|| anyhow!("rlottie could not parse the animation"))
     }
 
     /// Every renderer this build has, by name.

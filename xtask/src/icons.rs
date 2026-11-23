@@ -1,7 +1,7 @@
-//! The icons for menus and the Windows executable, made from the GUI's
-//! own pixel art rather than drawn apart, so they can't drift from it.
-//! They are committed, since release packages and the Windows build take
-//! them from the repository, and CI checks they still match the GUI's.
+//! Generates desktop menu PNG icons and the Windows `.ico` file directly from
+//! the GUI's pixel-art icon (`crates/gui/assets/icon.png`) so they cannot
+//! drift apart. Generated icons are committed to `crates/cli/assets/` for
+//! release packaging and Windows builds, and checked in CI.
 
 use std::path::Path;
 
@@ -61,7 +61,7 @@ pub fn icons(args: &[String]) -> Result<()> {
         }
     }
     if check {
-        println!("the icons are up to date");
+        println!("icons are up to date");
     }
     Ok(())
 }
@@ -70,7 +70,7 @@ pub fn icons(args: &[String]) -> Result<()> {
 fn read_rgba(path: &Path) -> Result<(usize, Vec<u8>)> {
     let file = std::io::BufReader::new(std::fs::File::open(path)?);
     let mut reader = png::Decoder::new(file).read_info()?;
-    let mut pixels = vec![0; reader.output_buffer_size().context("the PNG is too big")?];
+    let mut pixels = vec![0; reader.output_buffer_size().context("PNG is too large")?];
     let info = reader.next_frame(&mut pixels)?;
     ensure!(
         (info.color_type, info.bit_depth) == (png::ColorType::Rgba, png::BitDepth::Eight)

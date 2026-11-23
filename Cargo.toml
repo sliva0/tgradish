@@ -1,28 +1,27 @@
 [workspace]
 resolver = "3"
 members = ["crates/*", "xtask"]
-# a workspace of its own, see its manifest
+# Separate workspace; see crates/tgs-lab/Cargo.toml.
 exclude = ["crates/tgs-lab"]
 
-# the application's version, which core, the GUI and the command line
-# share; the library, tgradish-tgs, has its own
+# Shared application version for core, GUI, CLI, and xtask.
+# tgradish-tgs is versioned independently.
 [workspace.package]
 version = "2.1.1"
 edition = "2024"
-# the oldest Rust that builds every crate: `if let` guards in matches need
-# it, as does the GUI's egui
+# Minimum supported Rust version: required by `if let` match guards and egui.
 rust-version = "1.95"
 license = "MIT"
 authors = ["sliva0 <sliva0mk@gmail.com>"]
 repository = "https://github.com/sliva0/tgradish"
 
-# The workspace's own crates ask for each other's exact versions: they are
-# released together, and `cargo install` resolves afresh rather than read
-# Cargo.lock, so a looser requirement could pair crates never built as one.
+# Pin internal workspace crates to exact versions: they are released together,
+# and `cargo install` resolves fresh dependencies without Cargo.lock, so a
+# looser requirement could pair crates that were never built together.
 [workspace.dependencies]
 tgradish-core = { path = "crates/core", version = "=2.1.1" }
-# synthetic test art, the crates' dev-dependency: unpublished, so without
-# a version, which leaves it out of the packages cargo publishes
+# Unpublished dev-dependency for synthetic test media; omitting `version`
+# keeps it out of published crate manifests.
 tgradish-corpus = { path = "crates/corpus" }
 tgradish-gui = { path = "crates/gui", version = "=2.1.1" }
 tgradish-tgs = { path = "crates/tgs", version = "=0.2.0" }
@@ -30,7 +29,7 @@ tgradish-tgs = { path = "crates/tgs", version = "=0.2.0" }
 anyhow = "1.0.104"
 arboard = { version = "3.6.1", features = ["wayland-data-control"] }
 clap = { version = "4.6.7", features = ["derive", "env", "wrap_help"] }
-# `tgradish completions` and the man pages, which must move with clap
+# Shell completions and man pages; keep aligned with clap.
 clap_complete = "4.6.11"
 clap_complete_nushell = "4.6.2"
 clap_mangen = "0.3.3"
@@ -39,27 +38,27 @@ ctrlc = "3.5.2"
 directories = "6.0.0"
 embed-resource = "3.0.12"
 eframe = { version = "0.36.2", default-features = false, features = ["glow", "wayland", "x11"] }
-# the GUI's tests, which must move with eframe
+# GUI test harness; keep aligned with eframe.
 egui_kittest = { version = "0.36.2", features = ["eframe", "snapshot", "wgpu"] }
 egui-wgpu = "0.36.2"
 flate2 = "1.1.10"
 gif = "0.14.2"
-# the GUI's translations' tests, which read the files as Fluent does
+# GUI localisation tests, parsing Fluent files directly.
 fluent-bundle = "0.16.0"
 fluent-syntax = "0.12.0"
-# the GUI's translations: Fluent files built into the binary, `fl!`
-# checking their messages at compile time
+# GUI localisation: embeds Fluent files and checks message keys at compile time
+# via `fl!`.
 i18n-embed = { version = "0.16.0", default-features = false, features = ["fluent-system", "rust-embed"] }
 i18n-embed-fl = "0.10.1"
 image-webp = "0.2.4"
 libloading = "0.8.9"
-# the allocator of musl builds, see crates/cli/src/main.rs
+# Global allocator for musl builds; see crates/cli/src/main.rs.
 libmimalloc-sys = { version = "0.1.49", features = ["extended"] }
 mimalloc = { version = "0.1.52", features = ["override"] }
-# SIGTERM and SIGHUP, see crates/cli/src/signals.rs: already ctrlc's, with
-# its signal feature
+# SIGTERM and SIGHUP handling (see crates/cli/src/signals.rs); already pulled
+# in by ctrlc.
 nix = { version = "0.31.3", default-features = false, features = ["signal"] }
-# the accent colour on macOS, already in the GUI's dependencies there
+# System accent colour on macOS; already pulled in by the GUI stack there.
 objc2 = "0.6.5"
 objc2-app-kit = { version = "0.3.2", default-features = false }
 libwebp-sys = { version = "0.14.4", default-features = false, features = ["std", "parallel"] }
@@ -72,12 +71,13 @@ sys-locale = "0.3.2"
 raw-window-handle = "0.6.2"
 rustix = "1.1.5"
 rfd = "0.17.2"
-# in debug builds too, so that `fl!` checks the files that are built in
+# Embed in debug builds too so `fl!` validates embedded files during
+# development.
 rust-embed = { version = "8.13.0", features = ["debug-embed"] }
 schemars = "1.2.2"
 serde = { version = "1.0.229", features = ["derive"] }
-# each crate names the features it needs, so publishing one doesn't turn
-# another's on for whoever depends on it
+# Each crate enables only the features it needs to avoid leaking features to
+# consumers.
 serde_json = "1.0.151"
 shlex = "2.0.1"
 tempfile = "3.27.0"
@@ -97,12 +97,11 @@ unsafe_code = "deny"
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 
-# the encoder searches a lot, which takes minutes over the test corpus
-# without optimisation
+# The TGS encoder searches a lot: unoptimised, the test corpus takes minutes.
 [profile.dev.package.tgradish-tgs]
 opt-level = 2
 
-# and packs them, fitting's estimates as well as the result
+# zopfli packs both the final .tgs and size-fitting estimates.
 [profile.dev.package.zopfli]
 opt-level = 2
 
@@ -114,8 +113,8 @@ lto = "thin"
 strip = true
 codegen-units = 1
 
-# most dependencies are the GUI's and argument parsing, which aren't
-# where time goes; what decodes, writes and compresses stickers is
+# Optimise most dependencies (GUI, CLI parsing) for size, and hot
+# decoding/encoding/compression crates for speed.
 [profile.release.package."*"]
 opt-level = "s"
 

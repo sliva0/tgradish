@@ -1,36 +1,35 @@
-//! What a WebM conversion's events tell of as it fits: the settings of
-//! each encode, and why fitting stopped where it did or tried a change,
-//! which [`crate::Event`] carries.
+//! WebM encoding parameters and size-fitting decision types carried by
+//! [`crate::Event`].
 
 use schemars::JsonSchema;
 use serde::Serialize;
 
-/// Rate control used by one encode. Serialised tagged by `mode`, as
+/// Rate control mode for a single encode attempt. Serialises with a `mode` tag:
 /// `{"mode":"bitrate","kbps":500}`, `{"mode":"crf","crf":32}` or
 /// `{"mode":"lossless"}`.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
 #[serde(into = "RateMode")]
 #[non_exhaustive]
 pub enum Rate {
-    /// Two-pass average bitrate, in kbit/s.
+    /// Two-pass target bitrate in kbit/s.
     Bitrate(f64),
-    /// Constant quality, from 0 (best) to 63.
+    /// Constant quality from 0 (best) to 63 (worst).
     Crf(u8),
     /// Lossless VP9.
     Lossless,
 }
 
-/// [`Rate`] as it is serialised: an internally tagged enum needs fields
-/// to put its tag beside.
+/// Serialisation helper for [`Rate`]: an internally tagged serde enum cannot
+/// put its tag beside a bare number.
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "mode", rename_all = "kebab-case")]
 enum RateMode {
-    /// Two-pass average bitrate.
+    /// Two-pass target bitrate.
     Bitrate {
-        /// In kbit/s.
+        /// Bitrate in kbit/s.
         kbps: f64,
     },
-    /// Constant quality, from 0 (best) to 63.
+    /// Constant quality from 0 (best) to 63 (worst).
     Crf {
         crf: u8,
     },
@@ -47,118 +46,116 @@ impl From<Rate> for RateMode {
     }
 }
 
-/// Settings of one encode.
+/// Parameters used for a single WebM encode attempt.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Params {
-    /// Frames a second.
+    /// Frame rate in frames per second.
     pub fps: f64,
-    /// Length in seconds.
+    /// Duration in seconds.
     pub length: f64,
-    /// How the encoder spends bytes.
+    /// Rate control mode.
     pub rate: Rate,
 }
 
-/// Why fitting stopped where it did, or tried a change, said as it
-/// decides; a change left untried leaves the result as planned, which
-/// needs no reason. Serialised tagged by `reason`, shares of
-/// the limit and SSIM from 0 to 1, as `{"reason":"in-band","attempt":2,
-/// "share":0.99,"least":0.96}`.
+/// Reason why WebM size-fitting stopped or changed strategy. Serialises with a
+/// `reason` tag; limit shares are fractions of the limit (above 1.0 when over
+/// it) and SSIM is from 0 to 1 (e.g.
+/// `{"reason":"in-band","attempt":2,"share":0.99,"least":0.96}`). A change not
+/// tried emits nothing.
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "reason", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Decision {
-    /// Stopped: `attempt` fits and uses `share` of the limit, at least
-    /// the `least` fitting aims for.
+    /// Stopped because `attempt` fits and uses at least `least` of the size
+    /// limit.
     InBand {
-        /// The encode.
+        /// Attempt number.
         attempt: u32,
-        /// Its share of the limit.
+        /// Fraction of the size limit used.
         share: f64,
-        /// The least share that ends fitting.
+        /// Minimum share that ends fitting.
         least: f64,
     },
-    /// Stopped: `attempt` looks as like the input as encodes get, so more
-    /// bits would only make it larger.
+    /// Stopped because `attempt` already looks as like the input as encodes
+    /// get (SSIM >= 0.995), so more bits would only make it larger.
     AlikeEnough {
-        /// The encode.
+        /// Attempt number.
         attempt: u32,
-        /// Its SSIM.
+        /// SSIM score (0.0 to 1.0).
         ssim: f64,
     },
-    /// Stopped: `attempt` looks hardly more like the input than `than`,
-    /// made with fewer bits, so more still are not worth an encode.
+    /// Stopped because `attempt` barely improved SSIM over `than` (made with
+    /// fewer bits), so spending more bits is not worth another encode.
     AlikeUnchanged {
-        /// The encode with more bits.
+        /// Attempt with more bits.
         attempt: u32,
-        /// The one with fewer.
+        /// Earlier attempt with fewer bits.
         than: u32,
-        /// The SSIM of `attempt`.
+        /// SSIM score of `attempt`.
         ssim: f64,
     },
-    /// Stopped: the next encode is predicted to use `predicted` of the
-    /// limit, too little more than the `share` of `attempt`, the best
-    /// that fits, to be worth it.
+    /// Stopped because the next predicted encode would gain too little size
+    /// over `attempt`.
     LittleToGain {
-        /// The best encode that fits.
+        /// Best fitting attempt so far.
         attempt: u32,
-        /// Its share of the limit.
+        /// Current share of the size limit.
         share: f64,
-        /// The next one's, as predicted.
+        /// Predicted share of the next attempt.
         predicted: f64,
     },
-    /// Stopped: nothing fits, not even the least of the range searched,
-    /// encoded in `attempt`, which uses `share` of the limit.
+    /// Stopped because even the minimum value in the search range exceeded the
+    /// limit.
     TooLargeAtLeast {
-        /// The encode of the least.
+        /// Attempt at the minimum search value.
         attempt: u32,
-        /// Its share of the limit.
+        /// Fraction of the size limit used (> 1.0).
         share: f64,
     },
-    /// Stopped: every value of the range worth trying is tried.
+    /// Stopped because no untried values remain in the search range.
     NothingLeft,
-    /// Stopped: all `attempts` encodes allowed are made.
+    /// Stopped after using all allowed attempts.
     OutOfAttempts {
-        /// How many.
+        /// Configured attempt cap.
         attempts: u32,
     },
-    /// Trying `fps`: nothing fit at `from`.
+    /// Lowering frame rate to `fps` because nothing fit at `from`.
     LowersFrameRateToFit {
-        /// The frame rate given up.
+        /// Previous frame rate.
         from: f64,
-        /// The one tried next.
+        /// Next frame rate to try.
         fps: f64,
     },
-    /// Trying `fps`: the best that fits at `from`, `attempt`, looks only
-    /// `ssim` like the input.
+    /// Lowering frame rate to `fps` because the best encode at `from` had low
+    /// SSIM.
     LowersFrameRateForLooks {
-        /// The frame rate given up, for now.
+        /// Previous frame rate.
         from: f64,
-        /// The one tried next.
+        /// Next frame rate to try.
         fps: f64,
-        /// The best encode at `from`.
+        /// Best attempt at `from`.
         attempt: u32,
-        /// Its SSIM.
+        /// SSIM score of `attempt`.
         ssim: f64,
     },
-    /// Stopped: at `fps`, the best looks `ssim` like the input, no more
-    /// than `kept`, at `kept_fps`, does with `kept_ssim`.
+    /// Stopped because `fps` did not beat `kept` at `kept_fps` in SSIM.
     LowerLooksNoBetter {
-        /// The frame rate tried.
+        /// Lower frame rate just tried.
         fps: f64,
-        /// How like the input its best looks.
+        /// Best SSIM achieved at `fps`.
         ssim: f64,
-        /// The encode kept.
+        /// Previously kept attempt number.
         kept: u32,
-        /// Its frame rate.
+        /// Frame rate of `kept`.
         kept_fps: f64,
-        /// Its SSIM.
+        /// SSIM score of `kept`.
         kept_ssim: f64,
     },
-    /// Stopped early, as asked: `attempt` is kept, the best that fits so
-    /// far, see [`CancelToken::settle`](crate::CancelToken::settle).
+    /// Stopped early via [`CancelToken::settle`](crate::CancelToken::settle),
+    /// keeping the best fitting `attempt` so far.
     Settled {
-        /// The encode kept.
+        /// Kept attempt number.
         attempt: u32,
     },
 }
@@ -173,58 +170,60 @@ impl std::fmt::Display for Decision {
         match *self {
             Decision::InBand { attempt, share, least } => write!(
                 f,
-                "stopped: attempt {attempt} uses {} of the limit, at least the {} aimed for",
+                "stopped: attempt {attempt} uses {} of the limit (target >= {})",
                 percent(share),
                 percent(least)
             ),
             Decision::AlikeEnough { attempt, ssim } => write!(
                 f,
-                "stopped: attempt {attempt} already looks {} like the input, so more bits would \
-                 only make it larger",
+                "stopped: attempt {attempt} already matches the input at {} SSIM; more bits would \
+                 only enlarge it",
                 percent(ssim)
             ),
             Decision::AlikeUnchanged { attempt, than, ssim } => write!(
                 f,
-                "stopped: attempt {attempt} looks {} like the input, hardly more than attempt \
-                 {than} with fewer bits",
+                "stopped: attempt {attempt} reaches {} SSIM, barely improving on attempt {than} \
+                 with fewer bits",
                 percent(ssim)
             ),
             Decision::LittleToGain { attempt, share, predicted } => write!(
                 f,
-                "stopped: attempt {attempt} uses {} of the limit, and another would use about {}",
+                "stopped: attempt {attempt} uses {} of the limit; the next attempt would only \
+                 reach about {}",
                 percent(share),
                 percent(predicted)
             ),
             Decision::TooLargeAtLeast { attempt, share } => write!(
                 f,
-                "stopped: even the least of the range, attempt {attempt}, uses {} of the limit",
+                "stopped: even the lowest value in the range (attempt {attempt}) uses {} of the \
+                 limit",
                 percent(share)
             ),
-            Decision::NothingLeft => write!(f, "stopped: no value is left worth trying"),
+            Decision::NothingLeft => write!(f, "stopped: no remaining values worth trying"),
             Decision::OutOfAttempts { attempts } => {
-                write!(f, "stopped: all {attempts} attempts are made")
+                write!(f, "stopped: reached the limit of {attempts} attempts")
             }
             Decision::LowersFrameRateToFit { from, fps: rate } => {
                 write!(f, "trying {} fps: nothing fit at {} fps", fps(rate), fps(from))
             }
             Decision::LowersFrameRateForLooks { from, fps: rate, attempt, ssim } => write!(
                 f,
-                "trying {} fps: attempt {attempt} at {} fps looks only {} like the input",
+                "trying {} fps: attempt {attempt} at {} fps only reached {} SSIM",
                 fps(rate),
                 fps(from),
                 percent(ssim)
             ),
             Decision::LowerLooksNoBetter { fps: rate, ssim, kept, kept_fps, kept_ssim } => write!(
                 f,
-                "stopped: {} fps looks {} like the input, no better than attempt {kept} at {} fps \
-                 with {}",
+                "stopped: {} fps reached {} SSIM, no better than attempt {kept} at {} fps ({} \
+                 SSIM)",
                 fps(rate),
                 percent(ssim),
                 fps(kept_fps),
                 percent(kept_ssim)
             ),
             Decision::Settled { attempt } => {
-                write!(f, "stopped early, as asked: kept attempt {attempt}, the best that fits")
+                write!(f, "stopped early as requested: kept attempt {attempt}, the best that fits")
             }
         }
     }

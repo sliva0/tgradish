@@ -1,4 +1,4 @@
-//! Sets of cells as bits.
+//! Bitset representation of 2D cell masks.
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct Mask {

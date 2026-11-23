@@ -1,7 +1,7 @@
-//! The bar under the preview: where playback is, and which part of the
-//! input is used, with handles and numbers to change it. Where the
-//! input's frames are known, cuts land between them, and the numbers can
-//! count frames instead of seconds.
+//! Playback and trim bar under the preview: playhead scrubbing, trim start/end
+//! brackets and numeric fields, frame-picker mode for static outputs, and the
+//! result player. When frame timestamps are known, trim boundaries snap
+//! between frames and fields can display either frame numbers or seconds.
 
 use std::ops::RangeInclusive;
 
@@ -15,50 +15,51 @@ use crate::cuts::{Frames, part, set_part};
 use crate::l10n::fl;
 use crate::{theme, widgets};
 
-/// What the timeline changes.
+/// Parameters and mutable state for the input [`Timeline`].
 pub(crate) struct Timeline<'a> {
-    /// Length of the input, in seconds.
+    /// Total input duration in seconds.
     pub(crate) length: f64,
     pub(crate) start: &'a mut Option<f64>,
-    /// Length used from the start; the rest of the input when `None`.
+    /// Trimmed duration from `start` (`None` uses the remainder of the input).
     pub(crate) used: &'a mut Option<f64>,
     pub(crate) time: &'a mut f64,
     pub(crate) playing: &'a mut bool,
-    /// Telegram's length limit, marked from the start.
+    /// Telegram's 3 s output duration limit, marked from the start of the used
+    /// part, expressed in input seconds.
     pub(crate) limit: f64,
-    /// What becomes of the used part past the limit.
+    /// How content beyond `limit` is handled.
     pub(crate) past: PastLimit,
-    /// The input's frames, which cuts land between, when they are known.
+    /// Known frame boundaries for frame-accurate snapping.
     pub(crate) frames: Option<&'a Frames>,
-    /// Numbers count frames rather than seconds.
+    /// Whether numeric fields display frame numbers instead of seconds.
     pub(crate) in_frames: &'a mut bool,
 }
 
-/// What becomes of the used part past Telegram's limit, which the
-/// timeline hatches only where it is left out of the result.
+/// How the selected time range beyond Telegram's 3 s limit is handled (the
+/// timeline hatches the region past the limit only when it will be [`Cut`](PastLimit::Cut)).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum PastLimit {
-    /// Kept: a WebM's duration is spoofed, so Telegram takes all of it.
+    /// Kept in full: WebM container duration is spoofed to `<= 3 s`.
     Spoofed,
-    /// Kept: a `.tgs` at the speed tgradish picks plays fast enough to fit.
+    /// Kept in full: `.tgs` with automatic speed is accelerated to fit within 3 s.
     SpedUp,
-    /// Left out: the result ends at the limit.
+    /// Truncated: output stops at the 3 s limit.
     Cut,
 }
 
 impl PastLimit {
-    /// What a result in `format` does with the used part past the limit,
-    /// made with `webm` or `tgs`, the preset's options and the file's own.
+    /// Determines how an output in `format` with effective options `webm` or
+    /// `tgs` handles content past the 3 s limit.
     pub(crate) fn of(format: Format, webm: &webm::Options, tgs: &tgs::Options) -> PastLimit {
         match format {
             Format::Webm if webm.spoof_or_default() != Spoof::Never => PastLimit::Spoofed,
-            // a speed set plays as it says, the rest cut at 3 seconds
+            // An explicit `.tgs` tempo plays at that exact speed and truncates past 3 s.
             Format::Tgs if tgs.tempo.is_none() => PastLimit::SpedUp,
             _ => PastLimit::Cut,
         }
     }
 
-    /// What the limit's mark says, on hover and to screen readers.
+    /// Returns the tooltip and screen-reader description for the 3 s limit marker.
     pub(crate) fn text(self) -> String {
         match self {
             PastLimit::Spoofed => fl!("limit-mark", "spoofed"),
@@ -68,8 +69,8 @@ impl PastLimit {
     }
 }
 
-/// What of the used part, from `from` to `to`, is left out of the result
-/// past the `limit` from its start, as `past` says: what the bar hatches.
+/// Returns the `(cut_start, cut_end)` interval truncated past `limit` when
+/// `past` is [`PastLimit::Cut`], or `None` if nothing is truncated.
 fn left_out(from: f64, to: f64, limit: f64, past: PastLimit) -> Option<(f64, f64)> {
     let over = to - from > limit + 1e-3;
     (over && past == PastLimit::Cut).then_some((from + limit, to))
@@ -79,23 +80,23 @@ fn left_out(from: f64, to: f64, limit: f64, past: PastLimit) -> Option<(f64, f64
 enum Grab {
     Start,
     End,
-    /// One of the ends, where they meet on the bar, until the pointer
-    /// moves one way or the other from where it was pressed, at this x.
+    /// Ambiguous grab when `Start` and `End` overlap, resolved on the first
+    /// pointer movement away from press `x`.
     Either(f32),
-    /// All of the used part, keeping its length, from where it was, in
-    /// seconds, and where the pointer was pressed, at this x.
+    /// Shift-drag sliding the entire trimmed range of `(from_sec, to_sec)`
+    /// relative to press `x`.
     Slide((f64, f64), f32),
     Seek,
 }
 
-/// How near one of the used part's ends, in points, the pointer takes it.
+/// Hit-test radius in points around the trim start/end brackets.
 const REACH: f32 = 8.0;
 
-/// What the pointer at `x` takes on a bar whose used part's ends are at
-/// `ends`: the nearer end within reach, the one on the pointer's side of
-/// the middle between them, as a short part's ends are both in reach;
-/// where that doesn't tell, as where they meet, the one the pointer moves
-/// `towards`, on its way left below 0. Otherwise it seeks.
+/// Determines what a pointer at `x` grabs on a bar with trim brackets at
+/// `(start, end)`: the nearer bracket within [`REACH`] (splitting at the
+/// midpoint when both brackets are within reach, or using movement direction
+/// `towards`, where negative means moving left, when they overlap), or
+/// [`Grab::Seek`] outside [`REACH`].
 fn grab_at(x: f32, (start, end): (f32, f32), towards: f32) -> Grab {
     if (x - start).abs().min((x - end).abs()) > REACH {
         return Grab::Seek;
@@ -110,9 +111,9 @@ fn grab_at(x: f32, (start, end): (f32, f32), towards: f32) -> Grab {
     }
 }
 
-/// A field of a boundary between frames: its frame counted from 1, or
-/// where it is in seconds. `end` marks the boundary after the last frame
-/// used, which counts as that frame.
+/// Builds a numeric field for a frame boundary index (`0..=frames.count()`),
+/// formatted as a 1-based frame number (`end = true` formats boundary `N` as
+/// frame `N`) or as a timestamp in seconds.
 pub(crate) fn boundary_field<'a>(
     boundary: &'a mut usize,
     range: RangeInclusive<usize>,
@@ -138,9 +139,8 @@ pub(crate) fn boundary_field<'a>(
     }
 }
 
-/// A frame's or a boundary's `index` stepped `steps` frames, or, where
-/// `large`, as many seconds, to where `at` puts the time so far from its
-/// own: a frame at the least.
+/// Steps a frame or boundary `index` by `steps` frames (when `!large`) or by
+/// `steps` seconds via `at` (when `large`, advancing by at least one frame).
 fn by_seconds(index: f64, steps: f64, large: bool, at: impl Fn(f64) -> usize) -> f64 {
     if !large {
         return index + steps;
@@ -152,8 +152,9 @@ fn by_seconds(index: f64, steps: f64, large: bool, at: impl Fn(f64) -> usize) ->
     }
 }
 
-/// A field of one of `frames`, by its `index`: its number from 1, or where
-/// it starts in seconds. A time typed picks the frame shown then.
+/// Builds a numeric field for a single frame `index` (`0..frames.count()`),
+/// formatted as a 1-based frame number or start timestamp in seconds. A time
+/// typed picks the frame shown then.
 pub(crate) fn frame_field<'a>(
     index: &'a mut usize,
     frames: &'a Frames,
@@ -176,38 +177,37 @@ pub(crate) fn frame_field<'a>(
     }
 }
 
-/// How wide frames are on the bar, at least, for where they meet to be
-/// marked.
+/// Minimum points per frame on the timeline bar before individual frame
+/// tick marks are drawn.
 const MARKED_FRAME: f32 = 6.0;
 
-/// How high the bar is: as high as the buttons and fields beside it, so all
-/// of the row is in line.
+/// Timeline bar height (matches [`theme::CONTROL`] so buttons, fields, and bar
+/// align on one row).
 const BAR: f32 = theme::CONTROL;
 
-/// How high the track is, in the middle of the bar, so that it is in line
-/// with the middle of the buttons and fields beside it: what is left over
-/// it holds the playhead's head and the limit's label, and as much under it.
+/// Height of the inner track centred inside [`BAR`], leaving room above and
+/// below for the playhead triangle, 3 s limit label, and hover readout pill.
 const TRACK: f32 = 12.0;
 
-/// The track of the bar `rect`, where the input runs from end to end: in
-/// its middle, and in from its ends by room for the brackets and the
-/// playhead's head, so that they show whole at the ends.
+/// Returns the inner track rectangle within `rect`, inset by 8 pt on each end
+/// so trim brackets and the playhead triangle fit without clipping.
 fn track_of(rect: Rect) -> Rect {
     Rect::from_center_size(rect.center(), vec2(rect.width() - 16.0, TRACK))
 }
 
-/// Width of the fields of where the used part starts and ends.
+/// Width of the trim start and end numeric fields.
 const FIELD: f32 = 64.0;
 
-/// The least the bar narrows to: narrower, the unit's segments go under it.
+/// Minimum width of the timeline bar before the seconds/frames unit selector
+/// wraps onto a second row below.
 const NARROWEST_BAR: f32 = 160.0;
 
-/// Width of the play button, and of the frame picker's steps.
+/// Width of the play/pause button and frame-step buttons.
 const BUTTON: f32 = 30.0;
-/// Width of the frame picker's field.
+/// Width of the frame picker's numeric field.
 const PICKED: f32 = 72.0;
 
-/// The choices of what the numbers count.
+/// Segment choices for the timeline unit toggle (`Seconds` vs `Frames`).
 fn units() -> [widgets::Choice<bool>; 2] {
     [
         (false, fl!("in-seconds"), fl!("in-seconds", "hint")),
@@ -215,15 +215,14 @@ fn units() -> [widgets::Choice<bool>; 2] {
     ]
 }
 
-/// How wide the unit's segments are, as their words make them.
+/// Total width of the seconds/frames unit segments.
 fn unit_width(ui: &egui::Ui) -> f32 {
     let padding = 2.0 * ui.spacing().button_padding.x;
     units().iter().map(|(_, text, _)| widgets::text_width(ui, text, padding) + 1.0).sum()
 }
 
-/// Whether a timeline `width` wide puts the unit's segments on a line of
-/// their own, under its end, as the row leaves the bar less than its
-/// narrowest beside them; for the `picker` of a frame, or of a part.
+/// Returns true if a timeline row of `width` must place the unit segments on a
+/// second line below the bar so the bar remains at least [`NARROWEST_BAR`] wide.
 fn two_lines(ui: &egui::Ui, width: f32, picker: bool) -> bool {
     let gap = ui.spacing().item_spacing.x;
     let fixed = match picker {
@@ -233,9 +232,8 @@ fn two_lines(ui: &egui::Ui, width: f32, picker: bool) -> bool {
     fixed + NARROWEST_BAR + gap + unit_width(ui) > width
 }
 
-/// How much higher than a row a timeline `width` wide is, for the `picker`
-/// of a frame or of a part: a line more where the unit's segments go under
-/// the bar.
+/// Returns any extra height beyond a single [`theme::CONTROL`] row needed when
+/// the unit selector wraps onto a second line.
 pub(crate) fn extra_height(ui: &egui::Ui, width: f32, picker: bool) -> f32 {
     match two_lines(ui, width, picker) {
         true => theme::CONTROL + ui.spacing().item_spacing.y,
@@ -243,26 +241,24 @@ pub(crate) fn extra_height(ui: &egui::Ui, width: f32, picker: bool) -> f32 {
     }
 }
 
-/// How wide the bar is, and the room of the unit's segments after it, out
-/// of what is left of the row, with `after` more between them: the bar takes
-/// what the segments leave, as wide as their words make them, so the row
-/// ends where the preview does; all of it where they go on a line of their
-/// own, as `alone` says.
+/// Computes `(bar_width, unit_width)` from the remaining row width, reserving
+/// `after` points for controls between the bar and unit segments (or giving
+/// the full remaining width to the bar when `alone` puts the unit segments on
+/// a second line).
 fn bar_width(ui: &egui::Ui, after: f32, alone: bool) -> (f32, f32) {
     let gap = ui.spacing().item_spacing.x;
     let unit = unit_width(ui);
     let rest = ui.available_width() - after - gap;
     if alone {
-        // with no gap before segments after it
         return ((rest + gap).max(1.0), unit);
     }
     let unit = unit.min(rest - NARROWEST_BAR);
     ((rest - unit).max(NARROWEST_BAR), unit)
 }
 
-/// The unit's segments on a line of their own, under the row, at its end.
+/// Draws the seconds/frames unit segments right-aligned on a second line below
+/// the timeline bar.
 fn unit_below(ui: &mut egui::Ui, in_frames: &mut bool, known: bool) {
-    // as wide as they are drawn: their words, and a point between them
     let padding = 2.0 * ui.spacing().button_padding.x;
     let choices = units();
     let words: f32 =
@@ -274,8 +270,8 @@ fn unit_below(ui: &mut egui::Ui, in_frames: &mut bool, known: bool) {
     });
 }
 
-/// Whether the numbers count frames or seconds, which `known` frames
-/// allow, greyed out without them, in `room`.
+/// Draws the seconds/frames unit selector within `room` (disabling `Frames`
+/// when frame boundaries are not `known`).
 fn unit(ui: &mut egui::Ui, in_frames: &mut bool, known: bool, room: f32) {
     let mut shown = *in_frames && known;
     widgets::segments_on_line(
@@ -290,10 +286,10 @@ fn unit(ui: &mut egui::Ui, in_frames: &mut bool, known: bool, room: f32) {
     }
 }
 
-/// Shows the timeline.
+/// Draws the input timeline row.
 pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
     let Timeline { length, start, used, time, playing, limit, past, frames, in_frames } = timeline;
-    // one frame used has nothing to play
+    // Pause and disable playback when the trimmed range spans only a single frame.
     let still = frames.is_some_and(|frames| {
         let (first, after) = frames.part(length, *start, *used);
         after - first == 1
@@ -306,7 +302,6 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
         ui.add_enabled_ui(!still, |ui| play_button(ui, playing))
             .response
             .on_disabled_hover_text(fl!("nothing-to-play"));
-        // as high as the play button and the unit's segments, all in line
         let size = vec2(FIELD, ui.spacing().interact_size.y);
         match frames {
             Some(frames) => {
@@ -366,8 +361,8 @@ pub(crate) fn show(ui: &mut egui::Ui, timeline: Timeline) {
     }
 }
 
-/// A field of a time in the input, written as [`widgets::seconds`] writes
-/// times, and read back so.
+/// Builds a numeric field for a timestamp in `0.0..=length` seconds, formatted
+/// and parsed via [`widgets::seconds`] and [`widgets::parse_seconds`].
 pub(crate) fn seconds(value: &mut f64, length: f64) -> widgets::Number<'_> {
     widgets::Number::new(value)
         .range(0.0..=length)
@@ -377,7 +372,8 @@ pub(crate) fn seconds(value: &mut f64, length: f64) -> widgets::Number<'_> {
         .custom_parser(widgets::parse_seconds)
 }
 
-/// What the pointer is over, as the numbers count.
+/// Formats `time` for the timeline hover readout pill (as a 1-based frame
+/// number when `in_frames` is active, or in seconds).
 fn time_text(time: f64, frames: Option<&Frames>, in_frames: bool) -> String {
     match frames {
         Some(frames) if in_frames => {
@@ -402,7 +398,7 @@ fn bar(
     let x_of = |seconds: f64| track.left() + (seconds / length) as f32 * track.width();
     let seconds_at =
         |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
-    // where the used part's ends show: between frames, where they are known
+    // Snap displayed trim ends to frame boundaries when known.
     let ends = |start: Option<f64>, used: Option<f64>| match frames {
         Some(frames) => {
             let (first, after) = frames.part(length, start, used);
@@ -413,7 +409,7 @@ fn bar(
     let (from, to) = ends(*start, *used);
 
     let ends_x = (x_of(from), x_of(to));
-    // with Shift, an end takes all of the used part along
+    // Holding Shift while dragging a trim bracket slides the entire range.
     let sliding = ui.input(|input| input.modifiers.shift_only());
     let hovered = response.hover_pos().map(|pointer| match grab_at(pointer.x, ends_x, 0.0) {
         Grab::Seek => Grab::Seek,
@@ -423,7 +419,7 @@ fn bar(
     let id = response.id.with("grab");
     let pointer = response.interact_pointer_pos();
     let origin = ui.input(|input| input.pointer.press_origin());
-    // a press away from the ends seeks at once, rather than once let go
+    // Pressing outside the trim brackets seeks immediately on mouse-down.
     if response.is_pointer_button_down_on()
         && ui.input(|input| input.pointer.primary_pressed())
         && let Some(origin) = origin
@@ -441,7 +437,7 @@ fn bar(
         };
         ui.data_mut(|data| data.insert_temp(id, grab));
     }
-    // ends that meet go the way the pointer first moves
+    // Resolve overlapping brackets in the direction of the first drag movement.
     let mut grabbed: Option<Grab> = ui.data(|data| data.get_temp(id));
     if let (Some(Grab::Either(origin)), Some(pointer)) = (grabbed, pointer)
         && pointer.x != origin
@@ -478,7 +474,7 @@ fn bar(
                 *time = (at - 0.5).max(from);
             }
             (Grab::Slide((was_from, was_to), origin), Some(frames)) => {
-                // as many frames, from the boundary nearest where it moved
+                // Preserve the exact frame count while sliding to the nearest boundary.
                 let count = frames.nearest(was_to) - frames.nearest(was_from);
                 let by = at - seconds_at(origin);
                 let first = frames.nearest(was_from + by).min(frames.count() - count);
@@ -517,10 +513,10 @@ fn bar(
     let painter = ui.painter_at(rect);
     let visuals = ui.visuals();
     painter.rect_filled(track, 3.0, theme::span(visuals));
-    // Telegram plays 3 seconds; longer stickers are spoofed, sped up or cut:
-    // where they end, marked from the start of the used part while it is
-    // on the bar, and only what is cut hatched, in stripes that stay where
-    // they are as its ends move, as what is spoofed or sped up is all kept
+    // Mark Telegram's 3 s output limit relative to `from` when it falls within
+    // the input duration, and hatch the portion past the limit only when it
+    // will be truncated (`PastLimit::Cut`); the stripes stay put as the ends
+    // move. Spoofed or sped-up content is all kept, so it is not hatched.
     let limit_x = (from + limit < length).then(|| x_of(from + limit));
     let cut = left_out(from, to, limit, past);
     if let Some((cut_from, cut_to)) = cut {
@@ -530,7 +526,7 @@ fn bar(
         );
         widgets::hatch(&painter, cut, track.left(), theme::past_limit(visuals));
     }
-    // the unused parts, dimmed
+    // Dim the trimmed-out regions before `from` and after `to`.
     painter.rect_filled(
         Rect::from_min_max(track.min, pos2(x_of(from), track.max.y)),
         3.0,
@@ -541,7 +537,7 @@ fn bar(
         3.0,
         visuals.extreme_bg_color,
     );
-    // where frames meet, while they are far enough apart to tell
+    // Draw frame boundary ticks when frames are wide enough to distinguish.
     if let Some(frames) = frames
         && track.width() / frames.count() as f32 >= MARKED_FRAME
     {
@@ -551,9 +547,8 @@ fn bar(
             painter.line_segment([pos2(x, track.top()), pos2(x, track.bottom())], gap);
         }
     }
-    // the limit: a tick that shows on the accent of any hue, and its
-    // label over the bar, a warning only while some of the used part is
-    // cut off past it; both say what becomes of that part on hover
+    // Draw the 3 s limit tick and its "3 s" label above the track (coloured as
+    // a warning only when part of the range is actually cut).
     let mut mark = None;
     if let Some(x) = limit_x {
         let ends = (track.top() - 2.0, track.bottom() + 2.0);
@@ -562,8 +557,8 @@ fn bar(
         let colour = if warned { theme::warn(visuals) } else { visuals.weak_text_color() };
         let text = format!("{} s", tgradish_core::telegram::MAX_SECONDS);
         let galley = painter.layout_no_wrap(text, egui::FontId::proportional(10.5), colour);
-        // its baseline a point over the track, after the tick, or before it
-        // where there is no room after
+        // Position the label baseline 1 pt above the track, to the right of
+        // the tick (or to the left near the right end of the bar).
         let baseline = galley
             .rows
             .first()
@@ -578,14 +573,14 @@ fn bar(
         let label = Rect::from_min_size(pos2(x, y), galley.size());
         let tick = Rect::from_x_y_ranges(left..=right, ends.0..=ends.1);
         mark = Some((label, tick));
-        // over the bar's top, which the label's tallest glyphs reach past
+        // Expand the clip rect slightly above `rect` so tall glyphs are not clipped.
         let above = Rect::from_min_max(pos2(rect.left(), rect.top() - 3.0), rect.max);
         ui.painter().with_clip_rect(above).galley(pos2(x, y), galley, colour);
         let text = past.text();
         ui.ctx().accesskit_node_builder(response.id, |node| node.set_description(text));
     }
-    // over the limit's mark, what becomes of the used part past it, but
-    // for where a drag takes its ends
+    // Show the past-limit tooltip when hovering the 3 s tick or its label,
+    // but not while an end is dragged.
     if let Some(pointer) = response.hover_pos()
         && !response.dragged()
         && mark.is_some_and(|(label, tick)| {
@@ -594,8 +589,8 @@ fn bar(
     {
         response.clone().on_hover_text_at_pointer(past.text());
     }
-    // brackets at both ends of the used part, the one a press would take,
-    // or that is taken, in the accent: both where either would be
+    // Draw the trim start/end brackets, highlighting whichever bracket(s) will
+    // be moved by a press or active drag.
     let marks = ui.visuals().strong_text_color();
     let lit = match grabbed {
         Some(grab) if response.dragged() => Some(grab),
@@ -615,8 +610,8 @@ fn bar(
             bracket,
         ));
     }
-    // the playhead, with a small head, reaching as far under the track as
-    // its head does over it: a line drawn half its width past its end
+    // Playhead: reaches as far under the track as its head does over it, drawn
+    // as a line ending half its width back so it stays within `reach`.
     let x = x_of(time.clamp(0.0, length));
     let (reach, stroke) = (7.0, Stroke::new(1.0, marks));
     let end = track.bottom() + reach - stroke.width / 2.0;
@@ -630,9 +625,8 @@ fn bar(
         marks,
         Stroke::NONE,
     ));
-    // the end being dragged, as its field says it, or what is where the
-    // pointer is; beside the pointer either way, as an end snapped to
-    // frames may be half a frame from it, under the pointer's arrow
+    // Show the active drag value (or hovered time/frame) in a readout pill
+    // next to the pointer.
     let dragged = grabbed.filter(|_| response.dragged());
     let x = (response.hover_pos().or(pointer)).map(|at| at.x.clamp(track.left(), track.right()));
     let said = match (dragged, frames) {
@@ -649,8 +643,8 @@ fn bar(
         (Some(Grab::End), _) => Some(widgets::seconds(to)),
         _ => x.map(|x| time_text(seconds_at(x), frames, in_frames)),
     };
-    // but the part slid along by an end, whose start is said: under the
-    // start, or it would read as the time where the pointer is
+    // When Shift-sliding the range, anchor the readout pill under the range's
+    // start bracket rather than under the pointer so it clearly labels the start time.
     let x = match dragged {
         Some(Grab::Slide(..)) => x.map(|_| x_of(from).clamp(track.left(), track.right())),
         _ => x,
@@ -661,21 +655,18 @@ fn bar(
     }
 }
 
-/// Says `text` on a pill under the middle of the bar `rect`, ending just
-/// left of `x`, where the pointer or the end dragged is: the pointer's
-/// arrow points up and left from where it is, and would hide what is
-/// right of it. Right of `x`, past the arrow, where it doesn't fit left of
-/// it, near the bar's start. At once, as a tooltip shows only once the
-/// pointer rests, and never while a button is held, as it is while
-/// dragging. Under the bar's track rather than over it, in the room the
-/// bar's row has under it, never over the picture.
+/// Draws an immediate readout pill below the track of `rect`, positioned just
+/// left of `x` (so a top-left arrow cursor does not obscure it), or right of
+/// `x` past the cursor width when near the left edge of the bar. Drawn by hand
+/// because an egui tooltip appears only once the pointer rests and never while
+/// a button is held; kept in the room under the track, never over the picture.
 fn readout(ui: &egui::Ui, rect: Rect, x: f32, text: String) {
     let visuals = ui.visuals();
     let colour = visuals.strong_text_color();
     let painter = ui.ctx().layer_painter(ui.layer_id());
     let galley = painter.layout_no_wrap(text, READOUT, colour);
-    // a point shorter than the text's line, which leaves room under the
-    // glyphs, to keep clear of what is under the bar where it has a row
+    // A point shorter than the text's line (there is room under the glyphs),
+    // so the pill stays clear of the row under the bar.
     let size = galley.size() + vec2(2.0 * READOUT_PADDING, -1.0);
     let left = match x - READOUT_GAP - size.x {
         left if left >= rect.left() => left,
@@ -694,30 +685,27 @@ fn readout(ui: &egui::Ui, rect: Rect, x: f32, text: String) {
     painter.galley(pill.min + vec2(READOUT_PADDING, -0.5), galley, colour);
 }
 
-/// The readout's font, a little smaller than the GUI's, as it is said
-/// under the pointer and goes as it moves.
+/// Font for the timeline hover/drag readout pill.
 const READOUT: egui::FontId = egui::FontId::proportional(11.0);
-/// Room on either side of the readout's text, inside its pill.
+/// Horizontal padding inside the readout pill.
 const READOUT_PADDING: f32 = 5.0;
-/// How far left of the pointer the readout ends.
+/// Gap between the readout pill's right edge and `x`.
 const READOUT_GAP: f32 = 6.0;
-/// How far right of the pointer the readout starts where it goes there:
-/// past the pointer's arrow, as wide as it is at its usual size.
+/// Offset to the right of `x` when the pill does not fit on the left (clears
+/// the standard arrow cursor width).
 const READOUT_PAST: f32 = 14.0;
-/// How far under the middle of the bar the readout starts: under its
-/// track, and under the playhead's knob on the result's bar.
+/// Vertical offset from the bar centre to the top of the readout pill.
 const READOUT_DOWN: f32 = TRACK / 2.0 + 1.0;
 
-/// Plays a result: a play button and a bar to seek in it.
+/// Draws the result playback bar (play/pause button, scrub track, and
+/// `current / total` timestamp label).
 pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &mut bool) {
     let length = length.max(1e-6);
     ui.horizontal(|ui| {
         play_button(ui, playing);
         let text = format!("{} / {}", widgets::seconds(*time), widgets::seconds(length));
-        // the time at the end of the row, which ends where the preview does,
-        // as the timeline of the input does; the bar takes what it leaves,
-        // with room for the widest the time gets, so the bar keeps its width
-        // as it plays
+        // Reserve fixed width for the widest `time / length` string so the
+        // scrub bar does not resize during playback.
         let longest = widgets::zeros(&widgets::seconds(length));
         let widest = widgets::text_width(ui, &format!("{longest} / {longest}"), 0.0).ceil() + 1.0;
         let label_width = widest + ui.spacing().item_spacing.x;
@@ -729,7 +717,7 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
         );
         let seconds_at =
             |x: f32| (f64::from((x - track.left()) / track.width()) * length).clamp(0.0, length);
-        // from the press on, rather than once let go
+        // Seek immediately on mouse-down or drag.
         if let Some(pointer) = response.interact_pointer_pos()
             && (response.is_pointer_button_down_on() || response.clicked())
         {
@@ -740,7 +728,7 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
         painter.rect_filled(track, 3.0, visuals.extreme_bg_color);
         let x = track.left() + (*time / length) as f32 * track.width();
         let played = Rect::from_min_max(track.min, pos2(x, track.max.y));
-        // clipped rather than shrunk, so the start of the bar keeps its shape
+        // Clip the full track rectangle so the left cap retains its rounded corners.
         ui.painter_at(played).rect_filled(track, 3.0, theme::span(visuals));
         painter.circle_filled(pos2(x, track.center().y), 6.0, visuals.strong_text_color());
         let pointer = response.hover_pos().or(response.interact_pointer_pos());
@@ -752,10 +740,9 @@ pub(crate) fn player(ui: &mut egui::Ui, length: f64, time: &mut f64, playing: &m
     });
 }
 
-/// Picks a frame of a video for a still picture: a frame either way, its
-/// number or time, and a bar to click or drag along, the frame lit on it
-/// for as long as it shows. `frame` is where the picked frame starts, as
-/// the picture is made of it.
+/// Draws the single-frame picker row for static WebP outputs from animated
+/// inputs (previous/next frame buttons, frame/time field, and frame scrub bar).
+/// `frame` is where the picked frame starts, as the picture is made of it.
 pub(crate) fn frame_picker(
     ui: &mut egui::Ui,
     frames: &Frames,
@@ -768,7 +755,7 @@ pub(crate) fn frame_picker(
         let mut index = frames.at(frame.unwrap_or(0.0));
         let last = frames.count() - 1;
         let mut picked = None;
-        // as large as the play button, which stands here in the other modes
+        // As large as the play button that stands here in the other modes.
         let step = |ui: &mut egui::Ui, icon: &str, enabled: bool, hint: String, end: String| {
             let button =
                 egui::Button::new(egui::RichText::new(icon).size(15.0)).min_size(vec2(BUTTON, 0.0));
@@ -791,7 +778,7 @@ pub(crate) fn frame_picker(
         }
         let (width, unit_room) = bar_width(ui, 0.0, alone);
         let (rect, response) = ui.allocate_exact_size(vec2(width, BAR), Sense::click_and_drag());
-        // as the bar of the used part in the other modes
+        // As the used part's bar in the other modes.
         let track = track_of(rect);
         let x_of = |seconds: f64| track.left() + (seconds / length) as f32 * track.width();
         let seconds_at =
@@ -809,7 +796,8 @@ pub(crate) fn frame_picker(
         if !alone {
             unit(ui, in_frames, true, unit_room);
         }
-        // the span of a frame on the bar, at least wide enough to see
+        // Screen rectangle for a single frame's duration on the bar (at least
+        // 3 pt wide).
         let span = |index: usize| {
             let (from, to) = (x_of(frames.times[index]), x_of(frames.times[index + 1]));
             let middle = (from + to) / 2.0;
@@ -821,11 +809,10 @@ pub(crate) fn frame_picker(
         };
         let painter = ui.painter_at(rect);
         let visuals = ui.visuals();
-        // the other frames dimmed, as the unused part is in the other modes
+        // Dimmed as the unused part is.
         painter.rect_filled(track, 3.0, visuals.extreme_bg_color);
-        // the frame lit, the bar's rounded ends kept
+        // Highlight the selected frame while preserving the track's rounded ends.
         painter.with_clip_rect(span(index)).rect_filled(track, 3.0, theme::mark(visuals));
-        // where frames meet, while they are far enough apart to tell
         if track.width() / frames.count() as f32 >= MARKED_FRAME {
             let gap = Stroke::new(1.0, visuals.panel_fill);
             for &time in &frames.times[1..frames.count()] {
@@ -833,8 +820,8 @@ pub(crate) fn frame_picker(
                 painter.line_segment([pos2(x, track.top()), pos2(x, track.bottom())], gap);
             }
         }
-        // the frame a click picks, outlined so it shows on the frame lit,
-        // which is the accent at its strongest, too
+        // Outline the hovered frame with a high-contrast two-tone border so it
+        // remains visible even when hovering the already-selected frame.
         if let Some(hovered) = hovered {
             widgets::cased_outline(&painter, visuals, span(hovered), 2.0);
         }

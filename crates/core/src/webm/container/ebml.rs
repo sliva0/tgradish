@@ -74,25 +74,25 @@ const MAX_ID_LEN: usize = 4;
 /// Longest data size allowed by the default `EBMLMaxSizeLength`.
 const MAX_SIZE_LEN: usize = 8;
 
-/// Where EBML, which WebM is written in, stops making sense.
+/// Error reading EBML (the binary container format underlying WebM).
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum EbmlError {
-    /// The data ends inside an element's header, at this byte.
+    /// Data ended inside an element header at this byte offset.
     #[error("unexpected end of data at byte {0}")]
     Truncated(usize),
-    /// An element ID or size at this byte isn't a valid variable-size
-    /// integer, or is longer than WebM allows.
+    /// Element ID or size at this byte offset is not a valid variable-size
+    /// integer, or exceeds the maximum WebM length.
     #[error("invalid variable-size integer at byte {0}")]
     InvalidVint(usize),
-    /// An element's value is of a size its type can't have.
+    /// Element value has a byte length invalid for its type.
     #[error("invalid {size}-byte {kind} value at byte {offset}")]
     InvalidValue {
-        /// Its type: `unsigned integer` or `float`.
+        /// Value type (`"unsigned integer"` or `"float"`).
         kind: &'static str,
-        /// Its size in bytes.
+        /// Value size in bytes.
         size: usize,
-        /// Where it starts.
+        /// Byte offset where the value starts.
         offset: usize,
     },
 }

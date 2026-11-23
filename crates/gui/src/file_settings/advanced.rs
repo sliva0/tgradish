@@ -1,6 +1,6 @@
-//! Encoder options for WebM, which most people never need, so they sit
-//! folded away: libvpx-vp9 options by name, and raw ffmpeg arguments
-//! where the system's ffmpeg runs.
+//! Advanced WebM encoder settings (collapsed by default, as most people never
+//! need them): named `libvpx-vp9` options and raw `ffmpeg` arguments (when
+//! using an external `ffmpeg` binary).
 
 use std::collections::BTreeMap;
 

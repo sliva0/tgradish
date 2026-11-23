@@ -1,112 +1,114 @@
-//! The subset of Lottie tgradish writes, and a compact JSON writer for it.
+//! Lottie subset written by tgradish and its compact JSON serialiser.
 //!
-//! The default output has only what pixelart2tgs 1.x's stickers (accepted
-//! by Telegram) had, plus rectangles without a corner radius, which both
-//! renderers draw correctly; Telegram accepted it in upload probes.
-//! Paths have zero tangents where 1.x's were empty, which Telegram now
-//! refuses. [`Style`] adds optional fields back, for the probes.
+//! Default output contains only what pixelart2tgs 1.x stickers (accepted by
+//! Telegram) used, plus rectangles without a corner radius (drawn properly by
+//! both renderers and accepted in Telegram upload probes) and paths with zero
+//! tangents (`[0,0]`) because Telegram now rejects empty tangents (`[]`).
+//! [`Style`] restores optional fields for upload probes.
 
 use std::fmt::Write;
 
 use crate::scene::FillRule;
 
-/// Lottie's frame rate for stickers.
+/// Sticker frame rate in frames per second.
 const FPS: u32 = crate::limits::telegram::FPS;
 const CANVAS: u32 = crate::limits::telegram::CANVAS;
 
-/// A whole sticker as Lottie: what [`crate::layout`] makes of a scene.
+/// Complete Lottie animation produced by [`crate::layout`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Animation {
-    /// The top-level `nm`, where tgradish signs its output.
+    /// Top-level `nm` field, where tgradish writes its tool signature.
     pub name: Option<String>,
-    /// Length in 60 fps frames: `op`.
+    /// Duration in 60 fps ticks (`op`).
     pub ticks: u32,
-    /// Top first, as Lottie lists them.
+    /// Shape layers, ordered top to bottom as required by Lottie.
     pub layers: Vec<Layer>,
 }
 
-/// Optional fields; renderers don't need them, Telegram's checks might.
-/// Leaving out `"st"` and `"r"` saves about 6% of a sticker.
+/// Optional Lottie fields omitted by default. Renderers do not require them,
+/// though Telegram's validator might; omitting `"st"` and `"r"` saves about 6%
+/// of file size.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Style {
-    /// `"tgs":1`, which Telegram's exporter writes.
+    /// Include `"tgs":1` (written by Telegram's exporter).
     pub tgs_key: bool,
-    /// `"st":0` on layers.
+    /// Include `"st":0` on layers.
     pub layer_start: bool,
-    /// `"r":{"k":0}` (no rounding) on rectangles.
+    /// Include `"r":{"k":0}` (zero corner radius) on rectangles.
     pub rect_roundness: bool,
 }
 
-/// A shape layer.
+/// A Lottie shape layer.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Layer {
-    /// `ln`, a name renderers don't use; holds the bytes of [`crate::mark`]
-    /// in stickers with too few rectangles to order for them.
+    /// `ln` layer name, ignored by renderers; carries [`crate::mark`] bytes
+    /// when a sticker has too few rectangles to encode them by order.
     pub id: Option<String>,
-    /// Shown for frames `from..to`: `ip` and `op`.
+    /// Start frame (`ip`, inclusive).
     pub from: u32,
-    /// See `from`.
+    /// End frame (`op`, exclusive).
     pub to: u32,
-    /// Spans of frames within those where the layer is hidden after all,
-    /// in order: hold keyframes on its opacity.
+    /// Sorted frame spans within `from..to` where the layer is hidden via
+    /// opacity hold keyframes.
     pub hidden: Vec<(u32, u32)>,
-    /// Where its coordinates land on the canvas.
+    /// Transform mapping layer coordinates to the canvas.
     pub transform: Transform,
-    /// Top first.
+    /// Shape items, ordered top to bottom.
     pub items: Vec<Item>,
 }
 
-/// Maps layer coordinates onto the canvas: `position + scale * point`.
+/// Maps layer coordinates to canvas pixels: `position + scale * point`.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Transform {
-    /// Canvas pixels of the layer's 0, across and down.
+    /// Canvas pixel coordinates of the layer origin `(x, y)`.
     pub position: [f64; 2],
-    /// Canvas pixels per layer unit, across and down.
+    /// Canvas pixels per layer unit along `(x, y)`.
     pub scale: [f64; 2],
 }
 
-/// A shape item.
+/// A Lottie shape item.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Item {
-    /// Drawn top first; ends with its fill and an [`Item::GroupTransform`],
-    /// which has opacity keyframes only when the group is hidden while its
-    /// layer shows, as a shape drawn once for several spans of frames is.
+    /// Shape group drawn top to bottom, ending with a fill and an
+    /// [`Item::GroupTransform`] (which has opacity keyframes only when the
+    /// group is hidden for part of its layer's lifetime, such as a reused shape
+    /// shown across non-contiguous frame spans).
     Group(Vec<Item>),
-    /// A rectangle, in layer coordinates.
+    /// Axis-aligned rectangle in layer coordinates.
     Rect {
-        /// Its middle.
+        /// Rectangle centre `(x, y)`.
         centre: [f64; 2],
-        /// Its width and height.
+        /// Rectangle `(width, height)`.
         size: [f64; 2],
     },
-    /// A closed outline with straight edges.
+    /// Closed polygon with straight edges.
     Path(Vec<[f64; 2]>),
-    /// Straight RGBA; translucent colours become fill opacity.
+    /// Solid fill colour in straight RGBA (alpha becomes fill opacity).
     Fill {
-        /// The colour.
+        /// Fill colour `[r, g, b, a]`.
         colour: [u8; 4],
-        /// How the shapes before it fill.
+        /// Winding rule for preceding shapes.
         rule: FillRule,
     },
-    /// The transform every group needs, empty but for hold keyframes on
-    /// its opacity, `(frame, percent)`, when the group is hidden at times.
+    /// Group transform required at the end of every group; carries hold
+    /// keyframes on opacity `(frame, percent)` when visibility changes.
     GroupTransform {
-        /// Hold keyframes, `(frame, percent)`.
+        /// Opacity hold keyframes `(frame, percent)`.
         opacity: Vec<(u32, u8)>,
     },
 }
 
 impl Animation {
-    /// Compact JSON with a stable key order, so equal content gives equal
-    /// bytes for deflate to find.
+    /// Serialises to compact JSON with a fixed key order so deflate finds
+    /// repeated substrings.
     pub fn to_json(&self, style: Style) -> String {
         let mut out = String::new();
         out.push('{');
         if style.tgs_key {
             out.push_str("\"tgs\":1,");
         }
-        // `v` is the bodymovin version the file says it follows: everything
-        // written here is in 5.7, and Telegram accepted it in upload probes
+        // Bodymovin version; everything emitted here fits 5.7 and passed
+        // upload probes.
         write!(
             out,
             "\"v\":\"5.7.2\",\"fr\":{FPS},\"ip\":0,\"op\":{},\"w\":{CANVAS},\"h\":{CANVAS},",
@@ -131,9 +133,9 @@ impl Animation {
 impl Layer {
     fn write(&self, out: &mut String, style: Style) {
         let Transform { position: [x, y], scale: [across, down] } = self.transform;
-        // Lottie scales in percent. Positions are in canvas pixels, where 4
-        // decimals are far below what shows; shapes take 6, since the
-        // scale magnifies their units up to the whole canvas.
+        // Lottie scales are percentages. Layer positions are in canvas pixels,
+        // so 4 decimal places are well below visible precision; shape
+        // coordinates use 6 because layer scale magnifies them.
         let (across, down) = (number(across * 100.0, 4), number(down * 100.0, 4));
         if let Some(id) = &self.id {
             write!(out, "{{\"ln\":{},", serde_json::Value::from(id.as_str())).unwrap();
@@ -148,7 +150,7 @@ impl Layer {
         )
         .unwrap();
         if !self.hidden.is_empty() {
-            // shown from `from`, then hidden and shown again by turns
+            // Visible from `from`, toggling off and on around each hidden span.
             let mut keys = vec![(self.from, 100)];
             for &(start, end) in &self.hidden {
                 keys.extend([(start, 0), (end, 100)]);
@@ -166,7 +168,7 @@ impl Layer {
     }
 }
 
-/// An opacity of hold keyframes, `(frame, percent)`.
+/// Writes opacity hold keyframes `(frame, percent)`.
 fn write_opacity(out: &mut String, keys: &[(u32, u8)]) {
     out.push_str("\"o\":{\"a\":1,\"k\":[");
     for (index, (tick, opacity)) in keys.iter().enumerate() {
@@ -254,7 +256,7 @@ fn write_items(out: &mut String, items: &[Item], style: Style) {
     out.push(']');
 }
 
-/// A number with at most `decimals` decimals, without trailing zeros,
+/// Formats `value` with at most `decimals` decimals, without trailing zeros,
 /// exponents or `-0`.
 fn number(value: f64, decimals: usize) -> String {
     let mut text = format!("{value:.decimals$}");
@@ -264,7 +266,7 @@ fn number(value: f64, decimals: usize) -> String {
     if text == "-0" { "0".to_owned() } else { text }
 }
 
-/// The shortest decimal in `low..=high`, which must be at most 1 apart.
+/// Returns the shortest decimal string in `low..=high` (`high - low <= 1`).
 fn shortest(low: f64, high: f64) -> String {
     for decimals in 0..=6 {
         let step = 10f64.powi(decimals);
@@ -276,8 +278,9 @@ fn shortest(low: f64, high: f64) -> String {
     number(low, 6)
 }
 
-/// A colour channel as a fraction. Renderers truncate `255 * fraction`, so
-/// this aims inside `[value, value + 1)` with a margin for float maths.
+/// Formats an 8-bit colour channel as a `0..=1` fraction. Renderers truncate
+/// `255 * fraction`, so this targets `[value + 0.02, value + 0.98]` for float
+/// safety.
 fn channel(value: u8) -> String {
     match value {
         0 => "0".to_owned(),
@@ -286,7 +289,8 @@ fn channel(value: u8) -> String {
     }
 }
 
-/// Alpha as fill opacity in percent; truncated like colour channels.
+/// Formats alpha as a percentage, using the same truncation margin as
+/// [`channel`].
 fn opacity(alpha: u8) -> String {
     shortest((f64::from(alpha) + 0.02) / 2.55, (f64::from(alpha) + 0.98) / 2.55)
 }

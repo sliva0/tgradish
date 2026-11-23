@@ -1,8 +1,6 @@
-//! Releasing: every release variant built and packed on this machine, as
-//! the release workflow makes them, so they can be tried by hand before a
-//! tag sends them out; and the `release` task, which sets the version
-//! everywhere it is written, checks they agree, gives the release's notes
-//! and brings the AUR packages and crates.io up to a published release.
+//! Release automation: `local-release` builds and packages every release
+//! variant locally, and `release` manages version bumps, consistency checks,
+//! changelog notes, AUR updates, and crates.io publishing.
 
 mod aur;
 mod changelog;
@@ -56,11 +54,7 @@ fn read_tree(root: &Path) -> Result<Tree> {
 /// with `tag` where given.
 fn ensure_agrees(tree: &Tree, tag: Option<&str>) -> Result<()> {
     let problems = version::problems(tree, tag)?;
-    ensure!(
-        problems.is_empty(),
-        "the version isn't written alike everywhere:\n  {}",
-        problems.join("\n  ")
-    );
+    ensure!(problems.is_empty(), "version mismatch:\n  {}", problems.join("\n  "));
     Ok(())
 }
 
@@ -75,7 +69,7 @@ fn check(args: &[String]) -> Result<()> {
     let tree = read_tree(workspace_root())?;
     ensure_agrees(&tree, tag)?;
     let version = version::app_version(&tree)?;
-    println!("{version}, tgradish-tgs {}: written alike everywhere", version::tgs_version(&tree)?);
+    println!("{version}, tgradish-tgs {}: all versions match", version::tgs_version(&tree)?);
     Ok(())
 }
 
@@ -118,7 +112,7 @@ fn prepare(args: &[String]) -> Result<()> {
         git
     };
     let status = output(git().args(["status", "--porcelain"]))?;
-    ensure!(status.is_empty(), "commit or stash what has changed first:\n{}", status.trim_end());
+    ensure!(status.is_empty(), "commit or stash uncommitted changes first:\n{}", status.trim_end());
 
     let before = read_tree(root)?;
     let mut tree = before.clone();
@@ -132,9 +126,11 @@ fn prepare(args: &[String]) -> Result<()> {
     let rust = match here {
         Some(here) if here > pinned => {
             version::set_toolchain(&mut tree, here)?;
-            format!("raised from {pinned} to {here}, the stable Rust here")
+            format!("updated from {pinned} to {here} (local stable Rust)")
         }
-        _ => format!("left at {pinned}: if a newer stable Rust is out, rustup update and raise it"),
+        _ => format!(
+            "kept at {pinned} (if a newer stable Rust is available, run `rustup update` and raise it)"
+        ),
     };
     for (path, text) in &tree {
         if before[path] != *text {
@@ -150,17 +146,17 @@ fn prepare(args: &[String]) -> Result<()> {
         "crates/tgs-lab/Cargo.toml",
     ]))?;
     ensure_agrees(&read_tree(root)?, Some(&format!("v{version}")))
-        .context("git checkout -- . puts everything back")?;
+        .context("run `git checkout -- .` to revert")?;
 
-    println!("\n{version} written everywhere, the changelog's Unreleased dated as its section.");
+    println!("\nUpdated all versions to {version} and dated Unreleased in CHANGELOG.md.");
     println!("RUSTUP_TOOLCHAIN in {}: {rust}.", version::WORKFLOW);
     tgs_changes(root, tgs, &tree)?;
     println!(
-        "\nLook over git diff, then:\n\n  \
+        "\nReview git diff, then run:\n\n  \
          git commit -am \"Release {version}\"\n  \
          git tag -a v{version} -m \"tgradish {version}\"\n  \
          git push origin main v{version}\n\n\
-         The release workflow drafts the release. Publish the draft on GitHub, then:\n\n  \
+         The release workflow creates a draft release. Publish it on GitHub, then run:\n\n  \
          cargo xtask release aur --push\n  \
          cargo xtask release crates"
     );
@@ -172,7 +168,7 @@ fn prepare(args: &[String]) -> Result<()> {
 fn tgs_changes(root: &Path, tgs: Option<Version>, tree: &Tree) -> Result<()> {
     let now = version::tgs_version(tree)?;
     if tgs.is_some() {
-        println!("tgradish-tgs: raised to {now}.");
+        println!("tgradish-tgs: updated to {now}.");
         return Ok(());
     }
     let Ok(tag) = output(Command::new("git").current_dir(root).args([
@@ -182,7 +178,7 @@ fn tgs_changes(root: &Path, tgs: Option<Version>, tree: &Tree) -> Result<()> {
         "--match",
         "v*",
     ])) else {
-        println!("tgradish-tgs: no earlier release tag to compare with, kept at {now}.");
+        println!("tgradish-tgs: no previous release tag found; kept at {now}.");
         return Ok(());
     };
     let tag = tag.trim();
@@ -195,13 +191,13 @@ fn tgs_changes(root: &Path, tgs: Option<Version>, tree: &Tree) -> Result<()> {
         "crates/tgs",
     ]))?;
     if changed.trim().is_empty() {
-        println!("tgradish-tgs: unchanged since {tag}, kept at {now}.");
+        println!("tgradish-tgs: unchanged since {tag}; kept at {now}.");
     } else {
         println!(
-            "\nWARNING: tgradish-tgs changed since {tag}, but keeps {now}, and crates.io \
-             takes no changes under a version it has:\n{changed}\
-             Unless none of it is in its package, undo this with git checkout -- . and \
-             prepare again with --tgs and a version above {now}."
+            "\nWARNING: crates/tgs changed since {tag}, but its version is still {now} \
+             (crates.io rejects re-uploading an existing version):\n{changed}\
+             If packaged files changed, revert with `git checkout -- .` and re-run with \
+             `--tgs` set to a version above {now}."
         );
     }
     Ok(())
@@ -214,7 +210,7 @@ fn fetch(url: &str) -> Result<Option<String>> {
     match code {
         "200" => Ok(Some(body.to_owned())),
         "404" => Ok(None),
-        _ => bail!("{url} answered {code}"),
+        _ => bail!("{url} returned HTTP {code}"),
     }
 }
 

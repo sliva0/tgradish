@@ -1,10 +1,10 @@
-//! The resources of tgradish.exe: its icon, its manifest, and the version
-//! Explorer shows on a file's Details tab. The version is Cargo.toml's,
-//! written into both here, so no release has to remember them.
+//! Embeds Windows resources into `tgradish.exe`: icon, manifest, and the
+//! version shown on Explorer's Details tab. `build.rs` writes `Cargo.toml`'s
+//! version into both so releases do not have to update them.
 
 use std::path::Path;
 
-/// What the manifest says in place of its version.
+/// Placeholder version string in `tgradish.exe.manifest`.
 const MANIFEST_VERSION: &str = "version=\"0.0.0.0\"";
 
 fn main() {
@@ -18,7 +18,7 @@ fn main() {
         env!("CARGO_PKG_VERSION_PATCH"),
     ];
 
-    // Windows wants four numbers there
+    // Windows manifests require a four-part version.
     let manifest = std::fs::read_to_string("tgradish.exe.manifest")
         .expect("tgradish.exe.manifest should be beside build.rs");
     assert_eq!(
@@ -28,15 +28,15 @@ fn main() {
     );
     let manifest =
         manifest.replace(MANIFEST_VERSION, &format!("version=\"{major}.{minor}.{patch}.0\""));
-    // where tgradish.rc finds it: embed-resource has every resource compiler
-    // look in OUT_DIR
+    // embed-resource adds OUT_DIR to the resource compiler's include path so
+    // tgradish.rc can find this file.
     let out = std::env::var_os("OUT_DIR").expect("cargo sets OUT_DIR");
     std::fs::write(Path::new(&out).join("tgradish.versioned.manifest"), manifest)
         .expect("OUT_DIR is writable");
 
-    // with rc.exe from the Windows SDK, or MinGW's windres. The macros are
-    // bare numbers and a word without spaces, which every one of them
-    // passes on unharmed, as they wouldn't quotes
+    // Works with both rc.exe (Windows SDK) and windres (MinGW). The macros are
+    // bare numbers and a token without spaces, which both compilers pass
+    // through unchanged (unlike quotes).
     embed_resource::compile(
         "tgradish.rc",
         [

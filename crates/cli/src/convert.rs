@@ -26,56 +26,55 @@ pub enum Failed {
     Core(#[from] tgradish_core::Error),
     /// Another input of the same command was converted into `output`.
     #[error(
-        "{} was already written from {}; inputs with the same name need different output \
+        "{} was already written from {}; inputs with the same name require different output \
          directories",
         output.display(),
         other.display()
     )]
     SameOutput { output: PathBuf, other: PathBuf },
     /// The folder the output goes in couldn't be made.
-    #[error("couldn't create {}: {}", dir.display(), tgradish_core::io_reason(error))]
+    #[error("failed to create {}: {}", dir.display(), tgradish_core::io_reason(error))]
     Folder { dir: PathBuf, error: std::io::Error },
 }
 
-/// What Telegram would say of a result that was made.
+/// Whether Telegram would accept a converted output file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Verdict {
     Accepted,
-    /// It was made, but Telegram would refuse it, as the issues printed
-    /// with it say: the command exits with [`crate::REFUSED`].
+    /// Output was created, but Telegram would reject it for the reported
+    /// issues; exits with [`crate::REFUSED`].
     Refused,
 }
 
 impl Verdict {
-    /// What Telegram would say of a result with `issues`, as
-    /// [`tgradish_core::telegram::refuses`] them.
+    /// Returns the verdict for `issues` according to
+    /// [`tgradish_core::telegram::refuses`].
     fn of(issues: &[tgradish_core::telegram::Issue]) -> Verdict {
         if tgradish_core::telegram::refuses(issues) { Verdict::Refused } else { Verdict::Accepted }
     }
 }
 
-/// Runs conversions with the options and output settings of one command.
+/// Runs conversions using one command's resolved options and output settings.
 pub struct Converter<'a> {
     ctx: &'a Context,
     args: &'a ConversionArgs,
-    /// The format's options: the preset's, then `--options-json`'s, then
-    /// the flags'.
+    /// Resolved format options: preset, then `--options-json`, then CLI flags.
     options: FormatOptions,
-    /// ffmpeg, found once for WebM and WebP, which need it for every
-    /// input, so that a missing one fails the command before any; `.tgs`
-    /// asks for it only for videos.
+    /// Cached ffmpeg backend. Resolved up front for WebM and WebP (which always
+    /// need it) so a missing ffmpeg fails before converting any input; resolved
+    /// lazily for TGS (which only needs it for videos).
     backend: Option<Backend>,
-    /// Outputs written by this command, and their inputs, so two inputs
-    /// with the same name never overwrite each other's result.
+    /// Maps each written output path to its input path so two inputs with the
+    /// same stem cannot overwrite each other.
     written: RefCell<HashMap<PathBuf, PathBuf>>,
-    /// Whether `--fps`, or `--options-json`, set a frame rate: one that
-    /// `.tgs` can't use for an input with times of its own is said to be
-    /// unused, once.
+    /// Tracks whether `--fps` (or `"fps"` in `--options-json`) was supplied so
+    /// we warn once when making `.tgs` output from a single-file input with its
+    /// own frame timings.
     fps_given: bool,
     fps_unused_said: std::cell::Cell<bool>,
 }
 
-/// The options `--options-json` gave, as `format` takes them.
+/// Deserialises `--options-json` into the option type for `format`.
 fn overlay<T: serde::de::DeserializeOwned>(
     json: &serde_json::Map<String, serde_json::Value>,
     format: Format,
@@ -85,10 +84,9 @@ fn overlay<T: serde::de::DeserializeOwned>(
     })
 }
 
-/// Checks the options a command converts with, `options`, for values
-/// wrong whatever the input, before any is converted: named by the flag
-/// that gave one, or its key in `--options-json`, both mistakes in the
-/// command line; or else the preset `preset`, which set it.
+/// Validates input-independent option values before converting any input.
+/// Bad values from a CLI flag or `--options-json` key fail as usage errors
+/// (exit 2); bad values from `preset` fail as ordinary errors.
 fn check_options(
     options: &impl tgradish_core::options::Checked,
     args: &ConversionArgs,
@@ -108,11 +106,11 @@ fn check_options(
     if json.is_some_and(|json| json.contains_key(option)) {
         return Err(crate::usage(format!("{option:?} in --options-json {reason}")));
     }
-    bail!("the preset {preset:?} sets {option}, which {reason}")
+    bail!("preset {preset:?} sets {option}, which {reason}")
 }
 
-/// The format a command converts to: `--format`, or else the extension of
-/// `output` (the `-o` file), or else WebM.
+/// Resolves the output format from `--format`, then `-o`'s extension, then
+/// WebM.
 fn format_of(format: Option<FormatArg>, output: Option<&Path>) -> Format {
     match (format, output.and_then(Format::of_path)) {
         (Some(format), _) => format.into(),
@@ -121,14 +119,13 @@ fn format_of(format: Option<FormatArg>, output: Option<&Path>) -> Format {
     }
 }
 
-/// Refuses an `-o` that can't hold the result, before any work: a
-/// directory, or a name whose extension isn't the format's, which would
-/// make a file that says it is something else.
+/// Rejects an `-o` path before any work if it is a directory or has an
+/// extension incompatible with `format` (which would produce a file claiming to
+/// be another format).
 fn check_output(output: &Path, format: Format) -> Result<()> {
     if output.is_dir() {
         return Err(crate::usage(format!(
-            "{} is a directory: -o names the result's file, -O/--output-dir a directory for \
-             results",
+            "{} is a directory; use -o for a single output file or -O/--output-dir for a directory",
             output.display()
         )));
     }
@@ -136,14 +133,14 @@ fn check_output(output: &Path, format: Format) -> Result<()> {
     match Format::of_path(output) {
         Some(asked) if asked == format => Ok(()),
         Some(asked) => wrong(format!(
-            "{} is a .{} file, but this converts to {}: end it .{} or drop --format",
+            "{} has a .{} extension, which does not match {} output; use .{} or remove --format",
             output.display(),
             asked.extension(),
             format.name(),
             format.extension()
         )),
         None => wrong(format!(
-            "{} doesn't end in .{}, as {} output does; .tgs and .webp ask for those formats",
+            "{} must end in .{} for {} output (use .tgs or .webp for those formats)",
             output.display(),
             format.extension(),
             format.name()
@@ -152,8 +149,7 @@ fn check_output(output: &Path, format: Format) -> Result<()> {
 }
 
 impl<'a> Converter<'a> {
-    /// `format` is `--format`, and `output` the `-o` file, which can
-    /// choose the format instead.
+    /// Creates a converter for `format` (or the format inferred from `output`).
     pub fn new(
         ctx: &'a Context,
         args: &'a ConversionArgs,
@@ -167,7 +163,7 @@ impl<'a> Converter<'a> {
         let json = match &args.options_json {
             Some(json) => Some(
                 serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(json).map_err(
-                    |err| crate::usage(format!("--options-json isn't a JSON object: {err}")),
+                    |err| crate::usage(format!("--options-json must be a JSON object: {err}")),
                 )?,
             ),
             None => None,
@@ -176,13 +172,13 @@ impl<'a> Converter<'a> {
         if !unused.is_empty() {
             let unused = unused.join(", ");
             return Err(crate::usage(format!(
-                "{unused} can't be used for {} output",
+                "{unused} cannot be used with {} output",
                 format.name()
             )));
         }
         if args.keep_temp && format != Format::Webm {
             return Err(crate::usage(
-                "--keep-temp is for WebM output, which alone leaves intermediate files",
+                "--keep-temp only applies to WebM output, which alone leaves intermediate files",
             ));
         }
         let presets = Presets::load_user()?;
@@ -200,17 +196,13 @@ impl<'a> Converter<'a> {
             tgradish_core::Error::Preset(PresetError::Unknown { known, .. }) => {
                 let known = known.join(", ");
                 if args.preset.is_some() {
-                    return crate::usage(format!(
-                        "--preset {name:?} doesn't exist; available: {known}"
-                    ));
+                    return crate::usage(format!("unknown --preset {name:?}; available: {known}"));
                 }
                 // the only other place a preset is named
                 let key = if format == Format::Tgs { "tgs-preset" } else { "preset" };
                 let file = ctx.config_file.as_ref().map(|file| file.path.display());
                 let place = file.map_or(String::new(), |file| format!(" ({file}: {key})"));
-                anyhow::anyhow!(
-                    "the config's {key} {name:?} doesn't exist{place}; available: {known}"
-                )
+                anyhow::anyhow!("unknown {key} {name:?} in config{place}; available: {known}")
             }
             err => err.into(),
         })?;
@@ -226,8 +218,8 @@ impl<'a> Converter<'a> {
                 // how a sheet is read, of a sheet that isn't one
                 if options.sheet_frames.is_some() && options.sheet.is_none() {
                     return Err(crate::usage(match args.options.sheet_frames {
-                        Some(_) => "--sheet-frames needs --sheet",
-                        None => "\"sheet-frames\" in --options-json needs \"sheet\"",
+                        Some(_) => "--sheet-frames requires --sheet",
+                        None => "\"sheet-frames\" in --options-json requires \"sheet\"",
                     }));
                 }
                 FormatOptions::Tgs(options)
@@ -240,7 +232,7 @@ impl<'a> Converter<'a> {
         if let Some(dir) = &args.output_dir {
             std::fs::create_dir_all(dir).map_err(|err| {
                 anyhow::anyhow!(
-                    "couldn't create {}: {}",
+                    "failed to create {}: {}",
                     dir.display(),
                     tgradish_core::io_reason(&err)
                 )
@@ -262,9 +254,9 @@ impl<'a> Converter<'a> {
         })
     }
 
-    /// Where the result for `input` goes, unless `-o` says otherwise: as
-    /// core names it, in `--output-dir` when given, keeping the folders
-    /// between `base` and the input there.
+    /// Computes the default output path for `input`, placing it under
+    /// `--output-dir` when set (preserving any relative subdirectories under
+    /// `base`).
     pub fn output_for(&self, input: &Input, base: Option<&Path>) -> PathBuf {
         let output = input.default_output(self.options.format(), self.options.target());
         let (Some(dir), Some(name)) = (&self.args.output_dir, output.file_name()) else {
@@ -280,7 +272,7 @@ impl<'a> Converter<'a> {
         self.args.overwrite
     }
 
-    /// The ffmpeg found for the command, or else the one it would use.
+    /// Returns the cached ffmpeg backend, or resolves one on demand.
     fn backend(&self) -> tgradish_core::Result<Backend> {
         match &self.backend {
             Some(backend) => Ok(backend.clone()),
@@ -337,7 +329,7 @@ impl<'a> Converter<'a> {
             && !self.fps_unused_said.replace(true)
         {
             let message =
-                "--fps only sets how fast image sequences and sprite sheets play for .tgs";
+                "--fps only sets frame rate for image sequences and sprite sheets in .tgs output";
             if json {
                 crate::json_line(&Event::Warning { message: message.into() });
             } else {
@@ -358,9 +350,8 @@ impl<'a> Converter<'a> {
         Ok(Verdict::of(&outcome.issues))
     }
 
-    /// What is said of a result once it is made, as text: where a WebM's
-    /// intermediate files are kept, and, in terminals that show pictures,
-    /// a frame of it.
+    /// Prints post-conversion details in text mode: kept WebM temp directory
+    /// and an inline terminal preview if supported.
     fn after(&self, outcome: &Outcome, backend: Option<&Backend>) {
         if let Details::Webm { temp_dir: Some(dir), .. } = &outcome.details {
             eprintln!("{}", ui::status("Kept", format!("intermediate files in {}", dir.display())));
@@ -379,9 +370,8 @@ impl<'a> Converter<'a> {
         }
     }
 
-    /// Forgets what `input` was converted into, as watching does once it
-    /// is gone, so that another input may have the same result. Returns
-    /// the results it held, as absolute paths.
+    /// Removes `input` from the output collision map (used by `watch` when a
+    /// source file disappears) and returns the freed absolute output paths.
     pub fn forget(&self, input: &Path) -> Vec<PathBuf> {
         let input = std::path::absolute(input).unwrap_or_else(|_| input.to_path_buf());
         let mut freed = Vec::new();
@@ -411,7 +401,7 @@ impl<'a> Converter<'a> {
 
 pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     if args.output.is_some() && !args.sequence && args.inputs.len() > 1 {
-        return Err(crate::usage("-o/--output names one result: give one input, or --sequence"));
+        return Err(crate::usage("-o/--output only accepts a single input or --sequence"));
     }
     let converter = Converter::new(ctx, &args.conversion, args.format, args.output.as_deref())?;
     if args.sequence {
@@ -439,7 +429,7 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
         args.inputs.clone()
     };
     if args.output.is_some() && inputs.len() > 1 {
-        return Err(crate::usage("-o/--output names one result: give one input, or --sequence"));
+        return Err(crate::usage("-o/--output only accepts a single input or --sequence"));
     }
 
     let (mut failed, mut refused) = (0, false);
@@ -481,19 +471,17 @@ pub fn run(ctx: &Context, args: ConvertArgs) -> Result<()> {
     Ok(())
 }
 
-/// Cancels when a front-end writes `cancel` to stdin, and keeps the best
-/// WebM encode so far on `settle`, with `--cancel-on-stdin`: sending
-/// Ctrl-C to a child process is awkward on
-/// Windows. Only when asked, as a script reading its own stdin in a loop
-/// would lose what this read. End of input is ignored, so running without
-/// stdin is fine.
+/// Listens on stdin for `cancel` or `settle` lines when `--cancel-on-stdin` is
+/// set (for front-ends, since sending Ctrl-C to a child process is awkward on
+/// Windows). Ignored unless requested so scripts piping stdin are unaffected.
+/// EOF is ignored.
 fn listen_for_cancel(ctx: &Context) {
     let cancel = ctx.cancel.clone();
     std::thread::spawn(move || {
         for line in std::io::stdin().lines().map_while(Result::ok) {
             match line.trim() {
                 "cancel" => cancel.cancel(),
-                // where nothing fits yet, there is nothing to keep
+                // No-op if no fitting encode exists yet.
                 "settle" => _ = cancel.settle(),
                 _ => {}
             }
@@ -501,14 +489,12 @@ fn listen_for_cancel(ctx: &Context) {
     });
 }
 
-/// A progress bar, cargo-like: `verb` coloured on the left. It draws
-/// nothing until [`Bar::show`] puts it on stderr in place of the one
-/// before, as setting its message would draw it over that one.
+/// Builds a hidden cargo-style progress bar. Kept hidden until [`Bar::show`]
+/// clears any previous bar so lines do not overwrite each other.
 fn progress_bar(verb: &str, length: Option<u64>) -> ProgressBar {
     let bar = ProgressBar::with_draw_target(length, ProgressDrawTarget::hidden());
-    // the message last and wide, so that indicatif cuts it to the
-    // terminal's width: a line longer than that wraps, and each redraw
-    // would leave its first part behind
+    // Put `{wide_msg}` last so indicatif truncates to terminal width: a line
+    // that wraps would leave its first part behind on every redraw.
     let template = match length {
         Some(_) => "{prefix:>12.green.bold} {bar:20.green/dim} {percent:>3}% {wide_msg}",
         None => "{prefix:>12.green.bold} {spinner:.green} {wide_msg}",
@@ -523,13 +509,13 @@ fn progress_bar(verb: &str, length: Option<u64>) -> ProgressBar {
     bar
 }
 
-/// The progress bar a printer shows, if any, with lines printed above it.
+/// Active progress bar, plus helper for printing status lines above it.
 #[derive(Default)]
 struct Bar(Option<ProgressBar>);
 
 impl Bar {
-    /// Shows `bar` in place of the one before, which is cleared first: a
-    /// bar drawn before then would leave the old one's line behind.
+    /// Clears any previous progress bar and shows `bar` on stderr (drawing
+    /// before clearing the old bar would leave its line behind).
     fn show(&mut self, bar: ProgressBar) {
         self.clear();
         bar.set_draw_target(ProgressDrawTarget::stderr());
@@ -537,10 +523,11 @@ impl Bar {
         self.0 = Some(bar);
     }
 
-    /// Prints a line above the progress bar.
+    /// Prints a line above the progress bar (or directly to stderr if hidden).
     fn line(&self, text: impl AsRef<str>) {
         match &self.0 {
-            // a hidden bar, when stderr is not a terminal, prints nothing
+            // A hidden bar (when stderr is not a terminal) prints nothing on
+            // println.
             Some(bar) if !bar.is_hidden() => bar.println(text),
             _ => eprintln!("{}", text.as_ref()),
         }
@@ -552,28 +539,25 @@ impl Bar {
         }
     }
 
-    /// Clears the bar, and the progress the terminal shows.
+    /// Clears the progress bar and resets terminal taskbar progress.
     fn finish(&mut self) {
         self.clear();
         term::progress(None);
     }
 }
 
-/// Shows conversion events of any format as text, with a progress bar.
+/// Renders conversion events for any format as human-readable text.
 struct Printer {
     verbose: u8,
     quiet: bool,
     bar: Bar,
-    /// Telegram's size limit for what is being made.
+    /// Telegram size limit in bytes for the active target/format.
     limit: u64,
-    /// For `.tgs`: the art is kept exactly as it is, so a sticker too
-    /// large isn't fitted.
+    /// For `.tgs`: whether lossy fitting is disabled (`--exact`).
     exact: bool,
-    /// For `.tgs`: how much of making it is done, from 0 to 1, which
-    /// each stage's bar starts from.
+    /// For `.tgs`: overall completion fraction (`0.0..=1.0`).
     done: f64,
-    /// For `.tgs`: the tries again after the result missed the limit so
-    /// far, each with a bar of its own, as a WebM's encodes have.
+    /// For `.tgs`: count of oversize compression retries so far.
     retries: u32,
 }
 
@@ -636,7 +620,7 @@ impl Printer {
             }
             Event::Scored { ssim, .. } if self.verbose > 0 => {
                 self.bar
-                    .line(ui::status("Compared", ui::dim(format!("likeness (SSIM) {ssim:.4}"))));
+                    .line(ui::status("Compared", ui::dim(format!("similarity (SSIM) {ssim:.4}"))));
             }
             // why fitting stops, or tries a lower frame rate
             Event::Decided { message, .. } if !self.quiet => {
@@ -647,7 +631,7 @@ impl Printer {
             }
             Event::TooLarge { bytes } if !self.quiet && self.exact => {
                 self.bar.line(format!(
-                    "{} about {} as it is, too large; --no-exact lets fitting change the art",
+                    "{} about {} as-is (too large); pass --no-exact to allow lossy fitting",
                     ui::warning_label(),
                     ui::size_within(bytes, self.limit)
                 ));
@@ -655,7 +639,7 @@ impl Printer {
             Event::TooLarge { bytes } if !self.quiet => {
                 self.bar.line(ui::status(
                     "Fitting",
-                    format!("about {} as it is, too large", ui::size_within(bytes, self.limit)),
+                    format!("about {} as-is (too large)", ui::size_within(bytes, self.limit)),
                 ));
                 self.tgs_bar("Fitting", "into 64 KiB");
             }
@@ -681,18 +665,21 @@ impl Printer {
                         Some(bytes) => ui::status(
                             "Compressed",
                             format!(
-                                "try {tried} → {}, {}",
+                                "attempt {tried} → {}, {}",
                                 ui::size_within(bytes, self.limit),
                                 style("too large").red()
                             ),
                         ),
                         None => ui::status(
                             "Missed",
-                            format!("try {tried}: {}", style("far too large to compress").red()),
+                            format!(
+                                "attempt {tried}: {}",
+                                style("far too large to compress").red()
+                            ),
                         ),
                     });
                     let bar = progress_bar("Retrying", Some(1000));
-                    bar.set_message(format!("{}: aiming at {}", self.retries + 1, ui::kib(aim)));
+                    bar.set_message(format!("{}: targeting {}", self.retries + 1, ui::kib(aim)));
                     self.bar.show(bar);
                 }
             }
@@ -717,8 +704,7 @@ impl Printer {
         }
     }
 
-    /// The lines that start a conversion: what goes where, and what a
-    /// WebM's plan or a `.tgs`'s art comes to.
+    /// Prints the initial conversion status and plan/input summary.
     fn started(&mut self, started: Started) {
         self.bar.line(converting(&started.input, &started.output));
         match started.details {
@@ -751,16 +737,16 @@ impl Printer {
                     ui::seconds(f64::from(report.ticks) / 60.0),
                 );
                 if report.tempo != 1.0 {
-                    line.push_str(&format!(", played {:.2}x as fast", report.tempo));
+                    line.push_str(&format!(", {:.2}x speed", report.tempo));
                 }
                 if report.trimmed {
-                    line.push_str(", cut at 3 s");
+                    line.push_str(", trimmed to 3 s");
                 }
                 self.bar.line(ui::status("Read", ui::dim(line)));
                 if let Some(likely) = report.likely_scale {
                     self.bar.line(format!(
-                        "{} the pixel art looks like {}x with {:.1}% of its edges off that grid; \
-                         --pixel-scale {} snaps them",
+                        "{} pixel art looks like {}x with {:.1}% misaligned edges; pass \
+                         --pixel-scale {} to snap them",
                         ui::warning_label(),
                         likely.scale,
                         (1.0 - likely.fit) * 100.0,
@@ -774,8 +760,8 @@ impl Printer {
         }
     }
 
-    /// The result's line on stdout, even when quiet, as every format's is,
-    /// and what Telegram would have a problem with in it.
+    /// Prints the finished output line to stdout (even in quiet mode) and any
+    /// Telegram issues to stderr.
     fn finished(&mut self, outcome: &Outcome) {
         self.bar.finish();
         let size = ui::size_within(outcome.bytes, outcome.limit);
@@ -783,7 +769,7 @@ impl Printer {
             Details::Webm { params, spoofed, settled, .. } => {
                 let spoofed = if *spoofed { ", duration spoofed" } else { "" };
                 // the result line says it, where it says more than its path
-                let settled = if *settled { ", the best so far as asked" } else { "" };
+                let settled = if *settled { ", kept best so far" } else { "" };
                 format!(", {}{spoofed}{settled}", ui::params(params))
             }
             Details::Tgs { steps, .. } if outcome.changed && !steps.is_empty() => {
@@ -793,7 +779,7 @@ impl Printer {
             Details::Tgs { .. } => ", exact".to_string(),
             Details::Webp { width, height, encoding } => match encoding {
                 webp::Encoding::Lossy { quality } => {
-                    format!(", {width}×{height}, lossy at quality {quality} to fit")
+                    format!(", {width}×{height}, lossy (quality {quality}) to fit")
                 }
                 _ => format!(", {width}×{height}"),
             },
@@ -805,8 +791,8 @@ impl Printer {
     }
 }
 
-/// The line on stdout of a file made, `output`: "Finished" and `line`,
-/// which says what it is, or `quiet`, its path alone, for scripts.
+/// Prints the completed file to stdout: `Finished <line>`, or just the path
+/// when `quiet` is true.
 fn finished(quiet: bool, output: &Path, line: String) {
     if quiet {
         outln!("{}", output.display());
@@ -815,23 +801,22 @@ fn finished(quiet: bool, output: &Path, line: String) {
     }
 }
 
-/// What Telegram would have a problem with in a result, under its line,
-/// on stderr.
+/// Prints any Telegram validation issues for a result to stderr.
 fn print_issues(issues: &[tgradish_core::telegram::Issue]) {
     for issue in issues {
         eprintln!("{}", ui::issue(issue));
     }
 }
 
-/// The line that starts every conversion, whatever it makes: `input` →
-/// `output`.
+/// Formats the `Converting <input> → <output>` status line.
 fn converting(input: &Path, output: &Path) -> String {
     let input = term::link(input.display(), input);
     let output = term::link(style(output.display()).bold(), output);
     ui::status("Converting", format!("{input} → {output}"))
 }
 
-/// A frame of a finished sticker, shown in terminals that show pictures.
+/// Displays a representative frame of a finished sticker in terminals that
+/// support inline images.
 fn show_result(preview: &tgradish_core::preview::Preview) {
     let Some((rgba, _)) = preview.frames.get(preview.frames.len() / 3) else { return };
     term::picture(rgba, preview.width, preview.height, 8);
@@ -840,16 +825,14 @@ fn show_result(preview: &tgradish_core::preview::Preview) {
 fn reduction_text(reduction: &tgradish_core::tgradish_tgs::reduce::Reduction) -> String {
     use tgradish_core::tgradish_tgs::reduce::Reduction;
     match *reduction {
-        Reduction::SnapToGrid { scale } => format!("snapped to the {scale}x pixel grid"),
+        Reduction::SnapToGrid { scale } => format!("snapped to {scale}x pixel grid"),
         Reduction::MergeColours { distance } => format!("merged colours closer than {distance:.3}"),
         Reduction::MergeFrames { changed } => {
-            format!("merged frames differing in under {:.1}% of the area", changed * 100.0)
+            format!("merged frames differing by under {:.1}% of pixels", changed * 100.0)
         }
         Reduction::DropFrames { share } => format!("dropped {:.0}% of frames", share * 100.0),
-        Reduction::Despeckle => "removed single stray pixels".to_string(),
-        Reduction::Downscale { factor } => {
-            format!("lowered the resolution to {:.0}%", factor * 100.0)
-        }
+        Reduction::Despeckle => "removed isolated stray pixels".to_string(),
+        Reduction::Downscale { factor } => format!("downscaled to {:.0}%", factor * 100.0),
         other => format!("{other:?}"),
     }
 }

@@ -1,43 +1,39 @@
-//! How far making a sticker got, said as [`Progress::Advanced`]: each part
-//! of the work has a fixed share of the whole, and moves through it as far
-//! as the part can tell, so that the whole only goes on. What a part
-//! didn't need is passed over at once, as when the art fits as it is.
+//! Progress tracker emitting monotonic [`Progress::Advanced`] updates. Each
+//! pipeline phase has a weighted share of the whole; skipped phases complete
+//! immediately (for example, when lossless output already fits).
 //!
-//! The shares were measured at Best effort on the corpus, the reference
-//! art and fitting under lower limits than Telegram's, as the time each
-//! part takes of the whole, the middle of what they came to; a part's time
-//! varies with the art by several times either way.
+//! Phase weights are medians measured at `Effort::Best` on the corpus and
+//! reference art, and with fitting under limits lower than Telegram's; actual
+//! timings vary several-fold depending on the artwork.
 
 use std::cell::{Cell, RefCell};
 
 use super::Progress;
 
-/// The first quick encode, which tells whether the art fits, of all of it,
-/// when fitting may change the art.
+/// Share of total work assigned to the initial quick encode (under
+/// `Fit::Auto`).
 const QUICK: f64 = 0.02;
-/// Fitting, of what follows the quick encode, when the art doesn't fit as
-/// it is; the result is encoded and packed in the rest. Once the result
-/// missed and fitting aims lower, little is left to reduce, and encoding
-/// and packing it again takes most of the time.
+/// Share of post-quick work spent in fitting (the rest is final encoding and
+/// packing). On a [`Progress::Missed`] retry little reduction work remains, so
+/// re-encoding and packing dominate.
 const FITTING: f64 = 0.75;
 const FITTING_AGAIN: f64 = 0.3;
-/// Rounds of trying reductions, measuring the estimates against the real
-/// encoder, and weakening the last reduction: their shares of fitting.
-/// Measuring is an encode and packing of the art near as large as it is.
+/// Relative weights within fitting: reduction rounds, calibration against the
+/// real encoder (which encodes and packs the nearly full-size art), and
+/// weakening the final reduction.
 const ROUNDS: f64 = 0.12;
 const CALIBRATING: f64 = 0.85;
 const WEAKENING: f64 = 0.03;
-/// Encoding the result with the real encoder, of the rest; packing it by
-/// zopfli takes what is left. Measuring the estimates is split alike.
-/// Fitted art draws in fewer colours, quicker, and packs about as slowly.
+/// Share of final render+pack spent in encoding (rest is zopfli packing;
+/// calibration uses the same split). Fitted art has fewer colours and encodes
+/// faster, while zopfli packing takes roughly as long.
 pub(super) const RENDER: f64 = 0.6;
 const RENDER_FITTED: f64 = 0.25;
-/// What is kept back of encoding and packing a fitted result, for fitting
-/// to go on with should it miss: passed over when it fits.
+/// Reserve held back from final render+pack in case fitting misses and must
+/// retry (completed immediately once the packed output fits).
 const MISSED: f64 = 0.25;
 
-/// The least the whole goes on by before it is said again, and the stage
-/// at work: more often would only say the same.
+/// Minimum progress delta before emitting another [`Progress::Advanced`] event.
 const STEP: f64 = 0.001;
 
 /// A part of making a sticker.

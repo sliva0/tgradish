@@ -1,6 +1,5 @@
-//! How alike a result is to its input, by ffmpeg's SSIM filter over the
-//! input as the result's frames see it: how `fit = auto` picks a frame
-//! rate.
+//! Computes SSIM between an encoded candidate and the planned source using
+//! ffmpeg's `ssim` filter (used by `fit = auto` to pick the best frame rate).
 
 use std::ffi::OsString;
 use std::path::Path;
@@ -44,7 +43,7 @@ pub(crate) fn ssim(
 
     tail.iter().rev().find_map(|line| parse_ssim(line)).ok_or_else(|| Error::Ffmpeg {
         program: "ffmpeg",
-        status: "no SSIM in the output".into(),
+        status: "no SSIM score in ffmpeg output".into(),
         stderr: tail.join("\n"),
     })
 }

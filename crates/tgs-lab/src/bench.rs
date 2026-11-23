@@ -1,8 +1,7 @@
-//! Runs pixel art through the encoder: the synthetic corpus of
-//! `tgradish-corpus`, or the pictures of a folder that tgradish reads. A
-//! folder's `README.md` may give older sizes to compare with, in a
-//! Markdown table with the file name in backticks in its first column and
-//! the size in its seventh, like pixelart2tgs 1.x's.
+//! Benchmarks the TGS encoder on the built-in `tgradish-corpus` or a directory
+//! of supported image/animation files. If the directory has a `README.md` with
+//! a pixelart2tgs 1.x size table (backticked filename in column 1, byte size in
+//! column 7), compares output sizes against it.
 
 use std::path::Path;
 use std::time::Instant;
@@ -189,7 +188,7 @@ pub fn run(dir: Option<&Path>, bench: &Bench) -> Result<()> {
     }
     if then_total > 0 {
         println!(
-            "against the saved run: {now_total} bytes, was {then_total} ({:+.2}%)",
+            "compared with saved run: {now_total} bytes (was {then_total}, {:+.2}%)",
             (now_total as f64 / then_total as f64 - 1.0) * 100.0
         );
     }

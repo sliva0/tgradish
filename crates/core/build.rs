@@ -1,15 +1,17 @@
-//! Packs the licence notices of what tgradish is built from, compressed,
-//! so a binary on its own carries them; `licenses` reads them back for
-//! `tgradish licenses`. The texts are in this crate, since a published
-//! crate is built without the repository around it: tgradish's own beside
-//! this file, and in `licenses/` the Rust crates' from `cargo xtask
-//! licenses`, ffmpeg's from `cargo xtask ffmpeg`, and libwebp's from the
-//! libwebp-sys crate's copy of it. `src/notices.rs` lists them.
+//! Compresses the licence notices of what this build contains (ffmpeg's only
+//! with `linked-static`) into `OUT_DIR/notices.deflate` so standalone binaries
+//! embed them for `tgradish licenses`.
+//!
+//! Notice files live inside this crate so published crate builds work without
+//! the surrounding workspace: tgradish's own licence sits beside this file, and
+//! `licenses/` holds crate notices (from `cargo xtask licenses`), ffmpeg's
+//! notices (from `cargo xtask ffmpeg`), and libwebp's licence (from
+//! `libwebp-sys`). `src/notices.rs` lists them.
 
 use std::io::Write;
 use std::path::Path;
 
-// what each notice is matters only to `licenses`
+// Notice categories are only used by `licenses.rs`.
 #[allow(dead_code)]
 mod notices {
     include!("src/notices.rs");
@@ -19,8 +21,7 @@ fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     println!("cargo:rerun-if-changed=src/notices.rs");
     let ffmpeg = std::env::var_os("CARGO_FEATURE_LINKED_STATIC").is_some();
-    // each notice as its place in the list and its text, apart by unit and
-    // record separators
+    // Store each notice as `<index>\x1f<text>\x1e`.
     let mut packed = String::new();
     for (index, (file, of_ffmpeg, _)) in notices::FILES.iter().enumerate() {
         if *of_ffmpeg && !ffmpeg {

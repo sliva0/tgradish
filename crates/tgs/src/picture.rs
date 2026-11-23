@@ -1,37 +1,33 @@
-//! What a sticker shows, as frames of straight RGBA for previews: drawn
-//! from the art it is made of ([`of_art`]), or from the Lottie of a
-//! `.tgs` tgradish wrote ([`of_lottie`]), which give the same picture, so
-//! that a sticker made earlier shows as it did when it was made.
+//! Renders preview frames of a sticker as straight RGBA, either from its
+//! normalised art ([`of_art`]) or from the Lottie JSON of a `.tgs` file
+//! written by tgradish ([`of_lottie`]). Both produce the same preview so an
+//! existing sticker previews identically to when it was created.
 //!
-//! A picture's pixel is a square of the art's lattice: the largest block
-//! of input pixels every cell is a whole number of across and down. That
-//! is an art pixel, unless the canvas or a crop cut art pixels at the
-//! sides, which then show only in part. Where the lattice has more
-//! squares along its longer side than a picture may, or than [`MAX_BYTES`]
-//! hold in every frame, every so many show, the middle one of each run;
-//! frames that then come out the same as the one before are joined.
+//! Each output pixel corresponds to one square of the art's base lattice (the
+//! GCD of all cell sizes along both axes). That matches one art pixel unless
+//! edge art pixels were clipped by the canvas or a crop. When the lattice
+//! exceeds `max_side` or [`MAX_BYTES`] across all frames, pixels are uniformly
+//! subsampled by taking the middle of each block, and consecutive identical
+//! frames are merged.
 //!
-//! [`of_lottie`] reads the Lottie tgradish writes: shape layers of groups
-//! of rectangles, each group one solid fill, layers and groups shown and
-//! hidden over whole frames, all placed alike on the 512×512 canvas, the
-//! rectangles' edges on a pixel grid. Lottie with more than that, as paths,
-//! gradients, masks or fading, is refused rather than drawn wrong, as
-//! [`DrawError::Unsupported`]: other programs' stickers mostly.
+//! [`of_lottie`] supports the Lottie subset tgradish emits: shape layers with
+//! solid-filled rectangle groups, whole-frame visibility via `ip`/`op` and
+//! hold keyframes, shared layer transforms on the 512×512 canvas, and
+//! grid-aligned rectangles. Files using features outside this subset (paths,
+//! gradients, masks, fading, etc. — mostly stickers from other programs) return
+//! [`DrawError::Unsupported`] rather than rendering incorrectly.
 //!
-//! Where a pixel grid's edges are all where nothing is drawn, the file
-//! can't tell art cut at the sides from art that isn't: a square sticker
-//! cut from wider art through transparent columns reads as art as wide as
-//! what shows. The picture is then the same on the canvas, whose margins
-//! are wider by the transparent part.
+//! If clipped edges lie entirely in transparent regions, the Lottie file cannot
+//! distinguish clipped from unclipped art (for example, a square sticker
+//! cropped from wider art through transparent columns reads as the visible
+//! width); on the canvas the result is identical, with wider transparent
+//! margins.
 //!
-//! A picture is shown as a sticker's art is placed: in the middle of the
-//! canvas, filling it along its longer side, or stretched to fill it.
-//! Art placed otherwise, as smaller than the canvas or away from its
-//! middle, is drawn with the whole canvas around it, transparent where
-//! nothing is, so that it shows where it is on the canvas; where the
-//! canvas's edges aren't on the art's pixel grid, so that its margins
-//! can't be drawn in whole squares of it, it is refused as shapes off a
-//! pixel grid.
+//! A picture is shown as the sticker's art is placed: centred on the canvas,
+//! filling it along the longer side, or stretched to fill it. Art placed
+//! smaller or off-centre renders with the full 512×512 canvas around it
+//! (transparent outside); if the canvas edges do not align with the art's
+//! pixel grid, it is refused as shapes not aligned to a pixel grid.
 
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -40,44 +36,43 @@ use crate::grid::gcd;
 use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 use crate::normalise::PixelAnim;
 
-/// The most bytes the frames of a picture take together: a long
-/// animation of large art shows fewer of its pixels to stay within it.
+/// Maximum total RGBA bytes across all preview frames. Larger or longer
+/// animations are subsampled to stay within this budget.
 pub const MAX_BYTES: usize = 128 << 20;
 
-/// The most squares a lattice read from Lottie may have along a side.
+/// Maximum lattice squares allowed per side when reading Lottie JSON.
 const MAX_LATTICE: i64 = 1 << 16;
-/// The most squares of the lattice an art pixel of a file may be cut
-/// into, as by a crop through it.
+/// Maximum lattice subdivisions per art pixel (for cropped edge pixels).
 const MAX_DIVISIONS: i64 = 4096;
-/// How much drawing [`of_lottie`] does at most: pixels painted, in all
-/// frames. A sticker within Telegram's limits needs far less.
+/// Maximum total pixel writes permitted in [`of_lottie`]. Any valid Telegram
+/// sticker uses far less.
 const MAX_WORK: u64 = 1 << 30;
-/// How far from where tgradish put them the edges of a rectangle may be,
-/// in art pixels: rectangles are written with 6 decimals.
+/// Tolerance for rectangle edge coordinates in art pixels (written to 6
+/// decimal places).
 const EDGE: f64 = 2e-6;
 
-/// What a sticker shows.
+/// Rendered preview frames of a sticker.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Picture {
-    /// Width in pixels.
+    /// Frame width in pixels.
     pub width: u32,
-    /// Height in pixels.
+    /// Frame height in pixels.
     pub height: u32,
-    /// Each frame, `width * height * 4` bytes of straight RGBA, and how
-    /// many 60 fps frames it shows for. No two in a row are the same.
+    /// Frames as `(straight_rgba, ticks_at_60fps)`, with no two consecutive
+    /// identical frames.
     pub frames: Vec<(Vec<u8>, u32)>,
 }
 
-/// Why [`of_lottie`] couldn't draw a sticker.
+/// Error returned when [`of_lottie`] cannot render a sticker.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum DrawError {
-    /// It isn't Lottie JSON, or not as Lottie has it: what is wrong.
+    /// Invalid or malformed Lottie JSON.
     #[error("{0}")]
     Invalid(String),
-    /// It is Lottie with more than tgradish draws, which this names.
-    #[error("it has {0}, which tgradish doesn't draw")]
+    /// Valid Lottie using a feature tgradish's previewer does not render.
+    #[error("the sticker has {0}, which tgradish cannot draw")]
     Unsupported(String),
 }
 
@@ -138,8 +133,8 @@ fn push(frames: &mut Vec<(Vec<u8>, u32)>, rgba: Vec<u8>, ticks: u32) {
     }
 }
 
-/// What `anim` shows, `stretch`ed square as the sticker is, or not, at
-/// most `max_side` pixels along its longer side.
+/// Renders a preview [`Picture`] directly from normalised art, optionally
+/// stretched square, with the longer side capped at `max_side` pixels.
 pub fn of_art(anim: &PixelAnim, stretch: bool, max_side: u32) -> Picture {
     let grid = anim.grid();
     let (columns, rows) = (grid.columns(), grid.rows());
@@ -167,14 +162,11 @@ pub fn of_art(anim: &PixelAnim, stretch: bool, max_side: u32) -> Picture {
     Picture { width: xs.len() as u32, height: ys.len() as u32, frames }
 }
 
-/// What the Lottie `json` of a `.tgs` tgradish wrote shows, as [`of_art`]
-/// draws the art it was made of, at most `max_side` pixels along its
-/// longer side; art placed otherwise than tgradish places it is drawn
-/// with the canvas around it. Lottie with more than tgradish writes is
-/// refused, as is
-/// more JSON than Telegram's apps play
-/// ([`MAX_RAW_JSON`]) and a sticker longer
-/// than the 3 seconds Telegram allows.
+/// Renders a preview [`Picture`] from Lottie JSON written by tgradish,
+/// matching [`of_art`] with the longer side capped at `max_side` pixels. Art
+/// placed smaller or off-centre renders with the full canvas around it.
+/// Rejects unsupported Lottie features, JSON larger than [`MAX_RAW_JSON`], and
+/// animations longer than 3 seconds.
 pub fn of_lottie(json: &[u8], max_side: u32) -> Result<Picture> {
     if json.len() > MAX_RAW_JSON {
         return Err(unsupported("more JSON than Telegram's apps play"));
@@ -244,22 +236,22 @@ struct Sticker {
 }
 
 fn object<'a>(value: &'a Value, what: &str) -> Result<&'a Map<String, Value>> {
-    value.as_object().ok_or_else(|| invalid(format!("{what} isn't an object")))
+    value.as_object().ok_or_else(|| invalid(format!("{what} is not an object")))
 }
 
 fn field<'a>(object: &'a Map<String, Value>, key: &str, what: &str) -> Result<&'a Value> {
-    object.get(key).ok_or_else(|| invalid(format!("{what} has no \"{key}\"")))
+    object.get(key).ok_or_else(|| invalid(format!("{what} is missing \"{key}\"")))
 }
 
 fn number(value: &Value, what: &str) -> Result<f64> {
     value
         .as_f64()
         .filter(|n| n.is_finite())
-        .ok_or_else(|| invalid(format!("{what} isn't a number")))
+        .ok_or_else(|| invalid(format!("{what} is not a number")))
 }
 
 fn array<'a>(value: &'a Value, what: &str) -> Result<&'a [Value]> {
-    value.as_array().map(Vec::as_slice).ok_or_else(|| invalid(format!("{what} isn't a list")))
+    value.as_array().map(Vec::as_slice).ok_or_else(|| invalid(format!("{what} is not an array")))
 }
 
 /// Whether `value` is the number `n`.
@@ -282,7 +274,7 @@ fn only(
     // names, indices and the like, which change nothing that is drawn
     const NAMES: &[&str] = &["nm", "mn", "ln", "cl", "ix", "cix", "np", "ind"];
     match object.iter().find(|(key, value)| !NAMES.contains(&key.as_str()) && !known(key, value)) {
-        Some((key, _)) => Err(unsupported(format!("{what} with \"{key}\""))),
+        Some((key, _)) => Err(unsupported(format!("{what} with field \"{key}\""))),
         None => Ok(()),
     }
 }
@@ -306,7 +298,7 @@ fn pair(property: &Value, what: &str, third: f64) -> Result<[f64; 2]> {
         [x, y] => Ok([x, y]),
         [x, y, z] if z == third => Ok([x, y]),
         [_, _, _] => Err(unsupported(format!("{what} in 3D"))),
-        _ => Err(invalid(format!("{what} isn't two numbers"))),
+        _ => Err(invalid(format!("{what} does not have two numbers"))),
     }
 }
 
@@ -341,7 +333,7 @@ fn opacity(value: &Value, what: &str) -> Result<bool> {
     } else if percent == 0.0 {
         Ok(false)
     } else {
-        Err(unsupported("partly transparent layers or groups"))
+        Err(unsupported("semi-transparent layers or groups"))
     }
 }
 
@@ -362,7 +354,7 @@ fn shown(property: Option<&Value>) -> Result<Shown> {
     }
     let keys = array(value, what)?;
     if keys.is_empty() {
-        return Err(invalid("an opacity has no keyframes"));
+        return Err(invalid("opacity has no keyframes"));
     }
     if keys.len() > TLOTTIE.max_keyframes {
         return Err(unsupported("more keyframes than Telegram's apps play"));
@@ -393,7 +385,7 @@ fn shown(property: Option<&Value>) -> Result<Shown> {
 fn frame(value: &Value, what: &str) -> Result<f64> {
     let frame = number(value, what)?;
     if frame.fract() != 0.0 {
-        return Err(unsupported("frames that start between frames"));
+        return Err(unsupported("fractional frame numbers"));
     }
     Ok(frame)
 }
@@ -415,16 +407,16 @@ fn shape_name(kind: &str) -> String {
         "pb" => "pucker and bloat",
         "tw" => "twists",
         "zz" => "zig-zags",
-        "gr" => "groups in groups",
-        _ => return format!("shapes of the kind \"{kind}\""),
+        "gr" => "nested groups",
+        _ => return format!("a shape of type \"{kind}\""),
     };
     name.to_owned()
 }
 
 impl Sticker {
     fn read(root: &Value) -> Result<Sticker> {
-        let root = object(root, "the JSON")?;
-        only(root, "the animation", |key, value| match key {
+        let root = object(root, "root JSON")?;
+        only(root, "an animation", |key, value| match key {
             "v" | "fr" | "ip" | "op" | "w" | "h" | "layers" | "tgs" | "markers" | "meta" => true,
             "ddd" => is(value, 0.0),
             "assets" | "fonts" | "chars" => empty(value) || value.as_object().is_some(),
@@ -434,33 +426,33 @@ impl Sticker {
         if root.get("assets").is_some_and(|assets| !empty(assets)) {
             return Err(unsupported("assets"));
         }
-        let size = |key| number(field(root, key, "the animation")?, "the canvas's size");
+        let size = |key| number(field(root, key, "the animation")?, "canvas size");
         let (width, height) = (size("w")?, size("h")?);
         let canvas = f64::from(telegram::CANVAS);
         if (width, height) != (canvas, canvas) {
-            return Err(unsupported(format!("a canvas of {width}×{height}")));
+            return Err(unsupported(format!("a {width}×{height} canvas")));
         }
-        let rate = number(field(root, "fr", "the animation")?, "the frame rate")?;
+        let rate = number(field(root, "fr", "the animation")?, "frame rate")?;
         let fps = f64::from(telegram::FPS);
         if !(rate >= 1.0 && rate.fract() == 0.0 && (fps % rate) == 0.0) {
-            return Err(unsupported(format!("a frame rate of {rate}")));
+            return Err(unsupported(format!("a frame rate of {rate} fps")));
         }
         let ticks = (fps / rate) as u32;
-        let start = frame(field(root, "ip", "the animation")?, "its first frame")?;
-        let end = frame(field(root, "op", "the animation")?, "its last frame")?;
+        let start = frame(field(root, "ip", "the animation")?, "start frame")?;
+        let end = frame(field(root, "op", "the animation")?, "end frame")?;
         if end <= start {
-            return Err(invalid("it has no frames"));
+            return Err(invalid("animation has no frames"));
         }
         if (end - start) * f64::from(ticks) > f64::from(telegram::MAX_FRAMES) {
-            return Err(unsupported("more than 3 seconds of frames"));
+            return Err(unsupported("an animation longer than 3 seconds"));
         }
         let mut layers = Vec::new();
         let mut transform = None;
         // listed top first
-        for layer in array(field(root, "layers", "the animation")?, "the layers")?.iter().rev() {
+        for layer in array(field(root, "layers", "the animation")?, "layers")?.iter().rev() {
             let Some((placed, layer)) = Layer::read(layer)? else { continue };
             if *transform.get_or_insert(placed) != placed {
-                return Err(unsupported("layers placed differently"));
+                return Err(unsupported("layers with different transforms"));
             }
             layers.push(layer);
         }
@@ -478,7 +470,7 @@ impl Layer {
             return Ok(None);
         }
         if !layer.get("ty").is_some_and(|kind| is(kind, 4.0)) {
-            return Err(unsupported("layers other than shape layers"));
+            return Err(unsupported("non-shape layers"));
         }
         only(layer, what, |key, value| match key {
             "ty" | "ks" | "ip" | "op" | "shapes" => true,
@@ -488,22 +480,22 @@ impl Layer {
             "masksProperties" | "ef" => empty(value),
             _ => false,
         })?;
-        let ks = object(field(layer, "ks", what)?, "a layer's transform")?;
-        only(ks, "a layer's transform", |key, _| {
+        let ks = object(field(layer, "ks", what)?, "a layer transform")?;
+        only(ks, "a layer transform", |key, _| {
             matches!(key, "p" | "s" | "a" | "r" | "o" | "sk" | "sa" | "rx" | "ry" | "rz" | "or")
         })?;
         let position =
             ks.get("p").map_or(Ok([0.0, 0.0]), |p| pair(p, "a layer's position", 0.0))?;
         let scale =
             ks.get("s").map_or(Ok([100.0, 100.0]), |s| pair(s, "a layer's scale", 100.0))?;
-        neutral(ks, "a", "a layer's anchor away from its origin", &[0.0, 0.0])?;
+        neutral(ks, "a", "layer anchors away from the origin", &[0.0, 0.0])?;
         for key in ["r", "sk", "rx", "ry", "rz"] {
             neutral(ks, key, "rotated or skewed layers", &[0.0])?;
         }
         neutral(ks, "or", "rotated or skewed layers", &[0.0, 0.0, 0.0])?;
         let transform = Transform { position, scale: scale.map(|percent| percent / 100.0) };
-        let from = frame(field(layer, "ip", what)?, "a layer's first frame")?;
-        let to = frame(field(layer, "op", what)?, "a layer's last frame")?;
+        let from = frame(field(layer, "ip", what)?, "a layer's start frame")?;
+        let to = frame(field(layer, "op", what)?, "a layer's end frame")?;
         let mut groups = Vec::new();
         let shapes = layer.get("shapes").map_or(Ok(&[][..]), |shapes| array(shapes, "shapes"))?;
         for item in shapes.iter().rev() {
@@ -517,7 +509,7 @@ impl Layer {
                     return Err(unsupported(format!("\"{kind}\" outside groups")));
                 }
                 Some(kind) => return Err(unsupported(shape_name(kind))),
-                None => return Err(invalid("a shape has no kind")),
+                None => return Err(invalid("shape has no type")),
             }
         }
         let shown = shown(ks.get("o"))?;
@@ -535,10 +527,9 @@ impl Group {
             "hd" => value == &Value::Bool(false),
             _ => false,
         })?;
-        let items =
-            group.get("it").map_or(Ok(&[][..]), |items| array(items, "a group's shapes"))?;
+        let items = group.get("it").map_or(Ok(&[][..]), |items| array(items, "group shapes"))?;
         let (mut rects, mut colour, mut shown) = (Vec::new(), None, Shown::default());
-        let refused = || unsupported("groups other than a fill over rectangles");
+        let refused = || unsupported("groups other than filled rectangles");
         for (index, item) in items.iter().enumerate() {
             let item = object(item, "a shape")?;
             if item.get("hd").is_some_and(|hidden| hidden == &Value::Bool(true)) {
@@ -557,7 +548,7 @@ impl Group {
                 }
                 Some("rc" | "fl" | "tr") => return Err(refused()),
                 Some(kind) => return Err(unsupported(shape_name(kind))),
-                None => return Err(invalid("a shape has no kind")),
+                None => return Err(invalid("shape has no type")),
             }
         }
         // nothing is filled without a fill
@@ -579,14 +570,14 @@ fn rect(item: &Map<String, Value>) -> Result<Option<[f64; 4]>> {
     let [x, y] = pair(field(item, "p", "a rectangle")?, "a rectangle's position", 0.0)?;
     let [width, height] = pair(field(item, "s", "a rectangle")?, "a rectangle's size", 0.0)?;
     if width < 0.0 || height < 0.0 {
-        return Err(unsupported("rectangles of a negative size"));
+        return Err(unsupported("negative-sized rectangles"));
     }
     if width == 0.0 || height == 0.0 {
         return Ok(None);
     }
     let edges = [x - width / 2.0, y - height / 2.0, x + width / 2.0, y + height / 2.0];
     if edges.iter().any(|edge| !edge.is_finite()) {
-        return Err(invalid("a rectangle is too large"));
+        return Err(invalid("rectangle coordinates overflow"));
     }
     Ok(Some(edges))
 }
@@ -611,7 +602,7 @@ fn fill(item: &Map<String, Value>) -> Result<[u8; 4]> {
     let truncated = |fraction: f64| (fraction.clamp(0.0, 1.0) * 255.0) as u8;
     let [r, g, b] = match channels[..] {
         [r, g, b] | [r, g, b, _] => [r, g, b].map(truncated),
-        _ => return Err(invalid("a fill's colour isn't three numbers")),
+        _ => return Err(invalid("a fill's colour does not have three numbers")),
     };
     let alpha = match item.get("o") {
         Some(o) => number(fixed(o, "a fill's opacity")?, "a fill's opacity")?,
@@ -626,11 +617,11 @@ fn transform(item: &Map<String, Value>) -> Result<Shown> {
     only(item, what, |key, _| {
         matches!(key, "ty" | "p" | "a" | "s" | "r" | "o" | "sk" | "sa" | "hd")
     })?;
-    neutral(item, "p", "groups moved", &[0.0, 0.0])?;
-    neutral(item, "a", "groups moved", &[0.0, 0.0])?;
-    neutral(item, "s", "groups scaled", &[100.0, 100.0])?;
-    neutral(item, "r", "groups rotated", &[0.0])?;
-    neutral(item, "sk", "groups skewed", &[0.0])?;
+    neutral(item, "p", "translated groups", &[0.0, 0.0])?;
+    neutral(item, "a", "translated groups", &[0.0, 0.0])?;
+    neutral(item, "s", "scaled groups", &[100.0, 100.0])?;
+    neutral(item, "r", "rotated groups", &[0.0])?;
+    neutral(item, "sk", "skewed groups", &[0.0])?;
     shown(item.get("o"))
 }
 
@@ -772,7 +763,7 @@ fn divisions(extents: &[Extent; 2]) -> Result<i64> {
     (1..=MAX_DIVISIONS)
         .take_while(|&n| most * n as f64 <= 0.05)
         .find(|&n| near(n))
-        .ok_or_else(|| unsupported("shapes off a pixel grid"))
+        .ok_or_else(|| unsupported("shapes not aligned to a pixel grid"))
 }
 
 /// A side of the lattice: its squares, how many of them come before the
@@ -791,7 +782,7 @@ impl Side {
             ((before * divisions as f64).round(), (after * divisions as f64).round());
         let squares = before + after;
         if !(1.0..=MAX_LATTICE as f64).contains(&squares) || before < 0.0 {
-            return Err(unsupported("shapes off a pixel grid"));
+            return Err(unsupported("shapes not aligned to a pixel grid"));
         }
         Ok(Side { squares: squares as i64, before: before as i64, divisions })
     }
@@ -836,7 +827,7 @@ impl Sticker {
     fn draw(&self, max_side: u32) -> Result<Picture> {
         let Transform { position, scale } = self.transform;
         if !(scale[0] > 0.0 && scale[1] > 0.0) {
-            return Err(unsupported("layers flipped or scaled to nothing"));
+            return Err(unsupported("flipped or zero-scaled layers"));
         }
         let stretched = (scale[0] - scale[1]).abs() > 1e-6 * scale[0].max(scale[1]) + 2e-6;
         let rects = || self.layers.iter().flat_map(|layer| &layer.groups).flat_map(|g| &g.rects);
@@ -873,7 +864,7 @@ impl Sticker {
         }
         let divisions = divisions(&extents)?;
         let (across, down) = (Side::of(&extents[0], divisions)?, Side::of(&extents[1], divisions)?);
-        let off_grid = || unsupported("shapes off a pixel grid");
+        let off_grid = || unsupported("shapes not aligned to a pixel grid");
         for rect in rects() {
             let lines = [
                 across.line(rect[0]),
@@ -950,7 +941,7 @@ impl Sticker {
                     for &[left, top, right, bottom] in rects {
                         work += ((right - left) * (bottom - top)) as u64;
                         if work > MAX_WORK {
-                            return Err(unsupported("more to draw than a sticker has"));
+                            return Err(unsupported("more drawing than any sticker needs"));
                         }
                         for y in top..bottom {
                             for x in left..right {

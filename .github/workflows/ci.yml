@@ -1,8 +1,7 @@
 name: CI
 
-# not for Markdown alone, but for the Markdown checked here: the changelog
-# by `release check`, the README's links by xtask's tests, and ffmpeg's
-# notes, which the binaries carry. The last pattern a path matches decides
+# Skip pure Markdown changes, except files validated by CI (CHANGELOG.md,
+# README.md links, and licence files). The last matching pattern wins.
 on:
   push:
     branches: [main]
@@ -20,12 +19,12 @@ on:
       - CHANGELOG.md
       - crates/core/licenses/**
 
-# a newer push makes an older run of the same branch or pull request moot
+# Cancel superseded runs on the same branch or pull request.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# nothing here writes to the repository
+# Nothing here writes to the repository.
 permissions:
   contents: read
 
@@ -40,14 +39,13 @@ jobs:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
-    # it installs ffmpeg, so tests that need it fail rather than skip
-    # without it
+    # Fail (rather than skip) tests if ffmpeg is missing.
     env:
       TGRADISH_REQUIRE_FFMPEG: 1
     steps:
       - uses: actions/checkout@v7
 
-      # rust-toolchain.toml selects stable with clippy and rustfmt
+      # Uses latest stable with clippy and rustfmt from rust-toolchain.toml.
       - run: rustup show active-toolchain
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
@@ -55,7 +53,7 @@ jobs:
       - name: Install ffmpeg (Linux)
         if: runner.os == 'Linux'
         run: |
-          # a stalled download fails and is tried again, rather than hanging
+          # Retry stalled apt downloads instead of hanging.
           sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
           sudo apt-get update && sudo apt-get install -y ffmpeg
 
@@ -64,45 +62,45 @@ jobs:
         run: choco install ffmpeg -y --no-progress
 
       - run: cargo fmt --all --check
-      # --locked first, so a Cargo.lock that is out of date fails rather
-      # than being rewritten for the steps after
+      # Run --locked first so a stale Cargo.lock fails before later commands
+      # can modify it.
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      # the command line on its own, without the GUI
+      # Check the CLI-only build (without the GUI feature).
       - run: cargo clippy -p tgradish --no-default-features --all-targets -- -D warnings
       - run: cargo test --workspace
-      # .tgs on one thread, as for the web: the workspace's other crates
-      # turn on its threads
+      # tgradish-tgs alone, single-threaded as on the web (the workspace enables
+      # `threads`).
       - run: cargo test -p tgradish-tgs
-      # the icons for menus and Windows, made from the GUI's
+      # Verify menu and Windows icons match the GUI icon.
       - run: cargo xtask icons --check
-      # the version written alike everywhere it is, see CONTRIBUTING.md
+      # Verify all version numbers and the changelog agree (see
+      # CONTRIBUTING.md).
       - run: cargo xtask release check
         if: runner.os == 'Linux'
-      # public docs that link to what readers of them can't see, or to
-      # nothing; the same on every system, so once
+      # Check rustdoc warnings and broken intra-doc links (platform-independent,
+      # so Linux only).
       - run: cargo doc --workspace --no-deps
         if: runner.os == 'Linux'
         env:
           RUSTDOCFLAGS: -D warnings
-      # the libraries packaged as crates.io would get them, and built from
-      # those packages, each against the others', in the order they depend
-      # on each other
+      # Dry-run crates.io packaging and builds for the library crates in
+      # dependency order.
       - run: cargo publish --dry-run --locked -p tgradish-tgs -p tgradish-core
         if: runner.os == 'Linux'
 
-      # binaries carry the licences of their crates; they must list today's
+      # Verify bundled third-party crate licences are up to date.
       - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         if: runner.os == 'Linux'
         with:
-          # other versions word the list differently, and xtask refuses
-          # them: CARGO_ABOUT in xtask/src/licenses.rs
+          # Pin exact version to match CARGO_ABOUT in xtask/src/licenses.rs
+          # (output wording varies across versions).
           tool: cargo-about@0.9.2
       - run: cargo xtask licenses --check
         if: runner.os == 'Linux'
 
-  # the code only macOS compiles, which nothing else builds: checked, not
-  # run, as no release is built for it and its tests would want ffmpeg.
-  # Without `linked`, so no ffmpeg libraries are needed
+  # Compile-check macOS-only code: checked rather than run because no release is
+  # built for macOS and tests would need ffmpeg. Without `linked`, so no ffmpeg
+  # dev libraries are needed.
   macos:
     runs-on: macos-latest
     timeout-minutes: 30
@@ -112,7 +110,7 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
-  # the oldest Rust the manifests say builds tgradish, their `rust-version`
+  # Verify the workspace builds with the MSRV declared in Cargo.toml.
   msrv:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -122,16 +120,16 @@ jobs:
         run: |
           version=$(sed -n 's/^rust-version = "\(.*\)"$/\1/p' Cargo.toml)
           rustup toolchain install "$version" --profile minimal
-          # over rust-toolchain.toml's stable
+          # Override rust-toolchain.toml's stable channel.
           echo "RUSTUP_TOOLCHAIN=$version" >> "$GITHUB_ENV"
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: cargo check --workspace --all-targets --locked
 
-  # the built-in ffmpeg backend, against the distribution's ffmpeg libraries
+  # Test the built-in ffmpeg backend against Ubuntu's ffmpeg dev packages.
   linked:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # as in check
+    # As in check.
     env:
       TGRADISH_REQUIRE_FFMPEG: 1
     steps:
@@ -139,21 +137,21 @@ jobs:
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - name: Install ffmpeg and its development files
         run: |
-          # a stalled download fails and is tried again, rather than hanging
+          # Retry stalled apt downloads instead of hanging.
           sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
           sudo apt-get update
           sudo apt-get install -y ffmpeg pkg-config clang libclang-dev \
             libavcodec-dev libavformat-dev libavfilter-dev libavutil-dev \
             libswscale-dev libswresample-dev libavdevice-dev
-      # only core's code changes with the feature; the command line and the
-      # GUI are tested as they run with it, the other crates don't use it
+      # Only tgradish-core changes under `linked`; test the CLI and GUI against
+      # it too.
       - run: cargo clippy -p tgradish-core --all-targets --features linked --locked -- -D warnings
       - run: >
           cargo test -p tgradish-core -p tgradish -p tgradish-gui
           --features tgradish/linked
 
-  # what only musl builds have, their allocator, and the crates' C parts
-  # built with musl-gcc
+  # Check musl-specific code (mimalloc allocator and C dependencies built with
+  # musl-gcc).
   musl:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -162,7 +160,7 @@ jobs:
       - run: rustup target add x86_64-unknown-linux-musl
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
       - run: |
-          # a stalled download fails and is tried again, rather than hanging
+          # Retry stalled apt downloads instead of hanging.
           sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
           sudo apt-get update && sudo apt-get install -y musl-tools
       - run: >
@@ -171,8 +169,8 @@ jobs:
         env:
           CC_x86_64_unknown_linux_musl: musl-gcc
 
-  # tgs-lab, a workspace of its own: .tgs output rendered with tlottie and
-  # rlottie
+  # Test tgs-lab (separate workspace): renders .tgs output with tlottie and
+  # rlottie.
   lab:
     runs-on: ubuntu-latest
     timeout-minutes: 30
@@ -183,7 +181,7 @@ jobs:
           workspaces: crates/tgs-lab -> target
       - name: Install what Telegram's rlottie builds with
         run: |
-          # a stalled download fails and is tried again, rather than hanging
+          # Retry stalled apt downloads instead of hanging.
           sudo sh -c "echo 'Acquire::Retries \"3\"; Acquire::http::Timeout \"30\"; Acquire::https::Timeout \"30\";' > /etc/apt/apt.conf.d/80-stalls"
           sudo apt-get update && sudo apt-get install -y cmake ninja-build clang libclang-dev
       - run: cargo fmt --manifest-path crates/tgs-lab/Cargo.toml --check
@@ -192,7 +190,8 @@ jobs:
           --features rlottie --locked -- -D warnings
       - run: cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie
 
-  # the library a web page can run, with no files, processes or threads
+  # Verify tgradish-tgs compiles for WebAssembly (no filesystem, subprocesses,
+  # or threads).
   wasm:
     runs-on: ubuntu-latest
     timeout-minutes: 15

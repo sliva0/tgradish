@@ -1,8 +1,6 @@
-//! The bar under the selected item: converting it, stopping or not
-//! converting it after all and how far it has got, copying its result,
-//! what went wrong last time, and the name of the file its result goes
-//! to, cut short in its middle where the line has little room for it, and
-//! on a second line, under the rest, only where even that doesn't fit.
+//! Action bar below the preview for the selected item: convert, stop, cancel
+//! waiting, progress, copy result, last error, and output filename (middle-elided
+//! when tight, or wrapped to a second line when it still does not fit).
 
 use std::path::{Path, PathBuf};
 
@@ -16,8 +14,7 @@ use crate::l10n::fl;
 use crate::outputs::Written;
 use crate::{system, theme, widgets};
 
-/// What `add` adds, within `width` of the row, so text in it is cut short
-/// there.
+/// Runs `add` inside a scope capped at `width` so labels inside truncate there.
 fn within<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     ui.scope(|ui| {
         ui.set_max_width(width.max(1.0));
@@ -26,33 +23,32 @@ fn within<R>(ui: &mut egui::Ui, width: f32, add: impl FnOnce(&mut egui::Ui) -> R
     .inner
 }
 
-/// Space over the bar's row, under it, and how high it is, as its first
-/// button is: the list of files lays its own bar out level with it. Under
-/// it, with the margins of its panel and of the window, it is as far from
-/// the window's bottom as the bar over the preview is from its top; the
-/// space egui leaves after a row is part of it.
+/// Vertical spacing above and below the action bar row, and row height (matching
+/// its primary button). The file list aligns its footer to these values. Combined
+/// with panel and window margins (and egui's trailing row spacing), [`BAR_BELOW`]
+/// places the bar as far from the bottom of the window as the preview bar is from
+/// the top.
 pub(crate) const BAR_ABOVE: f32 = 8.0;
 pub(crate) const BAR_BELOW: f32 = 9.0;
 
-/// What to add after the bar's row for [`BAR_BELOW`] under it, past the
-/// space egui leaves after a row in `style`.
+/// Extra space to add after the bar row to reach [`BAR_BELOW`] beyond egui's
+/// default row spacing in `style`.
 pub(crate) fn below_bar(style: &egui::Style) -> f32 {
     BAR_BELOW - style.spacing.item_spacing.y
 }
 pub(crate) const BAR_ROW: f32 = 32.0;
 
-/// Whether the bar is on two lines, as it last needed, kept under this
-/// name.
+/// egui temp-data key recording whether the bar needed two lines on the last
+/// frame.
 const LINES: &str = "action bar lines";
-/// Asks the column beside the preview to show why converting failed, kept
-/// under this name.
+/// egui temp-data key asking the column beside the preview to scroll to the
+/// full failure message.
 pub(crate) const POINT_AT_FAILURE: &str = "point at failure";
 
 impl App {
-    /// The result `id` made, there still as it wrote it, not put in its
-    /// place since, which can be copied as a file: the one at `output`,
-    /// where the bar says its result goes, not one of another format made
-    /// before.
+    /// Returns the output file written by item `id` if it is still unchanged on
+    /// disk at `output` (matching the current format's destination rather than an
+    /// earlier conversion to another format) and can be copied to the clipboard.
     pub(crate) fn copyable(&self, id: u64, output: Option<&Path>) -> Option<PathBuf> {
         let item = self.item(id)?;
         match &item.made.as_ref()?.job.status {
@@ -250,10 +246,10 @@ impl App {
     }
 }
 
-/// Keep best so far, beside Stop while a WebM is fitted: it stops fitting
-/// and saves the best encode that fits so far, once one does. As wide
-/// whatever it says, and as high as Stop. Pressed by its key too, where
-/// `keyed`.
+/// "Keep best so far" button next to Stop during WebM fitting: stops the search
+/// and keeps the best fitting encode once one exists. Fixed to the wider of its
+/// two labels and the same height as Stop; also triggered by its shortcut when
+/// `keyed` is true.
 fn keep_best(ui: &mut egui::Ui, job: &crate::jobs::Job, stopping: bool, keyed: bool) {
     let (keep, keeping) = (fl!("keep-best"), fl!("keeping-best"));
     let width = [&keep, &keeping]
@@ -478,10 +474,10 @@ impl<'a> Right<'a> {
     }
 }
 
-/// Copy, beside Convert once there is a result: it copies `made` as a
-/// file, to paste into Telegram, and says what copying did on it a moment,
-/// as wide whatever it says, so nothing beside it moves. Gives the result
-/// to copy, once clicked or, where `keyed`, asked by its key.
+/// Copy button shown next to Convert once a result exists: copies `made` as a
+/// file for pasting into Telegram and briefly shows the outcome. Fixed to the
+/// widest of its labels so adjacent controls do not shift. Returns the path to
+/// copy when clicked or triggered via shortcut (`keyed`).
 fn copy_button(ui: &mut egui::Ui, made: &Path, keyed: bool) -> Option<PathBuf> {
     let now = ui.input(|input| input.time);
     let copied: Option<(f64, Result<(), String>)> =

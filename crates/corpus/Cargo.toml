@@ -1,6 +1,6 @@
 [package]
 name = "tgradish-corpus"
-description = "Synthetic test inputs for tgradish's crates: pixel art drawn in code, and video clips made with ffmpeg"
+description = "Synthetic test media for tgradish: procedural pixel art and ffmpeg-generated video clips"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

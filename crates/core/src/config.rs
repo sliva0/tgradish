@@ -14,13 +14,11 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::FfmpegChoice;
 
-/// A config file setting everything there is to set, each explained, as
-/// these docs show it.
+/// Full documented example `config.toml` showing every setting.
 pub const EXAMPLE: &str = include_str!("config.example.toml");
 
-/// [`EXAMPLE`] to start a config file from: what only the machine it was
-/// written on has, as a path to ffmpeg or a folder for results, left
-/// there as comments, and the rest as it is.
+/// Returns [`EXAMPLE`] ready for a fresh config file, with machine-specific
+/// paths (`path`, `output-dir`) commented out.
 pub fn starting_example() -> String {
     let machines_own = ["path = ", "output-dir = "];
     EXAMPLE
@@ -32,29 +30,27 @@ pub fn starting_example() -> String {
         .collect()
 }
 
-/// The user's settings, from `config.toml` ([`Config::default_path`]).
+/// User configuration loaded from `config.toml` ([`Config::default_path`]).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Config {
-    /// Preset used when none is given, for WebM.
+    /// Default preset for WebM and WebP output.
     pub preset: Option<String>,
-    /// Preset used when none is given, for `.tgs`.
+    /// Default preset for `.tgs` output.
     pub tgs_preset: Option<String>,
-    /// How many threads conversions use, as `--threads` says.
+    /// Maximum number of threads per conversion (equivalent to `--threads`).
     pub threads: Threads,
-    /// Which ffmpeg to use.
+    /// Which ffmpeg installation to use.
     pub ffmpeg: FfmpegConfig,
-    /// The GUI's settings, which the GUI reads and words itself: kept
-    /// here as written, and saved again with the rest. They aren't held
-    /// to this file's strictness, so a setting a newer GUI writes
-    /// never breaks the command line.
+    /// GUI-specific settings preserved verbatim so newer GUI keys never break
+    /// the CLI.
     #[serde(skip_serializing_if = "toml::Table::is_empty")]
     #[schemars(with = "BTreeMap<String, serde_json::Value>")]
     pub gui: toml::Table,
 }
 
 impl Config {
-    /// The preset to use for `format` when none is given.
+    /// Returns the default preset name for `format` when none is specified.
     pub fn preset_for(&self, format: crate::presets::Format) -> &str {
         let configured = match format {
             crate::presets::Format::Webm | crate::presets::Format::Webp => &self.preset,
@@ -64,40 +60,38 @@ impl Config {
     }
 }
 
-/// Which ffmpeg to use: the `[ffmpeg]` table of the config file.
+/// `[ffmpeg]` section of `config.toml`.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct FfmpegConfig {
-    /// Where to look for ffmpeg, as `--ffmpeg-from` says.
+    /// Where to locate ffmpeg (equivalent to `--ffmpeg-from`).
     #[serde(rename = "from")]
     pub choice: FfmpegChoice,
-    /// ffmpeg executable or the directory containing ffmpeg and ffprobe.
-    /// Overrides `from`.
+    /// Path to an ffmpeg executable or a directory containing `ffmpeg` and
+    /// `ffprobe`. Overrides `from`.
     pub path: Option<PathBuf>,
 }
 
-/// How many threads a conversion uses at once: as many as each part of it
-/// makes use of, or at most a number. Written `"auto"` or as the number,
-/// as the config file and `--threads` take it.
+/// Thread limit per conversion: `"auto"` or a positive integer (matching
+/// `config.toml` and `--threads`).
 ///
-/// A `.tgs` comes out the same whatever it is; a WebM can come out a few
-/// bytes apart, as libvpx encodes a little differently in another number
-/// of threads.
+/// `.tgs` output is identical regardless of thread count. WebM output can
+/// vary by a few bytes because `libvpx` encodes slightly differently across
+/// thread counts.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Threads {
-    /// ffmpeg's own choice, which goes by the machine's cores, and for
-    /// `.tgs` a thread for each candidate fitting tries at once, up to as
-    /// many as the machine runs.
+    /// Automatic thread count: ffmpeg picks based on CPU cores, and `.tgs`
+    /// size-fitting runs one worker per candidate up to available cores.
     #[default]
     Auto,
-    /// At most this many: ffmpeg decodes, filters and encodes in this
-    /// many, and fitting a `.tgs` tries this many candidates at once.
+    /// Hard cap on threads used by ffmpeg (decoding, filtering and encoding)
+    /// and `.tgs` parallel size-fitting.
     Limit(NonZeroU32),
 }
 
 impl Threads {
-    /// The most threads, unless it is automatic.
+    /// Returns the numeric thread limit, or `None` for [`Threads::Auto`].
     pub fn limit(self) -> Option<NonZeroU32> {
         match self {
             Threads::Auto => None,
@@ -123,7 +117,7 @@ impl std::str::FromStr for Threads {
             "auto" => Ok(Threads::Auto),
             text => match text.parse::<u32>() {
                 Ok(threads) => Threads::try_from(u64::from(threads)),
-                Err(_) => Err(format!("{s:?}: expected auto or a number of threads, from 1")),
+                Err(_) => Err(format!("{s:?}: expected \"auto\" or an integer of at least 1")),
             },
         }
     }
@@ -137,7 +131,7 @@ impl TryFrom<u64> for Threads {
             .ok()
             .and_then(NonZeroU32::new)
             .map(Threads::Limit)
-            .ok_or_else(|| format!("{threads} threads: expected at least 1, or auto"))
+            .ok_or_else(|| format!("{threads} threads: expected at least 1, or \"auto\""))
     }
 }
 
@@ -162,7 +156,7 @@ impl<'de> Deserialize<'de> for Threads {
             type Value = Threads;
 
             fn expecting(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                f.write_str("\"auto\" or a number of threads, from 1")
+                f.write_str("\"auto\" or an integer of at least 1")
             }
 
             fn visit_str<E: serde::de::Error>(self, text: &str) -> std::result::Result<Threads, E> {
@@ -201,8 +195,7 @@ impl JsonSchema for Threads {
     fn json_schema(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
         schemars::json_schema!({
             "anyOf": [{ "const": "auto" }, { "type": "integer", "minimum": 1 }],
-            "description": "How many threads a conversion uses at once: auto, as many as \
-                            each part of it makes use of, or at most a number"
+            "description": "Maximum threads per conversion: \"auto\" or an integer >= 1"
         })
     }
 }

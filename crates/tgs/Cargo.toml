@@ -1,7 +1,7 @@
 [package]
 name = "tgradish-tgs"
-description = "Pure-Rust library that turns pixel art from GIF, APNG, WebP, Aseprite or sprite sheets into Telegram animated stickers (.tgs), and checks any .tgs"
-# a library with its own version, not the application's
+description = "Pure-Rust library that converts pixel art (GIF, APNG, WebP, Aseprite, sprite sheets) into Telegram animated stickers (.tgs) and validates .tgs files"
+# Independently versioned from the main tgradish application.
 version = "0.2.0"
 edition.workspace = true
 rust-version.workspace = true
@@ -12,8 +12,8 @@ readme = "README.md"
 keywords = ["telegram", "sticker", "lottie", "pixel-art", "aseprite"]
 categories = ["multimedia::images", "multimedia::encoding", "wasm"]
 
-# with the schemas and the threads, but not the internals, which aren't
-# for others to use; core's features need ffmpeg, so it has no such line
+# Document `schema` and `threads` but not `internals`, which is not for others
+# to use. Core has no such section: its features need ffmpeg.
 [package.metadata.docs.rs]
 features = ["schema", "threads"]
 rustdoc-args = ["--cfg", "docsrs"]
@@ -23,24 +23,24 @@ flate2.workspace = true
 image.workspace = true
 schemars = { workspace = true, optional = true }
 serde.workspace = true
-# reads Lottie nested deeper than serde_json's own limit, see check.rs
+# Allow Lottie files nested deeper than serde_json's default recursion limit
+# (see check.rs).
 serde_json = { workspace = true, features = ["unbounded_depth"] }
 thiserror.workspace = true
 zopfli.workspace = true
 
 [features]
-# JSON Schemas of reports and options, for front-ends
+# Derive JSON Schemas for options and reports.
 schema = ["dep:schemars"]
-# Fitting tries its candidates in threads, as many at once as the options'
-# `threads` say, and zopfli packs in one. zopfli can't be stopped, so a
-# thread packing when a sticker is cancelled is left to finish alone, and
-# at most two pack at once in the whole process, however many stickers are
-# being made. Does nothing on wasm, which has no threads to start.
+# Evaluate size-fitting candidates across worker threads (up to
+# `options.threads`) and run zopfli compression on a worker thread. Because
+# zopfli cannot be cancelled, an in-flight compression thread finishes in the
+# background on cancellation, and a global limit of two concurrent zopfli
+# threads applies process-wide. No-op on wasm.
 threads = []
-# The encoder's interior, public for tgs-lab's benchmarks, render checks
-# and probes: scenes, Lottie, layout, the painter and its settings, and
-# how stickers are packed and their rectangles ordered. Unstable, and
-# exempt from semver: anything behind it can change in any release.
+# Expose internal encoder types (scenes, Lottie, layout, painter, packing,
+# rectangle ordering) for tgs-lab benchmarks, render checks and probes.
+# Unstable and exempt from semver.
 internals = []
 
 [dev-dependencies]

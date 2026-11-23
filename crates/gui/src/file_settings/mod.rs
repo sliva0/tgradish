@@ -1,5 +1,5 @@
-//! The settings of the file picked, each file's own: what to make,
-//! beside the preview, and how, under it.
+//! Per-file conversion settings for the selected item: output format, target,
+//! and preset beside the preview, and detailed options below it.
 
 mod advanced;
 mod aseprite;

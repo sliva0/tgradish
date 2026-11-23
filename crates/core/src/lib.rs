@@ -1,46 +1,42 @@
-//! Everything tgradish's command line and GUI share: Telegram stickers
-//! and emoji made from videos, pictures, Aseprite files and sequences of
-//! images, as any of three kinds of result, each converted by its module's
-//! `convert(backend, &Request, &cancel, on_event)`, or by
-//! [`convert::convert`] for any of them, which report through the same
-//! [`Event`]s and return the same [`Outcome`], of [`events`]:
+//! Shared conversion engine used by both the CLI and the GUI.
 //!
-//! - [`webm`]: VP9 WebM, planned from its [`webm::Options`] and the input,
-//!   fitted to the size limit, and the container inspected and patched,
-//!   as duration spoofing does, in [`webm::container`];
-//! - [`webp`]: pictures, from WebM's options for a picture;
-//! - [`tgs`]: `.tgs` vector animations of pixel art, made by
-//!   [`tgradish_tgs`], which this crate re-exports.
+//! Converts videos, images, Aseprite files and image sequences into Telegram
+//! stickers and custom emoji. Each format module exposes
+//! `convert(backend, &Request, &cancel, on_event)`, or callers can dispatch via
+//! [`convert::convert`]. All formats report progress through [`Event`] and
+//! return [`Outcome`] (from [`events`]):
 //!
-//! What they convert is an [`input::Input`], a file or a sequence of
-//! pictures, whose result goes where [`input::Input::default_output`]
-//! says unless a request names it; [`input::sniff`] tells kinds of file
-//! apart. The rest:
+//! - [`webm`]: VP9 WebM video stickers. Plans transforms from
+//!   [`webm::Options`],
+//!   fits output under the size limit, and inspects or patches WebM containers
+//!   (including duration spoofing) in [`webm::container`].
+//! - [`webp`]: Static WebP stickers, sharing picture options with [`webm`].
+//! - [`tgs`]: Vector `.tgs` stickers for pixel art, built with
+//!   [`tgradish_tgs`] (re-exported here).
 //!
-//! - [`picture`]: where a picture lands in a WebM or static sticker, and
-//!   telling pixel art, which auto scaling keeps sharp;
-//! - [`backend`] and [`ffmpeg`]: ffmpeg, which reads videos and encodes
-//!   WebM, as the `ffmpeg` and `ffprobe` programs or with the `linked`
-//!   feature its libraries, made to do what those programs' command lines
-//!   do; [`drawn`] draws what ffmpeg can't read, which tgradish reads
-//!   itself, for it;
-//! - [`options`]: the values every format's options take, and how options
-//!   layer and become flags; [`presets`] and [`config`], the user's;
-//! - [`inspect`], what a sticker file holds, judged by [`telegram`]'s
-//!   limits, whose [`telegram::Issue`] is what every format's results and
-//!   inspections have a problem with; [`preview`], finished stickers
-//!   decoded for showing;
-//! - [`protocol`]: what `--json` and `describe` print, by the rules its
-//!   docs give;
-//! - [`licenses`], [`paths`], and with the `clipboard` feature
-//!   `clipboard`.
+//! Supporting modules:
 //!
-//! Errors are an [`Error`], which says what is wrong without naming flags.
+//! - [`input`]: Represents inputs (single files or image sequences), detects
+//!   file kinds ([`input::sniff`]), and chooses default output paths
+//!   ([`input::Input::default_output`]).
+//! - [`picture`]: Framing, scaling and pixel-art detection (so auto scaling
+//!   keeps pixel art sharp).
+//! - [`backend`] and [`ffmpeg`]: Runs ffmpeg via external `ffmpeg`/`ffprobe`
+//!   processes or linked libraries (behind the `linked` feature). [`drawn`]
+//!   renders formats ffmpeg cannot read (such as Aseprite and image sequences).
+//! - [`options`], [`presets`], [`config`]: Shared option types, option
+//!   layering, CLI flag conversion, presets and user config.
+//! - [`inspect`], [`telegram`], [`preview`]: Inspects media against Telegram's
+//!   limits ([`telegram::Issue`]) and decodes finished stickers for preview.
+//! - [`protocol`]: JSON output types for `--json` and `describe`.
+//! - [`licenses`], [`paths`], and (with the `clipboard` feature) `clipboard`.
+//!
+//! Errors use [`Error`], keeping messages free of CLI flag names.
 
-// what only core uses says so, which keeps it out of the API
+// Keep internal items out of the public API.
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
-// docs.rs says which items need which features
+// Show required Cargo features on docs.rs.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod art;
@@ -77,26 +73,25 @@ pub mod webp;
 pub use cancel::CancelToken;
 pub use error::{ClipboardError, Error, FfmpegMissing, FileAction, Result, io_reason};
 pub use events::{Event, Outcome, Started};
-/// `tgradish-tgs`, which makes `.tgs` stickers of pixel art, with the pixel
-/// art reader under it as `tgradish_tgs::frames`: every type of theirs
-/// this crate's API names is reached through it.
+/// Re-export of `tgradish-tgs` (including its `frames` pixel-art reader) so
+/// callers can reach every type referenced by this crate's public API.
 pub use tgradish_tgs;
 
-/// Name and version, used in watermarks.
+/// Tool name and version used in watermarks.
 pub const TOOL_ID: &str = concat!("tgradish ", env!("CARGO_PKG_VERSION"));
 
-/// Where tgradish lives, which the signature of WebM files it makes
-/// names: older files are known by it, so it stays as it is.
+/// Repository URL embedded in WebM watermark signatures. Keep unchanged so
+/// older files remain recognisable.
 pub const REPOSITORY: &str = "https://github.com/sliva0/tgradish";
 
-/// What a `.tgs` sticker made without a title is named, before
-/// [`TOOL_ID`]; with a title, [`TITLED`] follows it. [`mark`] reads these
-/// back to know a sticker as tgradish's, so they must stay as they are.
+/// `.tgs` sticker names when watermarking is on: `UNTITLED` + [`TOOL_ID`]
+/// without a title, or the title + `TITLED`. [`mark`] checks these to
+/// recognise tgradish outputs, so keep them unchanged.
 pub(crate) const UNTITLED: &str = "made with ";
 pub(crate) const TITLED: &str = " (made with tgradish)";
 
-/// What WebM files made or modified by tgradish carry in their padding,
-/// unless their watermark is turned off, to say so.
+/// Watermark string written into the padding of WebM files made or modified by
+/// tgradish (unless watermarks are disabled).
 pub fn signature() -> String {
     format!("{TOOL_ID} {REPOSITORY}")
 }

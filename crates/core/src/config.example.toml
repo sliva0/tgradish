@@ -1,34 +1,32 @@
-preset = "balanced"   # preset used when none is given, for WebM and WebP
-tgs-preset = "best"   # the same for TGS
-threads = "auto"      # how many threads a conversion uses at once: auto,
-                      # as many as each part of it makes use of, or at
-                      # most a number, as --threads
+preset = "balanced"   # default preset for WebM and WebP
+tgs-preset = "best"   # default preset for TGS
+threads = "auto"      # max threads per conversion: "auto" (as many as each
+                      # part of the conversion can use) or a number, as
+                      # --threads
 
 [ffmpeg]
-from = "auto"         # auto (built in if there is one, else system),
-                      # builtin or system, as --ffmpeg-from
-path = "/opt/ffmpeg"  # ffmpeg executable or its directory, overrides `from`
+from = "auto"         # "auto" (built-in if available, else system), "builtin"
+                      # or "system", as --ffmpeg-from
+path = "/opt/ffmpeg"  # ffmpeg executable or its directory (overrides `from`)
 
-# the GUI's own: keys it doesn't know are kept, and a value it can't
-# read leaves that setting as it would be without it
+# GUI settings. Unknown keys are preserved, and invalid values fall back to
+# defaults.
 [gui]
-output-dir = "/home/me/stickers"  # results go here instead of next to inputs
-overwrite = false                  # replace existing results
-target = "sticker"                 # what new files become, or "emoji"
-motion = true                      # ease scrolling and changes, unless the system
-                                   # asks for less motion
-language = "en-GB"                 # the GUI's; the system's if left out
-theme = "system"                   # or "light" or "dark"
-accent = "system"                  # the accent colour: the system's, one of
+output-dir = "/home/me/stickers"  # save results here instead of beside inputs
+overwrite = false                  # overwrite existing output files
+target = "sticker"                 # default for new files: "sticker" or "emoji"
+motion = true                      # animate scrolling and transitions, unless
+                                   # the system asks for less motion
+language = "en-GB"                 # GUI language tag (system's if omitted)
+theme = "system"                   # "system", "light" or "dark"
+accent = "system"                  # "system", "#rrggbb" or a named colour:
                                    # "pink", "red", "orange", "yellow", "green",
-                                   # "teal", "blue", "purple", "violet", "grey",
-                                   # or one of your own as "#rrggbb"
-scale = 1.0                        # how large the GUI's text and controls
-                                   # are, from 0.5 to 5, as Ctrl+= and Ctrl+-
-                                   # change it; Ctrl+0 is back to 1
-reopen-files = true                # reopen the files of last time
-timeline-frames = false            # count the timeline in frames, not seconds
+                                   # "teal", "blue", "purple", "violet", "grey"
+scale = 1.0                        # UI scale from 0.5 to 5 (Ctrl+= and Ctrl+-
+                                   # adjust it; Ctrl+0 resets to 1)
+reopen-files = true                # reopen files from the previous session
+timeline-frames = false            # show timeline in frames instead of seconds
 
 [gui.result-preview]
-size = 3                 # the result's small picture, from 1 to 5
-corner = "bottom-right"  # or "bottom-left", "top-right", "top-left"
+size = 3                 # result thumbnail size, from 1 to 5
+corner = "bottom-right"  # "bottom-right", "bottom-left", "top-right", "top-left"

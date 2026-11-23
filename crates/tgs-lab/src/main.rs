@@ -1,8 +1,9 @@
-//! Development tool for tgradish's `.tgs` output: renders stickers with
-//! tlottie, the renderer in Telegram's current clients, shows what
-//! normalising does to inputs, and verifies encodings against their art.
-//! A workspace of its own, so these run from its folder, or anywhere with
-//! `--manifest-path` pointing at its `Cargo.toml`.
+//! Development tool for `.tgs` output: renders stickers with `tlottie`
+//! (Telegram's current renderer), inspects normalisation, runs benchmarks, and
+//! verifies encodings against source art.
+//!
+//! Lives in its own workspace; run from `crates/tgs-lab/` or with
+//! `--manifest-path crates/tgs-lab/Cargo.toml`.
 //!
 //! ```console
 //! cargo run -- info sticker.tgs
@@ -73,7 +74,8 @@ fn info(paths: &[PathBuf]) -> Result<()> {
         let json = read_lottie(path)?;
         let packed = (bytes != json).then_some(bytes.len());
         let (stats, issues) = check(&json, packed).map_err(anyhow::Error::msg)?;
-        Renderer::new(&json).with_context(|| format!("tlottie can't parse {}", path.display()))?;
+        Renderer::new(&json)
+            .with_context(|| format!("tlottie could not parse {}", path.display()))?;
         println!(
             "{}: {} frames, {} layers, {} bytes of JSON{}, features: {}",
             path.display(),
@@ -234,7 +236,7 @@ fn verify_file(args: &[String]) -> Result<()> {
         wrong |= centres.misses > 0;
     }
     if wrong {
-        bail!("the rendering doesn't match the art");
+        bail!("rendered output does not match the source art");
     }
     Ok(())
 }
@@ -283,7 +285,7 @@ fn main() -> Result<()> {
         }
         Some("features") if args.len() == 2 => features::write(folder(&args[1])?),
         Some("corpus") if args.len() == 2 => {
-            tgradish_corpus::write(folder(&args[1])?).context("cannot write the corpus")
+            tgradish_corpus::write(folder(&args[1])?).context("cannot write corpus")
         }
         Some("bench") => {
             let (paths, rest) = options(&args[1..], &["--save", "--against"])?;
@@ -365,7 +367,7 @@ fn asks_for_help(args: &[String]) -> bool {
 /// which would otherwise be made a folder of that name.
 fn folder(arg: &str) -> Result<&Path> {
     if arg.starts_with("--") {
-        bail!("unknown option {arg}, where a folder was expected\n{USAGE}");
+        bail!("unexpected option {arg}; expected a directory\n{USAGE}");
     }
     Ok(Path::new(arg))
 }

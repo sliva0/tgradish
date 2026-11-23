@@ -1,10 +1,9 @@
-//! Turns decoded frames into what the encoder works on: palette-indexed
-//! frames on Telegram's 60 fps grid, cropped and reduced to the art's own
-//! pixels.
+//! Converts decoded frames into the encoder's input representation:
+//! palette-indexed frames aligned to Telegram's 60 fps grid, cropped and
+//! reduced to the art's own pixel grid.
 //!
-//! Everything here is lossless except what the options ask for: a time
-//! window, playing faster or slower, cutting at 3 seconds, and a forced
-//! pixel scale.
+//! Normalisation is lossless except for explicit options: time windowing,
+//! tempo changes, trimming at 3 seconds, and forcing a pixel scale.
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -18,81 +17,74 @@ use crate::limits::telegram::{FPS, MAX_FRAMES};
 use crate::{Error, Result};
 
 const NANOS: u64 = 1_000_000_000;
-/// The slowest and fastest tempo [`Options::tempo`] takes, as many times as
-/// fast as the input. Left to itself, normalising plays an input longer
-/// than 3 seconds as fast as fits it into them, which for one longer than
-/// 30 seconds is faster than may be asked for.
+/// Allowed playback speed multiplier range for [`Options::tempo`]. When
+/// `tempo` is `None`, inputs longer than 3 seconds are automatically sped up
+/// to fit, which can exceed this range for inputs longer than 30 seconds.
 pub const TEMPOS: std::ops::RangeInclusive<f64> = 0.1..=10.0;
-/// How near where a frame starts or ends [`Options::start`] and the end of
-/// [`Options::length`] are taken as there, so that a time written with few
-/// digits, or rounded on its way, cuts between the frames meant rather
-/// than a hair into the one beside them: a tenth of a millisecond, a tenth
-/// of the shortest frame Aseprite, GIF or WebP times, and at most a quarter
-/// of the frames on either side.
+/// Tolerance for snapping [`Options::start`] and [`Options::length`] to nearby
+/// frame boundaries so rounded timestamps cut cleanly between frames: 0.1 ms
+/// (a tenth of the shortest frame Aseprite or WebP can time, 1 ms) and at most
+/// one quarter of either adjacent frame.
 pub const CUT_LEEWAY: Duration = Duration::from_micros(100);
-/// Longest stretch Telegram allows, in nanoseconds.
+/// Maximum sticker duration allowed by Telegram, in nanoseconds.
 const MAX_NANOS: u64 = MAX_FRAMES as u64 * NANOS / FPS as u64;
-/// Largest pixel scale looked for when the art isn't exactly on a grid.
+/// Maximum pixel scale considered when suggesting a likely scale.
 const MAX_LIKELY_SCALE: u32 = 16;
-/// Share of colour edges that must lie on a scale's grid to suggest it.
+/// Minimum share of colour edges on a grid required to suggest a likely scale.
 const LIKELY_FIT: f64 = 0.8;
-/// More colours than this and the input probably isn't pixel art.
+/// Colour count above which a non-pixel-art warning is emitted.
 const MANY_COLOURS: usize = 256;
 
-/// How art that isn't square fills the square canvas.
+/// How non-square art is fitted into Telegram's square canvas.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Square {
-    /// Whole, along its longer side, with transparent margins.
+    /// Fit whole along the longer side with transparent margins.
     #[default]
     Pad,
-    /// Cut to a square in its middle.
+    /// Centre-crop to a square.
     Crop,
-    /// Stretched, its art pixels no longer square.
+    /// Stretch to fill the square canvas (distorts aspect ratio).
     Stretch,
 }
 
-/// How [`normalise`] reads an animation. Built as `Options { tempo,
-/// ..Options::default() }`, so that what is added later keeps its default.
+/// Options for [`normalise`]. Construct with
+/// `Options { tempo, ..Options::default() }` so future fields retain defaults.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Options {
-    /// Keep the input's canvas instead of cropping to the visible pixels.
+    /// Keep the full canvas instead of trimming transparent margins.
     pub keep_canvas: bool,
-    /// The part of the input to use, in input pixels; all of it if `None`.
-    /// The canvas kept with `keep_canvas` is this part.
+    /// Optional crop rectangle in input pixels (`None` uses the whole input).
+    /// When `keep_canvas` is true, this rectangle is preserved as the canvas.
     pub crop: Option<Rect>,
-    /// Size of one art pixel in input pixels. Detected when not given;
-    /// forcing one moves pixels that are off its grid onto it (lossy).
+    /// Forced pixel scale in input pixels per art pixel. Auto-detected when
+    /// `None`; setting a value snaps off-grid pixels onto it (lossy).
     pub pixel_scale: Option<u32>,
-    /// Where in the input to start; within [`CUT_LEEWAY`] of where a frame
-    /// starts, there.
+    /// Start time in the input; snaps to a frame boundary within [`CUT_LEEWAY`].
     pub start: Duration,
-    /// How much of the input to use, from `start`; ending within
-    /// [`CUT_LEEWAY`] of where a frame ends, there.
+    /// Duration to take from `start`; end snaps to a frame boundary within
+    /// [`CUT_LEEWAY`].
     pub length: Option<Duration>,
-    /// How many times as fast as the input it plays. When `None`, inputs
-    /// longer than 3 seconds play as fast as fits them in. Whatever still
-    /// lasts longer is cut at 3 seconds.
+    /// Playback speed multiplier. When `None`, inputs longer than 3 seconds
+    /// speed up to fit. Anything still over 3 seconds is trimmed.
     pub tempo: Option<f64>,
-    /// How art that isn't square fills the canvas; only cropping changes
-    /// what normalising makes.
+    /// How non-square art fills the square canvas (only `Square::Crop` alters
+    /// the normalised frames).
     pub square: Square,
 }
 
-/// One frame of palette indices, row by row, and how many 60 fps frames
-/// it is shown for.
+/// One palette-indexed frame and its duration in 60 fps ticks.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PixelFrame {
-    /// An index into [`PixelAnim::palette`] for each cell, row by row.
+    /// Palette index for each cell, in row-major order.
     pub pixels: Vec<u16>,
-    /// How many 60 fps frames it shows for, at least 1.
+    /// Duration in 60 fps ticks (at least 1).
     pub ticks: u32,
 }
 
-/// A normalised animation. Cells are the largest blocks of input pixels
-/// that are one colour in every frame, so the grid can be uneven; colour 0
-/// is transparent. Made by [`normalise`], and by reductions of what it
-/// made: it has no other constructor, so that each one holds what
-/// normalising promises.
+/// A normalised pixel-art animation. Cells are the largest blocks of input
+/// pixels that stay uniform across all frames, so the grid may be uneven;
+/// palette index `0` is always transparent. Only [`normalise`] and reductions
+/// construct this type so its invariants hold.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PixelAnim {
     pub(crate) width: u32,
@@ -113,27 +105,27 @@ impl PixelAnim {
         self.height
     }
 
-    /// Where its cells lie in the input.
+    /// Cell boundary grid in input pixels.
     pub fn grid(&self) -> &Grid {
         &self.grid
     }
 
-    /// Straight RGBA colours; entry 0 is transparent.
+    /// Straight RGBA palette; index `0` is transparent.
     pub fn palette(&self) -> &[[u8; 4]] {
         &self.palette
     }
 
-    /// The frames in playing order, no two in a row the same.
+    /// Frames in playback order, with no two consecutive identical frames.
     pub fn frames(&self) -> &[PixelFrame] {
         &self.frames
     }
 
-    /// Length in 60 fps frames.
+    /// Total duration in 60 fps ticks.
     pub fn ticks(&self) -> u32 {
         self.frames.iter().map(|frame| frame.ticks).sum()
     }
 
-    /// Where each frame starts, in 60 fps frames, and then the length.
+    /// Start tick of each frame, followed by the total tick count.
     pub fn starts(&self) -> Vec<u32> {
         let mut starts = Vec::with_capacity(self.frames.len() + 1);
         starts.push(0);
@@ -143,12 +135,12 @@ impl PixelAnim {
         starts
     }
 
-    /// Whether any cell of any frame shows: only colour 0 is transparent.
+    /// Returns true if any cell in any frame is non-transparent (index != 0).
     pub(crate) fn shows(&self) -> bool {
         self.frames.iter().any(|frame| frame.pixels.iter().any(|&colour| colour != 0))
     }
 
-    /// A frame as RGBA at the input's resolution, cropped.
+    /// Renders `frame` as straight RGBA at the cropped input resolution.
     pub fn rgba(&self, frame: usize) -> Vec<u8> {
         let (columns, rows) = (&self.grid.columns, &self.grid.rows);
         let width = *columns.last().unwrap() as usize;
@@ -169,9 +161,9 @@ impl PixelAnim {
         out
     }
 
-    /// A frame as packed pixels (see [`pack`]) at the input's resolution,
-    /// cropped: [`PixelAnim::rgba`] without the bytes in between. What
-    /// reductions once worked on, which tests compare them with.
+    /// Renders `frame` as packed `u32` pixels (see [`pack`]) at the cropped
+    /// input resolution; used by tests to compare cell-based reductions
+    /// against pixel-based ones.
     #[cfg(test)]
     pub(crate) fn packed(&self, frame: usize) -> Vec<u32> {
         let (columns, rows) = (&self.grid.columns, &self.grid.rows);
@@ -181,7 +173,7 @@ impl PixelAnim {
         let mut out = Vec::with_capacity(width * *rows.last().unwrap() as usize);
         let pixels = &self.frames[frame].pixels;
         for (row, edges) in rows.windows(2).enumerate() {
-            // the first line of a row of cells, then copies of it
+            // Write the first scanline of the cell row, then repeat it.
             let start = out.len();
             for (column, cell) in columns.windows(2).enumerate() {
                 let colour = palette[pixels[row * self.width as usize + column] as usize];
@@ -195,90 +187,87 @@ impl PixelAnim {
     }
 }
 
-/// A rectangle of pixels.
+/// A pixel rectangle.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct Rect {
-    /// Its left edge, from the left of what it is in.
+    /// Left offset in pixels.
     pub x: u32,
-    /// Its top edge, from the top.
+    /// Top offset in pixels.
     pub y: u32,
-    /// Its width.
+    /// Width in pixels.
     pub width: u32,
-    /// Its height.
+    /// Height in pixels.
     pub height: u32,
 }
 
-/// What normalising did, for the user and the protocol.
+/// Summary of what [`normalise`] produced.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Report {
-    /// The input's width in pixels.
+    /// Input width in pixels.
     pub input_width: u32,
-    /// The input's height in pixels.
+    /// Input height in pixels.
     pub input_height: u32,
-    /// How many frames the input has.
+    /// Input frame count.
     pub input_frames: usize,
-    /// Length of the input, in seconds.
+    /// Total input duration in seconds.
     pub input_length: f64,
-    /// The part of the input that is used, in input pixels.
+    /// Used region of the input in input pixels.
     pub crop: Rect,
-    /// Width in cells (see [`PixelAnim`]).
+    /// Width in normalised cells (see [`PixelAnim`]).
     pub width: u32,
-    /// Height in cells.
+    /// Height in normalised cells.
     pub height: u32,
-    /// The art's pixel scale: every cell is a multiple of it, but those a
-    /// crop cuts at the sides.
+    /// Detected or forced pixel scale: every interior cell size is a multiple
+    /// of this value.
     pub scale: u32,
-    /// A larger scale most of the art follows, with the share of colour
-    /// edges on its grid; forcing it snaps the rest.
+    /// Suggested larger pixel scale if most colour edges align to it.
     pub likely_scale: Option<LikelyScale>,
-    /// Input pixels a forced scale changed.
+    /// Number of input pixels modified by a forced pixel scale.
     pub snapped_pixels: u64,
-    /// Visible colours, translucent ones too, counting each (colour,
-    /// alpha) once: all but the fully transparent.
+    /// Distinct non-transparent `(r, g, b, a)` colours.
     pub colours: usize,
-    /// Frames kept, once those alike in a row are joined.
+    /// Kept frame count after merging consecutive identical frames.
     pub frames: usize,
-    /// Consecutive identical frames joined into one.
+    /// Number of consecutive identical frames merged.
     pub merged_frames: usize,
-    /// Frames too short to get a whole 60 fps frame.
+    /// Number of frames dropped because they rounded to 0 ticks at 60 fps.
     pub dropped_frames: usize,
-    /// Length in 60 fps frames.
+    /// Output duration in 60 fps ticks.
     pub ticks: u32,
-    /// How many times as fast as the input it plays.
+    /// Applied playback speed multiplier.
     pub tempo: f64,
-    /// Whether a long input was cut at 3 seconds.
+    /// Whether the animation was trimmed at 3 seconds.
     pub trimmed: bool,
-    /// What is worth knowing about the art.
+    /// Non-fatal warnings about the input.
     pub warnings: Vec<Warning>,
 }
 
-/// A pixel scale most of the art follows, though not all of it.
+/// A larger pixel scale that most colour edges follow.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct LikelyScale {
-    /// The scale, in input pixels per art pixel.
+    /// Suggested scale in input pixels per art pixel.
     pub scale: u32,
-    /// The share of colour edges on its grid, from 0 to 1.
+    /// Fraction of colour edges aligned to this scale (`0.0..=1.0`).
     pub fit: f64,
 }
 
-/// Something about the art worth knowing, which doesn't stop a sticker.
+/// Non-fatal warning emitted during normalisation.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(tag = "warning", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Warning {
-    /// Hundreds of colours: probably not pixel art, so the sticker will be
-    /// large.
+    /// Input has many colours (likely not pixel art, so the sticker will be large).
     ManyColours {
-        /// How many it has.
+        /// Number of distinct non-transparent colours.
         colours: usize,
     },
 }
@@ -286,10 +275,9 @@ pub enum Warning {
 impl std::fmt::Display for Warning {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Warning::ManyColours { colours } => write!(
-                f,
-                "{colours} colours, which pixel art seldom has: the sticker will be large"
-            ),
+            Warning::ManyColours { colours } => {
+                write!(f, "{colours} colours found (unusual for pixel art; sticker will be large)")
+            }
         }
     }
 }
@@ -298,9 +286,9 @@ fn nanos(duration: Duration) -> u64 {
     u64::try_from(duration.as_nanos()).unwrap_or(u64::MAX)
 }
 
-/// `at`, or where one of frames lasting `durations` starts, or with `ends`
-/// where one ends, if `at` is within [`CUT_LEEWAY`] of it, and of a
-/// quarter of the frames on either side; all in nanoseconds.
+/// Snaps `at` (in nanoseconds) to a nearby frame start (or end when `ends` is
+/// true) if within [`CUT_LEEWAY`] and within a quarter of either adjacent
+/// frame's duration.
 fn on_edge(at: u64, durations: &[u64], ends: bool) -> u64 {
     let leeway = nanos(CUT_LEEWAY);
     let mut edge = 0u64;
@@ -337,30 +325,28 @@ fn pack(rgba: &[u8], width: u32, area: Rect) -> Vec<u32> {
     out
 }
 
-/// When the input's frames show on Telegram's 60 fps grid.
+/// Quantised frame schedule on Telegram's 60 fps grid.
 #[derive(Debug, Clone, PartialEq)]
 struct Timing {
-    /// How long each input frame shows, in nanoseconds of input: 0 for
-    /// those outside the part that is used.
+    /// Visible duration of each input frame in nanoseconds (`0` outside the
+    /// active window).
     shown: Vec<u64>,
-    /// How many 60 fps frames each of them gets: at least one and at most
-    /// [`MAX_FRAMES`] together.
+    /// 60 fps ticks assigned to each input frame (`1..=MAX_FRAMES` in total).
     ticks: Vec<u32>,
-    /// How many times as fast as the input it plays.
+    /// Applied playback speed multiplier.
     tempo: f64,
-    /// Whether the end was cut off to keep it to 3 seconds.
+    /// Whether the animation was trimmed to fit 3 seconds.
     trimmed: bool,
 }
 
-/// Times frames that last `durations`, of which `start..end` is used, all
-/// in nanoseconds, at `tempo`; with none, as fast as fits a long part into
-/// 3 seconds.
+/// Maps input frame `durations` within `start..end` (nanoseconds) onto
+/// Telegram's 60 fps grid at `tempo` (auto-speeding up when `None`).
 ///
-/// Whether the part is too long is decided in 60 fps frames, as Telegram
-/// counts them, and not in the input's time, where half a frame of leeway
-/// is five frames at tempo 0.1 and a twentieth of one at 10. So what rounds
-/// to 180 frames is taken whole, like 180 frames of 1/60 s each rounded up
-/// to whole nanoseconds, and anything more is cut at the end of the 180th.
+/// Overflow is checked in 60 fps ticks rather than input nanoseconds (where a
+/// half-tick leeway would equal 5 output ticks at tempo 0.1 and 1/20 of a tick
+/// at tempo 10). Anything rounding to 180 ticks (such as 180 frames of 1/60 s
+/// each rounded up to whole nanoseconds) is kept whole, and anything beyond is
+/// trimmed at tick 180.
 fn timing(durations: &[u64], start: u64, end: u64, tempo: Option<f64>) -> Result<Timing> {
     let length = end.saturating_sub(start);
     // 60 fps frames a nanosecond of input, as whole numbers over each other
@@ -405,11 +391,10 @@ fn timing(durations: &[u64], start: u64, end: u64, tempo: Option<f64>) -> Result
     Ok(Timing { shown, ticks, tempo, trimmed })
 }
 
-/// Reads `animation` as pixel art, as `options` say: cells of the largest
-/// blocks of input pixels that are one colour in every frame, a palette,
-/// and frames on Telegram's 60 fps grid; and what was done on the way. It
-/// takes the animation to let each frame go once it is read, which keeps
-/// what it holds at once to about the input's size.
+/// Normalises `animation` into a [`PixelAnim`] and [`Report`] according to
+/// `options`: aligns frames to 60 fps, trims margins or crops, builds a
+/// palette, and detects the cell grid. Consumes `animation` so each decoded
+/// frame can be dropped as it is packed, keeping peak memory near input size.
 pub fn normalise(animation: Animation, options: &Options) -> Result<(PixelAnim, Report)> {
     let durations: Vec<u64> =
         animation.frames().iter().map(|frame| nanos(frame.duration)).collect();
@@ -619,10 +604,8 @@ pub(crate) fn assemble_with(
     Ok(PixelAnim { width: cells_wide, height: cells_high, grid, palette, frames })
 }
 
-/// The largest square in the middle of a `width` by `height` picture,
-/// from its top left: what [`Square::Crop`] keeps of the art's crop. It
-/// may cut art pixels at its sides: the canvas shows only their part
-/// inside it.
+/// Returns the largest centred square inside `width × height` (used by
+/// [`Square::Crop`]). Outer art pixels may be clipped at its edges.
 pub fn middle_square(width: u32, height: u32) -> Rect {
     let side = width.min(height);
     Rect { x: (width - side) / 2, y: (height - side) / 2, width: side, height: side }

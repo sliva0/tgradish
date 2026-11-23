@@ -1,18 +1,18 @@
 # Contributing
 
-## How it fits together
+## Repository layout
 
-| Crate | What it holds |
+| Crate | Purpose |
 | --- | --- |
-| `crates/tgs` (`tgradish-tgs`) | Makes `.tgs` stickers from pixel art, and checks any `.tgs` against Telegram's limits. Its `frames` module reads pictures, animations and Aseprite files into RGBA frames with durations. |
-| `crates/core` (`tgradish-core`) | What the command line and the GUI share: conversion to every format, ffmpeg, presets, the config file and `inspect`. |
-| `crates/gui` (`tgradish-gui`) | The GUI, made with egui. |
-| `crates/cli` (`tgradish`) | The binary: arguments and terminal output. It includes the GUI unless built with `--no-default-features`. |
-| `crates/corpus` | Test inputs drawn in code, so nothing in the repository belongs to anyone else. |
-| `crates/tgs-lab` | Encoder research: benchmarks, and renders checked against tlottie and rlottie. A workspace of its own: run it from its folder. |
-| `xtask` | Release builds with ffmpeg built in, packages, releasing, licences and icons. |
+| `crates/tgs` (`tgradish-tgs`) | Converts pixel art into `.tgs` animated stickers and validates any `.tgs` file against Telegram's limits. Its `frames` module decodes images, animations, and Aseprite files into RGBA frames with durations. |
+| `crates/core` (`tgradish-core`) | Shared engine for the CLI and GUI: conversion for all formats, ffmpeg integration, presets, config loading, and `inspect`. |
+| `crates/gui` (`tgradish-gui`) | Desktop GUI built with egui. |
+| `crates/cli` (`tgradish`) | Main binary: argument parsing and terminal output. Includes the GUI by default unless built with `--no-default-features`. |
+| `crates/corpus` | Synthetic test media generated in code so tests do not rely on third-party files. |
+| `crates/tgs-lab` | Encoder research tools: benchmarks and render checks against `tlottie` and `rlottie`. Separate workspace; run from its directory (or with `--manifest-path crates/tgs-lab/Cargo.toml`). |
+| `xtask` | Developer tasks: building ffmpeg and release binaries, packaging, releasing, updating licence notices, and generating icons. |
 
-Each crate's own docs (`cargo doc --open`) say how it is laid out.
+Run `cargo doc --open` to read each crate's module documentation.
 
 ## Building and testing
 
@@ -20,86 +20,38 @@ Each crate's own docs (`cargo doc --open`) say how it is laid out.
 cargo test --workspace
 ```
 
-needs `ffmpeg` and `ffprobe` on PATH, with libvpx and libx264. Tests that
-need them are skipped without, or fail with `TGRADISH_REQUIRE_FFMPEG=1`,
-as in CI. `nix develop` gives everything below but cargo-about. tgradish
-is built and tested for Linux and Windows.
+This requires `ffmpeg` and `ffprobe` on `PATH` with `libvpx` and `libx264`. Tests that need ffmpeg are skipped if it is absent, or fail if `TGRADISH_REQUIRE_FFMPEG=1` is set (as in CI). Running `nix develop` provides all tools below except `cargo-about`. tgradish is built and tested on Linux and Windows.
 
-- With ffmpeg built in: `cargo test --workspace --features tgradish/linked`,
-  which needs ffmpeg's development files, pkg-config and libclang.
-- tgs-lab:
-  `cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie`,
-  which needs cmake, ninja and clang.
-- Pictures of the GUI, which need a GPU:
-  `TGRADISH_SCREENSHOTS=DIR cargo test -p tgradish-gui -- --ignored screenshot`.
-  `tgradish-readme.png` among them is the README's
-  `.github/screenshot.png`.
+- **Built-in ffmpeg backend:** `cargo test --workspace --features tgradish/linked` (requires ffmpeg development libraries, `pkg-config`, and `libclang`).
+- **tgs-lab:** `cargo test --manifest-path crates/tgs-lab/Cargo.toml --features rlottie` (requires `cmake`, `ninja`, and `clang`).
+- **GUI screenshots (requires a GPU):** `TGRADISH_SCREENSHOTS=DIR cargo test -p tgradish-gui -- --ignored screenshot`. This generates `tgradish-readme.png`, which is used as `.github/screenshot.png`.
 
-CI also runs rustfmt, clippy with `-D warnings`, `cargo xtask icons
---check`, `cargo xtask licenses --check` and `cargo xtask release check`;
-`.github/workflows/ci.yml` has the exact commands.
+CI also checks `rustfmt`, `clippy` with `-D warnings`, `cargo xtask icons --check`, `cargo xtask licenses --check`, and `cargo xtask release check`. See `.github/workflows/ci.yml` for exact commands.
 
-Keep your own test files in `references/`, which git ignores.
+Put personal test files in `references/` (gitignored).
 
-## Writing
+## Writing style
 
-Comments say why; the code says what. Commit messages say what changed
-and why.
+Use comments to explain *why*, not *what* the code already shows. Write commit messages that state what changed and why.
 
 ### Translations
 
-The GUI's text is in `crates/gui/i18n/en-GB/tgradish.ftl`, in
-[Fluent](https://projectfluent.org/fluent/guide/), and each message's
-comment says where it is shown. The command line stays English, since
-scripts read its output.
+GUI strings live in `crates/gui/i18n/en-GB/tgradish.ftl` in [Fluent](https://projectfluent.org/fluent/guide/) format, with comments noting where each string appears. CLI output stays in English because scripts parse it.
 
-A translation is a copy of that file in a folder named for its language,
-as `crates/gui/i18n/de/tgradish.ftl`. What it leaves out shows in English.
-`TGRADISH_LANG=de` picks a language for a run, and `TGRADISH_LANG=pseudo`
-shows English with longer, accented words, to see where text won't fit.
-A script the GUI's fonts lack, as Chinese or Arabic, needs a font added
-first.
+To add a translation, copy that file into a directory named after the language tag (for example, `crates/gui/i18n/de/tgradish.ftl`). Missing messages fall back to English. Set `TGRADISH_LANG=de` to test a language, or `TGRADISH_LANG=pseudo` to test longer accented English strings for layout overflow. Scripts not covered by the bundled fonts (such as Chinese or Arabic) need a matching font added first.
 
-`cargo xtask strings` writes `target/strings/index.html`: every message
-of the GUI beside pictures of where it shows, and the command line's help
-and messages.
+Run `cargo xtask strings` to generate `target/strings/index.html`, which shows every GUI message alongside screenshots and all CLI help and messages.
 
 ## Licences
 
-tgradish is MIT, and every binary carries the notices of what is built
-into it, kept in `crates/core/licenses`. After changing dependencies, run
-`cargo xtask licenses` with cargo-about 0.9.2 (`cargo install --locked
-cargo-about@0.9.2 --features cli`). ffmpeg stays LGPL: never enable its
-GPL parts.
+tgradish is MIT-licensed. Every binary embeds its own licence and the notices for everything built into it (kept in `crates/core/licenses`). After changing dependencies, regenerate them with `cargo xtask licenses` using `cargo-about` 0.9.2 (`cargo install --locked cargo-about@0.9.2 --features cli`). Keep ffmpeg under the LGPL — never enable its GPL components.
 
 ## Releasing
 
-1. `cargo xtask release prepare X.Y.Z` sets the version everywhere it is
-   written, dates the changelog's Unreleased as its section, which becomes
-   the release's notes, and refreshes both lock files. `tgradish-tgs` has
-   a version of its own: `prepare` says whether it changed since the last
-   release, and `--tgs X.Y.Z` raises it. It also raises `RUSTUP_TOOLCHAIN`
-   in `.github/workflows/release.yml`, the Rust releases are built with,
-   to the stable Rust here, so `rustup update` first. It commits nothing,
-   and says what to commit, tag and push. `cargo xtask release check`,
-   which CI runs, says whether every place agrees.
-2. `cargo xtask local-release` builds every variant into
-   `target/release-artifacts`, named as the release names them; it needs
-   mingw-w64 for Windows and musl-gcc for musl. Try them.
-3. Commit, and push the `vX.Y.Z` tag. The release workflow checks the
-   tag is the version, builds and tests everything, and drafts a release
-   with the changelog's notes. Check the draft, then publish it.
-4. `cargo xtask release aur` brings the AUR packages, cloned in `.aur/`,
-   which git ignores, up to `packaging/aur`, with the checksums of the
-   published release, and commits each; `--push` pushes them. It needs
-   makepkg, and an SSH key the AUR knows. The repository's own PKGBUILDs
-   keep `SKIP` for checksums. To change the AUR packages alone, raise
-   `pkgrel` in the PKGBUILD and its `.SRCINFO`, commit, and run it.
-5. `cargo xtask release crates` publishes to crates.io the crates whose
-   version it lacks, in the order they depend on each other, once asked;
-   with `--dry-run` it packages and builds them instead. Before packaging
-   again at a version already packaged, delete the `tgradish-*` folders
-   under cargo's `registry/src`, or the old copies are used.
+1. Run `cargo xtask release prepare X.Y.Z`. This updates versions across all files, turns `[Unreleased]` in `CHANGELOG.md` into the dated release section (used as GitHub release notes), updates both lockfiles, and bumps `RUSTUP_TOOLCHAIN` in `.github/workflows/release.yml` to your active stable Rust (run `rustup update` first). `tgradish-tgs` is versioned independently: `prepare` reports whether it changed since the last release, and `--tgs X.Y.Z` bumps it. `prepare` does not commit; it prints the commit, tag, and push commands. Run `cargo xtask release check` to verify all version references match.
+2. Run `cargo xtask local-release` to build all release variants into `target/release-artifacts`, named as the release names them (requires `mingw-w64` for Windows and `musl-gcc` for musl), and test them.
+3. Commit and push the `vX.Y.Z` tag. The release workflow checks the tag against the version, builds and tests all targets, and creates a draft GitHub release with the changelog notes. Review the draft and publish it.
+4. Run `cargo xtask release aur` to update the AUR clones in `.aur/` (gitignored) from `packaging/aur` with checksums from the published release and commit each one. Pass `--push` to push them. Requires `makepkg` and an SSH key registered on the AUR. PKGBUILDs in this repo keep `SKIP` checksums. To update only AUR packaging without a new release, bump `pkgrel` in the PKGBUILD and `.SRCINFO`, commit, and run `cargo xtask release aur`.
+5. Run `cargo xtask release crates` to publish each crate whose current version is not yet on crates.io, in dependency order (it prompts before publishing). Pass `--dry-run` to test packaging and building without publishing. If re-packaging a version you already packaged locally, delete any matching `tgradish-*` directories under Cargo's `registry/src` first so Cargo does not reuse cached copies.
 
-`rust-version` in `Cargo.toml` is the oldest Rust that builds every crate,
-which CI checks.
+`rust-version` in `Cargo.toml` sets the MSRV (minimum supported Rust version) for the whole workspace and is checked in CI.

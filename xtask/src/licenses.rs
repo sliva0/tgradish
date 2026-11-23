@@ -1,12 +1,11 @@
-//! The licences of the Rust crates in tgradish, which every binary carries
-//! (see `crates/core/build.rs`). cargo-about lists them; the list is
-//! committed, so builds need no network or cargo-about, and CI checks it
-//! after dependencies change. Its sections are sorted here so a reader can
-//! find a licence and its crates.
-//!
-//! tgradish's own licence is `LICENSE.txt` at the top of the repository,
-//! and every published crate has a copy, kept the same here: crates.io
-//! packs a crate's own folder and nothing above it.
+//! Generates and checks third-party Rust crate licence notices
+//! (`crates/core/licenses/THIRD-PARTY-CRATES.txt`, embedded in every binary by
+//! `crates/core/build.rs`) and syncs the root `LICENSE.txt` into every
+//! published crate (since `cargo publish` packages only the crate directory).
+//! The generated list is committed so builds do not require network access or
+//! `cargo-about`, and its sections are sorted so licences and crates are easy
+//! to look up. CI runs `--check` to catch outdated notices after dependency
+//! changes.
 
 use std::path::{Path, PathBuf};
 
@@ -26,7 +25,7 @@ fn check_cargo_about() -> Result<()> {
         .with_context(|| format!("cargo-about is missing: {install}"))?;
     ensure!(
         version.split_whitespace().nth(1) == Some(CARGO_ABOUT),
-        "found {}, but the list is written with cargo-about {CARGO_ABOUT}: {install}",
+        "found {}, expected cargo-about {CARGO_ABOUT}: {install}",
         version.trim()
     );
     Ok(())
@@ -69,7 +68,7 @@ fn own_licence(root: &Path, check: bool) -> Result<()> {
         if check {
             ensure!(
                 std::fs::read(&copy).ok().as_ref() == Some(&text),
-                "{} isn't a copy of {name}: run cargo xtask licenses and commit it",
+                "{} does not match {name}; run cargo xtask licenses and commit it",
                 copy.display()
             );
         } else {
@@ -112,7 +111,7 @@ pub fn crate_licenses(args: &[String]) -> Result<()> {
         let committed = std::fs::read_to_string(&file).unwrap_or_default();
         ensure!(
             committed == text,
-            "{} is out of date: run cargo xtask licenses and commit it",
+            "{} is out of date; run cargo xtask licenses and commit it",
             file.display()
         );
         println!("{} is up to date", file.display());

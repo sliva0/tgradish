@@ -1,8 +1,7 @@
-//! The GUI's main scenes, drawn without a GPU, for tests that look over
-//! all of them at once: that every button has a name screen readers can
-//! say, and no two fields of one row the same, that no button's words are
-//! cut short in English, and that the list's bars are level with those
-//! beside them.
+//! Headless traversal of the GUI's main scenes for layout and accessibility
+//! tests: verifies that every interactive control has a screen-reader label,
+//! no two spin buttons in a row share a label, no English button text is
+//! truncated, and the file list header/footer align with the main panel's bars.
 
 use std::path::Path;
 

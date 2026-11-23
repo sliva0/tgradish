@@ -1,6 +1,6 @@
-//! The picture: the crop and the shape it keeps, and how the result is
-//! squared and scaled. The preview works out the result's size from here
-//! too, so what it shows is what converting makes.
+//! Picture framing settings: crop rectangle, aspect ratio lock, squaring mode,
+//! and scaling. The preview also computes result dimensions through this module
+//! so its display matches the conversion output.
 
 use eframe::egui;
 use tgradish_core::options::{Crop, IntegerScale, Resize, Scaling};
@@ -572,12 +572,12 @@ fn sketch(ui: &mut egui::Ui, (width, height): (u32, u32), crop: Crop, wide: f32)
     painter.with_clip_rect(cut).add(egui::Shape::line(peaks, egui::Stroke::new(1.5, weak)));
 }
 
-/// Where the dashes around `cut` go at `ppp` screen pixels to a point, and
-/// how wide they are: a whole number of pixels, about a point, just within
-/// its edges as they fall on the pixels. A line on its edges is half out
-/// of it, and egui moves one a pixel wide onto the pixels after an edge
-/// between two, so where the picture fills the room, across or down, its
-/// right or bottom dashes would fall past the room and be cut off.
+/// Computes the dashed rectangle and stroke width for `cut` at `ppp` pixels per
+/// point: an integer pixel width near 1 pt, inset by half the stroke width from
+/// pixel-rounded edges. Drawing directly on the edge would place half the
+/// stroke outside `cut` (and egui moves a 1 px stroke on a pixel boundary onto
+/// the pixels after it), so the right or bottom dashes would be clipped when
+/// the picture fills its box.
 fn dashes_within(cut: egui::Rect, ppp: f32) -> (egui::Rect, f32) {
     use egui::emath::GuiRounding as _;
     let width = ppp.round().max(1.0) / ppp;
@@ -587,12 +587,11 @@ fn dashes_within(cut: egui::Rect, ppp: f32) -> (egui::Rect, f32) {
 /// The aspect of a square crop.
 const SQUARE: Aspect = Aspect::Ratio(1.0, 1.0);
 
-/// Keeps the crop of an item made a `.tgs` that keeps the crop's shape, as
-/// its own choice, its preset's or the default's says, square, and its
-/// aspect ratio 1:1, once its size is known: however the choice came, by a
-/// preset, the defaults, a session, the format changed or Settings, and
-/// whether its settings are shown or not. The GUI keeps every file so,
-/// each frame, and as it is queued to convert.
+/// Ensures any `.tgs` item with `Resize::Contain` (whether from item choices,
+/// a preset, the defaults, a session, a format change or Settings, and whether
+/// its settings are shown or not) locks its aspect ratio to 1:1 and squares its
+/// crop once the input size is known. Called every frame for all items and when
+/// queuing conversions.
 pub(crate) fn keep_square(item: &mut Item, presets: &Presets, config: &Config) {
     if item.format != Format::Tgs {
         return;

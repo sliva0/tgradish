@@ -45,10 +45,10 @@ pub const DEFAULT_FRAME_DURATION: Duration = Duration::from_millis(100);
 #[non_exhaustive]
 pub enum Error {
     /// An animation of no frames, which [`Animation::new`] refuses.
-    #[error("the animation has no frames")]
+    #[error("animation has no frames")]
     Empty,
     /// A width or height of 0, or a frame too large to address.
-    #[error("{width}×{height} is not a usable size")]
+    #[error("{width}×{height} is not a valid image size")]
     BadSize {
         /// The width given.
         width: u32,
@@ -56,7 +56,7 @@ pub enum Error {
         height: u32,
     },
     /// A frame of another size than its animation's.
-    #[error("frame {index} has {len} bytes, a {width}×{height} RGBA frame has {expected}")]
+    #[error("frame {index} has {len} bytes; a {width}×{height} RGBA frame requires {expected}")]
     FrameSize {
         /// Which frame, from 0.
         index: usize,
@@ -73,7 +73,7 @@ pub enum Error {
     #[error("not a GIF, PNG, WebP, JPEG, BMP or Aseprite file")]
     UnknownFormat,
     /// A file that starts like `format` but doesn't decode as one.
-    #[error("couldn't decode the {format} file: {message}")]
+    #[error("failed to decode {format} file: {message}")]
     Decode {
         /// What the file starts like.
         format: Format,
@@ -103,7 +103,9 @@ pub enum Error {
     #[error("layers only exist in Aseprite files")]
     LayersWithoutAseprite,
     /// An image of a [`sequence`] of another size than the first.
-    #[error("image {index} is {width}×{height}, the first one is {first_width}×{first_height}")]
+    #[error(
+        "image {index} is {width}×{height}, but the first image is {first_width}×{first_height}"
+    )]
     SequenceSize {
         /// Which image, from 0.
         index: usize,
@@ -117,7 +119,7 @@ pub enum Error {
         first_height: u32,
     },
     /// A sprite sheet that doesn't divide into the [`Sheet`]'s cells.
-    #[error("{width}×{height} doesn't split into {columns}x{rows} equal cells")]
+    #[error("{width}×{height} does not divide evenly into {columns}x{rows} cells")]
     SheetGrid {
         /// The sheet's width.
         width: u32,
@@ -129,7 +131,7 @@ pub enum Error {
         rows: u32,
     },
     /// More frames asked of a sprite sheet than it has cells, or none.
-    #[error("the sprite sheet has {cells} cells, {frames} frames were asked for")]
+    #[error("sprite sheet has {cells} cells, but {frames} frames were requested")]
     SheetFrames {
         /// How many cells it has.
         cells: u32,
@@ -137,13 +139,13 @@ pub enum Error {
         frames: u32,
     },
     /// An animation given as a sprite sheet, which is one picture.
-    #[error("a sprite sheet must be a single picture, this has {frames} frames")]
+    #[error("sprite sheet must be a single image, not an animation ({frames} frames)")]
     SheetAnimated {
         /// How many frames it has.
         frames: usize,
     },
     /// Something past the [`Limits`] decoding was given.
-    #[error("the input is too large: {}", oversize_text(what, limit))]
+    #[error("input is too large: {}", oversize_text(what, limit))]
     TooLarge {
         /// What was too large, with its size.
         what: Oversize,
@@ -200,15 +202,15 @@ pub enum Limit {
 fn oversize_text(what: &Oversize, limit: &Limit) -> String {
     match (what, limit) {
         (Oversize::Frames { frames, width, height }, _) => {
-            format!("{frames} frames of {width}×{height}")
+            format!("{frames} frames at {width}×{height}")
         }
-        (Oversize::Image { width, height }, _) => format!("a {width}×{height} image"),
-        (Oversize::Canvas { width, height }, _) => format!("the canvas is {width}×{height}"),
+        (Oversize::Image { width, height }, _) => format!("{width}×{height} image"),
+        (Oversize::Canvas { width, height }, _) => format!("{width}×{height} canvas"),
         (Oversize::Decoding, Limit::Bytes(bytes)) => {
-            format!("decoding needs more than {bytes} bytes")
+            format!("decoding requires more than {bytes} bytes")
         }
         (Oversize::Decoding, Limit::Dimension(pixels)) => {
-            format!("a side is longer than {pixels} pixels")
+            format!("dimension exceeds {pixels} pixels")
         }
     }
 }

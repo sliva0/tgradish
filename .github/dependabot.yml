@@ -1,8 +1,8 @@
 version: 2
 updates:
-  # The workflows' actions. Other people's are pinned by commit, which a tag
-  # can't be moved away from, with the version beside it for this to raise.
-  # One pull request a week for all of them.
+  # Update GitHub Actions weekly in a single grouped PR. Third-party actions are
+  # pinned by commit SHA (which a tag cannot be moved away from), with the
+  # version in a comment for Dependabot to raise.
   - package-ecosystem: github-actions
     directory: /
     schedule:

@@ -1,5 +1,5 @@
-//! Pictures of inputs and results: decoded on worker threads and kept as
-//! frames with the time each starts.
+//! Input and result media decoding on worker threads, stored as RGBA frames with
+//! start timestamps.
 
 use std::panic::AssertUnwindSafe;
 use std::path::Path;

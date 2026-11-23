@@ -1,11 +1,12 @@
-//! Synthetic test data, so every machine has the same and nothing in it
-//! belongs to anyone: pixel art drawn in code, written in each format
-//! tgradish reads (GIF, WebP, APNG, Aseprite, image sequences and sprite
-//! sheets), and video clips made with ffmpeg.
+//! Synthetic test data that produces identical results on every machine with
+//! no third-party assets. It contains pixel art drawn in code and saved in
+//! every format tgradish reads (GIF, WebP, APNG, Aseprite, image sequences and
+//! sprite sheets), plus video clips generated with ffmpeg.
 //!
-//! Each sprite stands for a case real pixel art has; [`sprites`] says
-//! which. They are small, but not so small that encoding them is trivial,
-//! and their timings are whole centiseconds, which GIF keeps.
+//! Each sprite covers a specific case found in real pixel art; see [`sprites`].
+//! The sprites are small enough to generate quickly, large enough for
+//! meaningful encoding tests, and use whole-centisecond delays so GIF preserves
+//! their timing.
 
 mod canvas;
 mod clip;
@@ -15,17 +16,17 @@ mod sprites;
 pub use canvas::{Canvas, Colour};
 pub use clip::{Clip, clip, ffmpeg_on_path, ffmpeg_required, skip};
 
-/// An animation, and what it stands for.
+/// A test animation and its metadata.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sprite {
     pub name: &'static str,
     pub about: &'static str,
     pub frames: Vec<Canvas>,
-    /// How long each frame shows, in milliseconds.
+    /// Duration of each frame in milliseconds.
     pub delays: Vec<u32>,
-    /// Input pixels to an art pixel, where the art is on a whole grid.
+    /// Input pixels per art pixel when the art sits on an exact grid.
     pub scale: u32,
-    /// The grid most of the art is on, where some pixels are off it.
+    /// Dominant pixel grid when a few pixels sit off-grid.
     pub likely_scale: Option<u32>,
 }
 
@@ -42,18 +43,18 @@ impl Sprite {
         (self.frames[0].width, self.frames[0].height)
     }
 
-    /// How long it plays, in milliseconds.
+    /// Total duration in milliseconds.
     pub fn length(&self) -> u32 {
         self.delays.iter().sum()
     }
 }
 
-/// The animated sprites.
+/// Returns all animated test sprites.
 pub fn sprites() -> Vec<Sprite> {
     let walker = sprites::walker();
     let doubled = (walker.0.iter().map(|frame| frame.scaled(2)).collect(), walker.1.clone());
     let (hammer, hammer_delays) = sprites::hammer();
-    // cut through the last column of art pixels, as rips often are
+    // Cut through the last column of art pixels, as sprite rips often do.
     let hammer = hammer.iter().map(|frame| frame.scaled(4).cropped(0, 0, 415, 276)).collect();
     vec![
         Sprite::new("walker", "a person walking: outlined and shaded, 1x", walker),
@@ -90,7 +91,7 @@ pub fn sprites() -> Vec<Sprite> {
     ]
 }
 
-/// The sprite named `name`.
+/// Returns the sprite with the given `name`, or panics if not found.
 pub fn sprite(name: &str) -> Sprite {
     sprites()
         .into_iter()
@@ -98,18 +99,16 @@ pub fn sprite(name: &str) -> Sprite {
         .unwrap_or_else(|| panic!("no sprite {name}"))
 }
 
-/// A file of the corpus: its name with the extension of its format, and
-/// the sprite it holds.
+/// An encoded corpus file and its source sprite.
 pub struct File {
     pub name: String,
     pub bytes: Vec<u8>,
     pub sprite: Sprite,
 }
 
-/// Every animated sprite as a file, in the format that suits it: partial
-/// alpha in WebP and APNG, the rest in GIF, and the walker at twice its
-/// size, `walker_2x`, also as an Aseprite file with an "idle" tag of its
-/// first two frames.
+/// Encodes every animated sprite in a suitable format: WebP or APNG for sprites
+/// with partial transparency, GIF for the rest, plus an extra Aseprite file for
+/// `walker_2x` containing an `"idle"` tag on its first two frames.
 pub fn files() -> Vec<File> {
     let mut files = Vec::new();
     for sprite in sprites() {
@@ -127,14 +126,14 @@ pub fn files() -> Vec<File> {
     files
 }
 
-/// The frames of image sequences: four steps of 27 by 31, the second and
-/// fourth the same, and eight frames of a wave, 28 by 42.
+/// Returns the image-sequence test cases: `steps` (4 frames at 27x31, with
+/// frames 2 and 4 identical) and `wave` (8 frames at 28x42).
 pub fn sequences() -> [(&'static str, Vec<Canvas>); 2] {
     [("steps", sprites::steps()), ("wave", sprites::wave())]
 }
 
-/// Writes the files and the sequences' frames, as PNG files in a folder
-/// each, to `dir`.
+/// Writes all corpus files and PNG image sequences (one folder per sequence)
+/// into `dir`.
 pub fn write(dir: &std::path::Path) -> std::io::Result<()> {
     std::fs::create_dir_all(dir)?;
     for file in files() {

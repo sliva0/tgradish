@@ -1,11 +1,6 @@
-//! Pixel art ffmpeg can't read, drawn for it, for WebM and static
-//! stickers. That is Aseprite files, with the tag and layers chosen; the
-//! frames of one animation in several files; and animated WebP, which
-//! ffmpeg reads only from version 8.
-//!
-//! tgradish's own reader draws them into a temporary PNG, an animated
-//! one when it moves, with each frame's own duration, which ffmpeg then
-//! reads as it reads any other input.
+//! Renders inputs that ffmpeg cannot read directly (Aseprite files, image
+//! sequences, and animated WebP, which ffmpeg only supports from version 8)
+//! into a temporary PNG or APNG for WebM and static WebP conversion.
 
 use std::path::{Path, PathBuf};
 
@@ -21,41 +16,39 @@ use crate::input::{FileKind, Input, sniff};
 use crate::tgs::DEFAULT_FPS;
 use crate::webm::{self, Options};
 
-/// An input as ffmpeg reads it: the file itself, or pixel art drawn into a
-/// temporary PNG, which lasts as long as this does.
+/// Input prepared for ffmpeg: either the original file or a rendered temporary
+/// PNG/APNG (cleaned up when dropped).
 #[derive(Debug)]
 pub struct Readable {
     path: PathBuf,
     dir: Option<tempfile::TempDir>,
-    /// What the Aseprite file drawn tells of itself.
+    /// Metadata read from an Aseprite input, if applicable.
     aseprite: Aseprite,
-    /// What was drawn, until it is taken, and whether it is a still picture.
+    /// Rendered animation and still-image flag, available until taken.
     drawn: Option<(Animation, bool)>,
-    /// How long a sequence plays, in seconds, its frame rate and its base
-    /// frame rate (see [`sequence_timing`]).
+    /// Exact `(duration, fps, base_fps)` for an image sequence (see
+    /// [`sequence_timing`]).
     sequence: Option<(f64, f64, f64)>,
-    /// Where the frames drawn start, in seconds, then where the last ends:
-    /// none for a still picture, or what isn't drawn.
+    /// Cumulative frame boundaries in seconds (start of each frame plus end of
+    /// the last). Empty for still images and non-drawn inputs.
     times: Vec<f64>,
 }
 
 impl Readable {
-    /// The file ffmpeg reads: the input, or the PNG drawn of it.
+    /// Path that ffmpeg should read (the original input or the rendered PNG).
     pub fn path(&self) -> &Path {
         &self.path
     }
 
-    /// What `backend` reads of it, with a sequence's length and frame rate
-    /// as they were asked for, since what ffmpeg makes of the frames' times
-    /// can be enough short of them to leave the last frame out.
+    /// Probes the file with `backend`, overriding sequence duration and frame
+    /// rate with exact values so APNG rounding never drops the last frame.
     pub fn probe(&self, backend: &Backend, cancel: &CancelToken) -> Result<Probe> {
         Ok(self.timed(backend.probe(&self.path, cancel)?))
     }
 
-    /// What [`Readable::probe`] finds of the frames drawn, worked out from
-    /// them without ffmpeg: `animation` and `still` as
-    /// [`Readable::take_drawn`] gave them, read as the PNG they were drawn
-    /// into, a still picture or each frame lasting its own time.
+    /// Computes a [`Probe`] directly from the drawn frames without running
+    /// ffmpeg. Pass the `animation` and `still` flag returned by
+    /// [`Readable::take_drawn`].
     pub fn probe_drawn(&self, animation: &Animation, still: bool) -> Probe {
         let seconds = animation.frames().iter().map(|frame| frame.duration.as_secs_f64());
         let length: f64 = seconds.clone().sum();
@@ -77,8 +70,7 @@ impl Readable {
         })
     }
 
-    /// `probe` with a sequence's length and frame rate as its frames are
-    /// timed.
+    /// Replaces probed duration and frame rate with exact sequence timing.
     fn timed(&self, mut probe: Probe) -> Probe {
         if let Some((duration, fps, base_fps)) = self.sequence.filter(|_| !probe.still_image) {
             probe.duration = Some(duration);
@@ -87,50 +79,47 @@ impl Readable {
         probe
     }
 
-    /// Whether it is pixel art, drawn.
+    /// Returns true if the input was rendered to a temporary PNG.
     pub fn is_drawn(&self) -> bool {
         self.dir.is_some()
     }
 
-    /// `options` with their start and length as ffmpeg reads the frames
-    /// drawn, from a cut near where they start or end, written with a few
-    /// digits, as the frames it is meant for (see [`webm::drawn_cut`]).
+    /// Snaps rounded trim boundaries in `options` to the drawn frame timestamps
+    /// (see [`webm::drawn_cut`]).
     pub fn cut(&self, options: &Options) -> Options {
         webm::drawn_cut(options, &self.times)
     }
 
-    /// The frames drawn, each lasting its own time, and whether they are a
-    /// still picture, as ffmpeg reads them, for showing without it.
+    /// Takes the rendered animation and its `still` flag for previewing without
+    /// ffmpeg.
     pub fn take_drawn(&mut self) -> Option<(Animation, bool)> {
         self.drawn.take()
     }
 
-    /// The tags of the Aseprite file drawn, which `tag` chooses from.
+    /// Tags present in a drawn Aseprite file.
     pub fn tags(&self) -> &[Tag] {
         &self.aseprite.tags
     }
 
-    /// The layers of the Aseprite file drawn, as its Layers panel lists
-    /// them, which `show-layers` and `hide-layers` choose from.
+    /// Layers present in a drawn Aseprite file, in Layers-panel order.
     pub fn layers(&self) -> &[LayerInfo] {
         &self.aseprite.layers
     }
 
-    /// How long each frame of the Aseprite file drawn shows, in seconds,
-    /// its tags' or not.
+    /// Frame durations (in seconds) of all frames in a drawn Aseprite file.
     pub fn durations(&self) -> &[f64] {
         &self.aseprite.durations
     }
 }
 
-/// The layers to show and hide, from the options that name them.
+/// Builds an Aseprite [`Layers`] filter from optional show/hide name lists.
 pub fn layers(show: Option<&[String]>, hide: Option<&[String]>) -> Layers {
     let names = |list: Option<&[String]>| list.map(<[String]>::to_vec).unwrap_or_default();
     Layers { show: names(show), hide: names(hide) }
 }
 
-/// The error for a `tag` or `chosen` layers given for what isn't an
-/// Aseprite file, which alone has them; `None` if neither is.
+/// Returns an invalid-option error if `tag` or `chosen` layers were set on a
+/// non-Aseprite input, or `None` if neither was set.
 pub(crate) fn not_aseprite(tag: Option<&str>, chosen: &Layers) -> Option<Error> {
     let option = match (tag, chosen.show.is_empty()) {
         (Some(_), _) => "tag",
@@ -138,13 +127,14 @@ pub(crate) fn not_aseprite(tag: Option<&str>, chosen: &Layers) -> Option<Error> 
         (None, true) if !chosen.hide.is_empty() => "hide-layers",
         (None, true) => return None,
     };
-    Some(Error::invalid(option, "can only be used for Aseprite files"))
+    Some(Error::invalid(option, "only applies to Aseprite files"))
 }
 
-/// `input` as ffmpeg can read it: an Aseprite file drawn with the tag and
-/// layers `options` choose; a sequence's frames, `fps` a second,
-/// [`DEFAULT_FPS`] unless it says; an animated WebP drawn as it is; and
-/// anything else as it is. Only Aseprite files have tags and layers.
+/// Prepares `input` so ffmpeg can read it. Renders Aseprite files (applying
+/// `tag` and layer visibility), image sequences (at `options.fps` or
+/// [`DEFAULT_FPS`]), and animated WebP files into a temporary PNG/APNG. All
+/// other files are passed through directly. Rejects Aseprite-only options on
+/// non-Aseprite inputs.
 pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Result<Readable> {
     input.refuse_folder()?;
     let layers = layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
@@ -210,12 +200,11 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
     Ok(Readable { path, dir: Some(dir), aseprite, drawn, sequence: rate, times })
 }
 
-/// How long a sequence of `animation`'s frames plays, in seconds, its
-/// frame rate and its base frame rate. Where every frame is a still
-/// picture shown at `fps`, as asked for: ffmpeg's reading of the frames'
-/// times can come enough short of them to leave the last frame out. Where
-/// an animated picture among them keeps its own frames' times, as those
-/// are timed, as [`Readable::probe_drawn`] times any drawn animation.
+/// Computes `(duration, fps, base_fps)` for an image sequence.
+/// When every frame has the uniform duration for `fps`, uses exact arithmetic
+/// so ffmpeg's APNG delay rounding cannot cut off the final frame. When the
+/// sequence contains animated files with their own timings, uses actual frame
+/// durations, matching [`Readable::probe_drawn`].
 fn sequence_timing(animation: &Animation, fps: f64) -> (f64, f64, f64) {
     let frames = animation.frames();
     let still = art::frame_duration(Some(fps)).ok();
@@ -228,8 +217,7 @@ fn sequence_timing(animation: &Animation, fps: f64) -> (f64, f64, f64) {
     (length, frames.len() as f64 / length, 1.0 / shortest)
 }
 
-/// Writes `animation` as a PNG, `animated` with each frame lasting its own
-/// time, looping, or else a picture of its first frame.
+/// Writes `animation` as a still PNG or looping APNG with per-frame delays.
 fn write_png(
     path: &Path,
     animation: &Animation,
@@ -239,7 +227,7 @@ fn write_png(
     let mut encoder = png::Encoder::new(file, animation.width(), animation.height());
     encoder.set_color(png::ColorType::Rgba);
     encoder.set_depth(png::BitDepth::Eight);
-    // read once, straight away
+    // Temporary file read immediately once; prioritise speed over size.
     encoder.set_compression(png::Compression::Fast);
     let frames = if animated { animation.frames() } else { &animation.frames()[..1] };
     if animated {
@@ -256,9 +244,9 @@ fn write_png(
     writer.finish()
 }
 
-/// `seconds` as a fraction of 16-bit numbers, as APNG times frames: the
-/// closest of the continued fraction's that fit, so a twelfth of a second
-/// stays exact as well as a whole millisecond.
+/// Approximates `seconds` as a `u16 / u16` fraction for APNG frame delays using
+/// continued-fraction convergents, keeping values like `1/12` and whole
+/// milliseconds exact.
 fn fraction(seconds: f64) -> (u16, u16) {
     let most = f64::from(u16::MAX);
     let seconds = seconds.clamp(1.0 / most, most);

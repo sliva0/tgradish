@@ -1,13 +1,14 @@
 # tgradish-tgs
 
-A pure-Rust library that turns pixel art animations into Telegram animated
-stickers (`.tgs`, gzipped Lottie JSON): the art is decoded from GIF, PNG
-and APNG, WebP, JPEG, BMP or Aseprite files, sprite sheets or image
-sequences, read on its own pixel grid, drawn as rectangles in layers,
-reduced until it fits Telegram's 64 KiB when that is allowed, and checked
-against Telegram's limits. It also checks any `.tgs` against those limits,
-and draws what a sticker it made shows, from the art or from the file, for
-previews.
+A pure-Rust library that converts pixel art animations into Telegram
+animated stickers (`.tgs`, gzipped Lottie JSON) and validates any `.tgs`
+file against Telegram's limits.
+
+It decodes GIF, PNG/APNG, WebP, JPEG, BMP, Aseprite files, sprite sheets
+and image sequences on their native pixel grid, encodes them as layered
+vector rectangles, optionally reduces them to fit within Telegram's 64 KiB
+limit, checks the result against Telegram's limits and renders previews of
+stickers it made (from the source art or from the `.tgs` file).
 
 ```rust
 use tgradish_tgs::frames::{DecodeOptions, Limits, decode};
@@ -18,16 +19,20 @@ let sticker = make(animation, &Options::default(), &mut |_progress| {}, &|| fals
 std::fs::write("art.tgs", &sticker.tgs)?;
 ```
 
-What decoding may allocate is bounded by `frames::Limits`, so hostile
-files fail rather than exhaust memory. Aseprite files can be read for
-their tags and layers first, with `frames::aseprite::Sprite`;
-`frames::DecodeOptions` picks among them.
+Decoding memory is bounded by `frames::Limits` so malformed or hostile
+inputs fail safely instead of exhausting memory. For Aseprite files, use
+`frames::aseprite::Sprite` to inspect tags and layers, and
+`frames::DecodeOptions` to select which ones to render.
 
-Pure Rust with no files, processes or ffmpeg, so it builds for
-`wasm32-unknown-unknown`; the `threads` feature tries fitting's candidates
-in threads of their own, and `schema` gives JSON Schemas of its options
-and reports, written in kebab-case. The `internals` feature opens up the
-encoder for tgradish's own research tools, and is exempt from semver.
+## Features and portability
 
-It is the part of [tgradish](https://github.com/sliva0/tgradish) that makes
-animated stickers, with a version of its own.
+Because it uses pure Rust with no filesystem access, subprocesses or
+ffmpeg, `tgradish-tgs` compiles to `wasm32-unknown-unknown`.
+
+- `threads` — evaluates size-fitting candidates across multiple threads.
+- `schema` — derives kebab-case JSON Schemas for options and reports.
+- `internals` — exposes internal encoder APIs for tgradish's research tools
+  (unstable, exempt from semver).
+
+Part of [tgradish](https://github.com/sliva0/tgradish), versioned
+independently.

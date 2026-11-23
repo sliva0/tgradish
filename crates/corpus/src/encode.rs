@@ -1,13 +1,13 @@
-//! Sprites written in the formats tgradish reads, losslessly: decoding one
-//! gives its frames back.
+//! Lossless encoders for test sprites in every format tgradish reads.
 
 use std::io::Write;
 
 use crate::Sprite;
 use crate::canvas::{CLEAR, Canvas, Colour};
 
-/// A GIF, each frame whole and cleared after it shows. GIF keeps
-/// centiseconds and on or off transparency, which the sprites keep to.
+/// Encodes `sprite` as a looping GIF with full-frame background disposal.
+/// GIF stores centisecond delays and 1-bit transparency, which the test
+/// sprites follow.
 pub fn gif(sprite: &Sprite) -> Vec<u8> {
     let (width, height) = sprite.size();
     let mut out = Vec::new();
@@ -16,7 +16,7 @@ pub fn gif(sprite: &Sprite) -> Vec<u8> {
         encoder.set_repeat(gif::Repeat::Infinite).unwrap();
         for (canvas, &delay) in sprite.frames.iter().zip(&sprite.delays) {
             let mut rgba = canvas.rgba.clone();
-            // fewer than 256 colours: an exact palette
+            // Fewer than 256 colours produces an exact palette.
             let mut frame = gif::Frame::from_rgba_speed(width as u16, height as u16, &mut rgba, 10);
             frame.delay = (delay / 10) as u16;
             frame.dispose = gif::DisposalMethod::Background;
@@ -26,7 +26,7 @@ pub fn gif(sprite: &Sprite) -> Vec<u8> {
     out
 }
 
-/// A still PNG.
+/// Encodes a still RGBA PNG.
 pub fn png(canvas: &Canvas) -> Vec<u8> {
     let mut out = Vec::new();
     let mut encoder = png::Encoder::new(&mut out, canvas.width, canvas.height);
@@ -36,7 +36,8 @@ pub fn png(canvas: &Canvas) -> Vec<u8> {
     out
 }
 
-/// An APNG, each frame replacing the one before.
+/// Encodes `sprite` as a looping APNG where each frame replaces the previous
+/// one.
 pub fn apng(sprite: &Sprite) -> Vec<u8> {
     let (width, height) = sprite.size();
     let mut out = Vec::new();
@@ -53,8 +54,8 @@ pub fn apng(sprite: &Sprite) -> Vec<u8> {
     out
 }
 
-/// A lossless animated WebP: each frame the VP8L image of a still WebP,
-/// replacing the one before.
+/// Encodes `sprite` as a lossless animated WebP using one VP8L frame per
+/// canvas, each frame replacing the one before.
 pub fn webp(sprite: &Sprite) -> Vec<u8> {
     let (width, height) = sprite.size();
     let chunk = |name: &[u8], data: &[u8]| {
@@ -67,22 +68,22 @@ pub fn webp(sprite: &Sprite) -> Vec<u8> {
         out
     };
     let u24 = |value: u32| value.to_le_bytes()[..3].to_vec();
-    // animation and alpha
+    // Animation and alpha flags.
     let mut header = vec![0x12, 0, 0, 0];
     header.extend(u24(width - 1));
     header.extend(u24(height - 1));
     let mut body = chunk(b"VP8X", &header);
-    // a clear background, looping forever
+    // Transparent background, infinite loop.
     body.extend(chunk(b"ANIM", &[0, 0, 0, 0, 0, 0]));
     for (canvas, &delay) in sprite.frames.iter().zip(&sprite.delays) {
         let mut still = Vec::new();
         image::codecs::webp::WebPEncoder::new_lossless(&mut still)
             .encode(&canvas.rgba, width, height, image::ExtendedColorType::Rgba8)
             .unwrap();
-        // the still's only chunk, after "RIFF", its size and "WEBP"
+        // Extract the single VP8L chunk after the 12-byte RIFF/WEBP header.
         assert_eq!(&still[12..16], b"VP8L");
         let mut frame = [u24(0), u24(0), u24(width - 1), u24(height - 1), u24(delay)].concat();
-        // no blending, no disposal
+        // Replace frame without blending or disposal.
         frame.push(0b10);
         frame.extend(&still[12..]);
         body.extend(chunk(b"ANMF", &frame));
@@ -94,8 +95,7 @@ pub fn webp(sprite: &Sprite) -> Vec<u8> {
     out
 }
 
-/// The colours of an Aseprite file's tags, in turn: Aseprite's green
-/// first.
+/// Tag colours assigned in order, starting with Aseprite's default green.
 pub const TAG_COLOURS: [Colour; 4] = [
     [0x6a, 0xbe, 0x30, 255],
     [0x5b, 0x6e, 0xe1, 255],
@@ -103,30 +103,30 @@ pub const TAG_COLOURS: [Colour; 4] = [
     [0xfb, 0xf2, 0x36, 255],
 ];
 
-/// A layer of an Aseprite file besides the art's: a group, or an image
-/// layer, empty but for one named "sketch".
+/// Extra layer placed above the main `"art"` layer in a generated Aseprite
+/// file. Image layers are empty unless named `"sketch"`.
 #[derive(Debug, Clone, Copy)]
 pub struct Layer<'a> {
     pub name: &'a str,
     pub group: bool,
-    /// How deep in groups it is; a group's layers follow it.
+    /// Group nesting depth; child layers follow their parent group.
     pub level: u16,
     pub visible: bool,
 }
 
-/// An Aseprite file in indexed colour, index 0 clear, with a layer of the
-/// art, a cel per frame, and over it a hidden layer named "sketch", as
-/// artists leave them, of a 2x2 block at the top left in the first frame;
-/// and `tags` as `(name, first, last)` frames, of [`TAG_COLOURS`] in turn.
+/// Encodes `sprite` as an indexed-colour Aseprite file (index 0 transparent)
+/// with an `"art"` layer (one cel per frame), a hidden `"sketch"` layer above
+/// it (as artists leave them) containing a 2×2 block at the top left of frame
+/// 0, and `tags` as `(name, first, last)` coloured from [`TAG_COLOURS`].
 pub fn aseprite(sprite: &Sprite, tags: &[(&str, u16, u16)]) -> Vec<u8> {
     let sketch = Layer { name: "sketch", group: false, level: 0, visible: false };
     aseprite_with(sprite, tags, &[sketch])
 }
 
-/// [`aseprite`] with `layers` over the art's, bottom first, instead of
-/// only the sketch.
+/// Like [`aseprite`], but places custom `layers` (bottom-to-top) above `"art"`.
 pub fn aseprite_with(sprite: &Sprite, tags: &[(&str, u16, u16)], layers: &[Layer]) -> Vec<u8> {
-    // the cel of the sketch, if there is one: after the art's layer
+    // Layer index for the optional "sketch" layer (offset by 1 for the "art"
+    // layer).
     let sketch = layers.iter().position(|layer| layer.name == "sketch").map(|at| at as u8 + 1);
     let (width, height) = sprite.size();
     let mut palette: Vec<Colour> = vec![CLEAR];
@@ -193,8 +193,8 @@ pub fn aseprite_with(sprite: &Sprite, tags: &[(&str, u16, u16)], layers: &[Layer
                     data.extend(string(name));
                 }
                 chunks.push(chunk(0x2018, &data));
-                // each tag's colour in user data after them, as Aseprite
-                // 1.3 keeps it
+                // Store each tag's colour in a following user-data chunk
+                // (Aseprite 1.3 format).
                 for colour in TAG_COLOURS.iter().cycle().take(tags.len()) {
                     let mut data = 2u32.to_le_bytes().to_vec();
                     data.extend(colour);
@@ -259,7 +259,8 @@ pub fn aseprite_with(sprite: &Sprite, tags: &[(&str, u16, u16)], layers: &[Layer
     header
 }
 
-/// The frames side by side in a grid of `columns`, row by row.
+/// Arranges the sprite frames left-to-right, top-to-bottom in a PNG sprite
+/// sheet with `columns` columns.
 pub fn sheet(sprite: &Sprite, columns: u32) -> Vec<u8> {
     let (width, height) = sprite.size();
     let rows = (sprite.frames.len() as u32).div_ceil(columns);

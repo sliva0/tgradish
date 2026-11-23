@@ -7,13 +7,12 @@ pkgrel=1
 pkgdesc='Telegram stickers and emoji from videos, images or pixel art'
 arch=(x86_64 aarch64)
 url='https://github.com/sliva0/tgradish'
-# tgradish is MIT, with libwebp; the GUI's fonts are Ubuntu's, JetBrains
-# Mono's and emoji-icon-font's, which is MIT
+# tgradish is MIT, with libwebp (BSD-3-Clause); the GUI's fonts: Ubuntu (Ubuntu
+# Font Licence 1.0), JetBrains Mono (OFL-1.1), emoji-icon-font (MIT).
 license=(MIT BSD-3-Clause Ubuntu-font-1.0 OFL-1.1)
-# the release build without ffmpeg, which runs the system's; the GUI
-# loads the graphics libraries when it opens, and D-Bus for file dialogues
-# the GUI's libraries are those of GUI_LIBRARIES in xtask/src/package.rs,
-# which says where each comes from: keep them alike
+# The release build without ffmpeg, which runs the system's; the GUI dlopens
+# graphics libraries and D-Bus for file dialogues at runtime. Keep in sync with
+# GUI_LIBRARIES in xtask/src/package.rs, which documents where each comes from.
 depends=(
   dbus
   ffmpeg
@@ -33,8 +32,8 @@ optdepends=('xdg-desktop-portal: file dialogues in the GUI')
 provides=("$_pkgname")
 conflicts=("$_pkgname")
 options=(!strip !debug)
-# a release names its files alike in every version: here they are named
-# by it, so a cache of downloads, as SRCDEST, keeps versions apart
+# Upstream release filenames omit the version, so include $pkgver locally to
+# avoid collisions in shared download caches such as SRCDEST.
 source_x86_64=("$pkgname-$pkgver-x86_64.tar.gz::$url/releases/download/v$pkgver/$_pkgname-linux-x86_64-system-ffmpeg.tar.gz")
 source_aarch64=("$pkgname-$pkgver-aarch64.tar.gz::$url/releases/download/v$pkgver/$_pkgname-linux-aarch64-system-ffmpeg.tar.gz")
 sha256sums_x86_64=('SKIP')
@@ -54,6 +53,6 @@ package() {
   done
   install -Dm644 README.md THIRD-PARTY.txt THIRD-PARTY-CRATES.txt -t "$pkgdir/usr/share/doc/$_pkgname/"
   install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  # libwebp's licence and patent grant, and the GUI's fonts' licences
+  # libwebp licence and patent grant, plus bundled GUI font licences.
   install -Dm644 licenses/* -t "$pkgdir/usr/share/licenses/$pkgname/"
 }

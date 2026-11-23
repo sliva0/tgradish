@@ -1,28 +1,24 @@
-//! Machine-readable description of tgradish for front-ends that run the
-//! CLI, printed by `tgradish describe`, and the rules everything the CLI
-//! prints with `--json` keeps:
+//! Machine-readable CLI schema printed by `tgradish describe` and the wire
+//! conventions followed by every `--json` command:
 //!
-//! - Every key and every enum value is kebab-case.
-//! - Every `--json` output is JSON Lines: one compact object per line.
-//!   `convert` and `watch` print an event a line, an [`Event`] as the
-//!   description's `events` schema gives it, the same for every format:
-//!   `started` first and `finished` last, each naming the `input`,
-//!   `output`, `format`, `target` and `limit`, with what only the format
-//!   has beside them. `inspect` prints a file a line, `preset list` a
-//!   preset a line, `licenses` a notice a line, `spoof` one event, a
-//!   [`SpoofEvent`], and other commands one line.
-//! - A tagged union names its tag by what it distinguishes: `event` for
-//!   events, `format` for what `inspect` found, `kind` for issues,
-//!   encodings and ffmpeg backends, `mode` for an encode's rate control.
-//! - A file is named by its path as text, with what isn't Unicode in it
-//!   replaced, and a line about one input names it `input`.
-//! - What Telegram would have a problem with is an issue, of every format
-//!   alike, as [`crate::telegram::Issue`] serialises it: its `kind`, with
-//!   what it found, its `severity` and its `message`. A file with any
-//!   issue of severity `error` is refused, and makes the command exit
-//!   with 3.
-//! - Whatever fails is an `error` event, with its `message` and the
-//!   `input` that failed, or `null` where the whole command did.
+//! - All JSON keys and enum values use kebab-case.
+//! - Every `--json` command prints JSON Lines (one compact JSON object per
+//!   line). `convert` and `watch` emit [`Event`]s (`started` first, `finished`
+//!   last, carrying `input`, `output`, `format`, `target`, `limit`, plus
+//!   format-specific fields). `inspect` prints one file per line, `preset list`
+//!   one preset per line, `licenses` one notice per line, `spoof` one
+//!   [`SpoofEvent`], and other commands one object.
+//! - Tagged unions name their discriminator by role: `event` for events,
+//!   `format` for inspection results, `kind` for issues, WebP encodings and
+//!   ffmpeg backends, and `mode` for rate control.
+//! - Paths are serialised lossily as UTF-8 strings; per-input objects put the
+//!   input path under `input`.
+//! - Telegram validation issues use [`crate::telegram::Issue`] uniformly across
+//!   all formats (`kind`, `severity`, `message`, plus variant fields). Any
+//!   `error`-severity issue means Telegram rejects the file and causes the CLI
+//!   to exit with status 3.
+//! - Failures emit an `error` event with `message` and `input` (`null` for
+//!   command-wide errors).
 
 use std::path::{Path, PathBuf};
 
@@ -37,126 +33,120 @@ use crate::presets::{Format, Presets};
 use crate::tgs;
 use crate::webm::Options;
 
-/// The version of the protocol: of the description, the events, what
-/// `--json` prints and the flags front-ends use. It goes up with a change
-/// that would break a front-end following it, as a key renamed or removed
-/// or a flag gone; what is only added, as an event, a key or a flag,
-/// leaves it as it is, so front-ends ignore what they don't know.
+/// Protocol version for `describe`, `--json` output and machine-facing CLI
+/// flags. Incremented only on breaking changes (renamed/removed keys or
+/// flags); additive changes (new events, keys or flags) keep the same version,
+/// so front-ends should ignore anything they do not recognise.
 pub const PROTOCOL_VERSION: u32 = 1;
 
-/// What `describe` prints: the protocol, the formats with the schemas of
-/// their options, the schema of the events conversions print, and the
-/// presets.
+/// Top-level document printed by `tgradish describe`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Description {
-    /// [`PROTOCOL_VERSION`].
+    /// Protocol version ([`PROTOCOL_VERSION`]).
     pub protocol: u32,
-    /// `tgradish`.
+    /// Tool name (`"tgradish"`).
     pub tool: &'static str,
-    /// tgradish's version.
+    /// Package version.
     pub version: &'static str,
-    /// The format conversions make when nothing asks for another.
+    /// Default output format when none is specified.
     pub default_format: Format,
-    /// How a front-end stops `convert` or `watch` where it can't send
-    /// Ctrl-C.
+    /// Instructions for front-ends to cancel or settle `convert` or `watch`
+    /// over stdin when they cannot send Ctrl-C.
     pub cancel: &'static str,
-    /// Every format conversions make.
+    /// Supported output formats and their option schemas.
     pub formats: Vec<FormatDescription>,
-    /// JSON Schema of the events `convert --json` and `watch --json`
-    /// print, one per line, of every format: an [`Event`].
+    /// JSON Schema for [`Event`] lines emitted by `convert --json` and
+    /// `watch --json`.
     pub events: Schema,
-    /// Every preset, built in or the user's, broken ones too.
+    /// All built-in and user presets (including broken ones with `error` set).
     pub presets: Vec<PresetDescription>,
-    /// JSON Schema of what `spoof --json` prints: a [`SpoofEvent`].
+    /// JSON Schema for [`SpoofEvent`] emitted by `spoof --json`.
     pub spoof_events: Schema,
 }
 
-/// What `spoof --json` prints, one line: the file it wrote, or why it
-/// couldn't, as conversions' events say it.
+/// JSON event emitted by `tgradish spoof --json`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum SpoofEvent {
-    /// The spoofed file is written.
+    /// Spoofed file written successfully.
     Finished {
-        /// The WebM spoofed.
+        /// Source WebM path.
         #[serde(serialize_with = "crate::protocol::serialize_path")]
         input: PathBuf,
-        /// Where the spoofed copy went.
+        /// Destination WebM path.
         #[serde(serialize_with = "crate::protocol::serialize_path")]
         output: PathBuf,
-        /// What was changed.
+        /// Summary of container edits.
         report: crate::webm::container::PatchReport,
-        /// What Telegram would still refuse: a duration longer than it
-        /// takes.
+        /// Remaining Telegram validation issues (e.g. if duration still
+        /// exceeds 3 s).
         issues: Vec<crate::telegram::Issue>,
     },
     /// Spoofing failed.
     Error(Failure),
 }
 
-/// A format, as [`Description`] tells of it.
+/// Output format entry inside [`Description`].
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct FormatDescription {
-    /// Which.
+    /// Format identifier.
     pub format: Format,
-    /// What it makes, from what, in a sentence.
+    /// One-sentence summary of the format.
     pub description: &'static str,
-    /// Extension of produced files.
+    /// Output file extension without a dot.
     pub output_extension: &'static str,
-    /// The preset used for this format when none is given.
+    /// Effective default preset name for this format.
     pub default_preset: String,
-    /// JSON Schema of the options accepted by `convert --options-json` for
-    /// this format. Every property also has a `--<property>` flag.
+    /// JSON Schema for `convert --options-json`. Every property also maps to
+    /// `--<property>`.
     pub options: Schema,
 }
 
-/// A preset, as [`Description`] tells of it.
+/// Preset entry inside [`Description`].
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct PresetDescription {
-    /// What it is called.
+    /// Preset name.
     pub name: String,
-    /// What it is for; empty when it says nothing, or is broken.
+    /// Preset description (empty if omitted or broken).
     pub description: String,
-    /// Whether it is built into tgradish rather than a user's file.
+    /// True for built-in presets; false for user preset files.
     pub builtin: bool,
-    /// Options for WebM and static results, with everything the preset
-    /// extends applied; `None` if broken.
+    /// Resolved WebM/WebP options (with `extends` applied), or `None` if
+    /// broken.
     pub webm: Option<Options>,
-    /// The same for `.tgs` results.
+    /// Resolved `.tgs` options (with `extends` applied), or `None` if broken.
     pub tgs: Option<tgs::Options>,
-    /// Why the preset cannot be used, if it is broken for either format.
+    /// Error message if the preset is invalid for either format.
     pub error: Option<String>,
 }
 
-/// Why a conversion, or the whole command, failed: the error event of
-/// every stream `convert --json`, `watch --json` and `inspect --json`
-/// print, the same in each. Only printed by the CLI; the library returns
-/// errors instead.
+/// Error event payload emitted by CLI `--json` commands (`convert`, `watch`,
+/// `inspect`, `spoof`). Library functions return `Err` instead.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub struct Failure {
-    /// What went wrong, in English.
+    /// Human-readable error message.
     pub message: String,
-    /// The input that failed, `None` when the whole command did.
+    /// Failing input path, or `None` for command-wide errors.
     #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
     pub input: Option<PathBuf>,
 }
 
-/// Serialises `path` as text, with what isn't Unicode in it replaced:
-/// serde refuses such paths, and JSON has no way of carrying them. Every
-/// path tgradish prints goes through this, through `serialize_with`.
+/// Lossily serialises `path` as a UTF-8 string (replacing invalid UTF-8 with
+/// U+FFFD) so non-Unicode paths never fail JSON serialisation. Every printed
+/// path goes through this via `serialize_with`.
 pub fn serialize_path<S: serde::Serializer>(path: &Path, serializer: S) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(&path.to_string_lossy())
 }
 
-/// [`serialize_path`] for a path that may not be there.
+/// Optional version of [`serialize_path`].
 pub fn serialize_optional_path<S: serde::Serializer>(
     path: &Option<PathBuf>,
     serializer: S,
@@ -167,15 +157,16 @@ pub fn serialize_optional_path<S: serde::Serializer>(
     }
 }
 
-/// The JSON Schema of `T` as it is written, rather than read: of what
-/// tgradish prints.
+/// Generates a JSON Schema matching how `T` serialises (rather than
+/// deserialises).
 fn printed<T: JsonSchema>() -> Schema {
     SchemaSettings::default().for_serialize().into_generator().into_root_schema_for::<T>()
 }
 
-/// `schema` with only the properties named `keys`, and only the
-/// definitions they still refer to: what a format takes of another's
-/// options, so that a front-end building options from it is never refused.
+/// Filters `schema` to keep only properties listed in `keys` and the `$defs`
+/// reachable from them (used to derive the WebP option schema from WebM's,
+/// omitting unused `$defs` such as `Fit` and `Spoof`), so front-ends building
+/// options from it never send one WebP refuses.
 fn only_properties(mut schema: Schema, keys: &[&str]) -> Schema {
     let Some(root) = schema.as_object_mut() else { return schema };
     if let Some(Value::Object(properties)) = root.get_mut("properties") {
@@ -184,7 +175,7 @@ fn only_properties(mut schema: Schema, keys: &[&str]) -> Schema {
     if let Some(Value::Array(required)) = root.get_mut("required") {
         required.retain(|key| key.as_str().is_some_and(|key| keys.contains(&key)));
     }
-    // definitions refer to each other, so follow references until no more turn up
+    // Definitions can reference other definitions, so follow $ref transitively.
     let mut wanted = Vec::new();
     let mut unread = vec![root.get("properties").cloned().unwrap_or_default()];
     while let Some(value) = unread.pop() {
@@ -243,31 +234,32 @@ pub fn describe(presets: &Presets, config: &Config) -> Description {
         tool: "tgradish",
         version: env!("CARGO_PKG_VERSION"),
         default_format: Format::default(),
-        cancel: "run with --cancel-on-stdin and write a line reading cancel to stdin: it stops \
-                 as Ctrl-C does, convert exiting with 130 and watch stopping as done, with 0; \
-                 a line reading settle instead stops fitting the WebM under way where an \
-                 encode fits, as progress events' can-settle says, and keeps the best so far, \
-                 its finished event saying settled; without the flag stdin isn't read",
+        cancel: "Pass --cancel-on-stdin and write a line `cancel` to stdin to stop as Ctrl-C does \
+                 (convert exits with 130; watch exits with 0). A line `settle` during WebM \
+                 fitting, once an encode fits (progress events report can-settle: true), keeps the \
+                 best encode so far (finished reports settled: true). Without this flag, stdin is \
+                 not read.",
         formats: vec![
             FormatDescription {
                 format: Format::Webm,
-                description: "Video sticker or emoji, from any video or image",
+                description: "Video sticker or custom emoji from any video or image",
                 output_extension: Format::Webm.extension(),
                 default_preset: default_preset(Format::Webm),
                 options: schema_for!(Options),
             },
             FormatDescription {
                 format: Format::Tgs,
-                description: "Animated sticker, from pixel art",
+                description: "Animated sticker or custom emoji from pixel art (videos are read as \
+                              pixel art)",
                 output_extension: Format::Tgs.extension(),
                 default_preset: default_preset(Format::Tgs),
                 options: schema_for!(tgs::Options),
             },
             FormatDescription {
                 format: Format::Webp,
-                description: "Static sticker or emoji, from one frame of a video or an image: \
-                              WebM's options where a still picture has them, start being \
-                              the frame's time",
+                description: "Static sticker or custom emoji from an image or a single video \
+                              frame; takes the WebM options that apply to still images, with start \
+                              choosing the frame",
                 output_extension: Format::Webp.extension(),
                 default_preset: default_preset(Format::Webp),
                 options: only_properties(schema_for!(Options), &crate::webp::PICTURE_OPTIONS),
@@ -559,7 +551,7 @@ mod tests {
         let start =
             r#"{"event":"finished","input":"in.webm","output":"in.spoofed.webm","report":{"#;
         assert!(line.starts_with(start), "{line}");
-        let issues = r#""issues":[{"kind":"too-long","seconds":5.0,"max":3.0,"severity":"error","message":"metadata duration is 5.000 s, limit is 3 s"}]}"#;
+        let issues = r#""issues":[{"kind":"too-long","seconds":5.0,"max":3.0,"severity":"error","message":"metadata duration is 5.000 s (limit is 3 s)"}]}"#;
         assert!(line.ends_with(issues), "{line}");
     }
 
@@ -640,12 +632,12 @@ mod tests {
             ),
             Some(r#"{"event":"scored","attempt":1,"ssim":0.95}"#),
             Some(
-                r#"{"event":"decided","decision":{"reason":"in-band","attempt":1,"share":0.99,"least":0.96},"message":"stopped: attempt 1 uses 99.0% of the limit, at least the 96.0% aimed for"}"#,
+                r#"{"event":"decided","decision":{"reason":"in-band","attempt":1,"share":0.99,"least":0.96},"message":"stopped: attempt 1 uses 99.0% of the limit (target >= 96.0%)"}"#,
             ),
             Some(r#"{"event":"warning","message":"a warning"}"#),
             Some(r#"{"event":"log","line":"a line"}"#),
             Some(
-                r#"{"event":"finished","input":"in.mp4","output":"in.sticker.webm","format":"webm","target":"sticker","bytes":250000,"limit":262144,"changed":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"293.0 KiB, over the 256 KiB limit"}],"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"settled":false,"temp-dir":"/tmp/tgradish-x"}"#,
+                r#"{"event":"finished","input":"in.mp4","output":"in.sticker.webm","format":"webm","target":"sticker","bytes":250000,"limit":262144,"changed":false,"issues":[{"kind":"too-big","bytes":300000,"max":262144,"severity":"error","message":"293.0 KiB exceeds the 256 KiB limit"}],"attempt":2,"params":{"fps":30.0,"length":2.0,"rate":{"mode":"crf","crf":32}},"spoofed":false,"settled":false,"temp-dir":"/tmp/tgradish-x"}"#,
             ),
             Some(r#"{"event":"error","message":"it failed","input":"in.mp4"}"#),
             None,

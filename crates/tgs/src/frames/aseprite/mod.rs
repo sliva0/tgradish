@@ -261,7 +261,7 @@ impl Sprite {
             n => usize::from(n),
         };
         if width == 0 || height == 0 {
-            return Err(error(format!("the canvas is {width}×{height}")));
+            return Err(error(format!("canvas dimensions are {width}×{height}")));
         }
         if width.max(height) > limits.max_dimension {
             return Err(limits.dimension(Oversize::Canvas { width, height }));
@@ -300,7 +300,7 @@ impl Sprite {
         for _ in 0..frame_count {
             let length = file.u32()? as usize;
             if file.u16()? != 0xf1fa {
-                return Err(error("a frame header is broken"));
+                return Err(error("invalid frame header"));
             }
             let old_count = file.u16()?;
             let duration = file.u16()?;
@@ -308,7 +308,7 @@ impl Sprite {
             file.skip(2)?;
             let new_count = file.u32()?;
             let body_length =
-                length.checked_sub(16).ok_or_else(|| error("a frame is too short"))?;
+                length.checked_sub(16).ok_or_else(|| error("frame size is smaller than header"))?;
             let mut body = Reader::new(file.take(body_length)?);
             // the newer count, when set, overrides the old WORD one, which
             // says 0xFFFF when there are more chunks than it holds; older
@@ -321,7 +321,9 @@ impl Sprite {
             for _ in 0..chunks {
                 let size = body.u32()? as usize;
                 let kind = body.u16()?;
-                let size = size.checked_sub(6).ok_or_else(|| error("a chunk is too short"))?;
+                let size = size
+                    .checked_sub(6)
+                    .ok_or_else(|| error("chunk size is smaller than header"))?;
                 let mut chunk = Reader::new(body.take(size)?);
                 let next_tag = tag_data.take();
                 match kind {
@@ -395,7 +397,7 @@ impl Sprite {
         sprite.resolve_links()?;
         let frames = sprite.frames.len() as u32;
         if let Some(tag) = sprite.tags.iter().find(|tag| tag.from > tag.to || tag.to >= frames) {
-            return Err(error(format!("tag {:?} has frames outside the file", tag.name)));
+            return Err(error(format!("tag {:?} references frames outside the file", tag.name)));
         }
         Ok(sprite)
     }
@@ -407,17 +409,19 @@ impl Sprite {
         for index in 0..self.layers.len() {
             let level = usize::from(self.layers[index].level);
             if level > MAX_GROUP_DEPTH {
-                return Err(error(format!("groups are nested more than {MAX_GROUP_DEPTH} deep")));
+                return Err(error(format!(
+                    "layer groups are nested more than {MAX_GROUP_DEPTH} levels deep"
+                )));
             }
             if level > open.len() {
-                return Err(error("a layer is nested deeper than its group"));
+                return Err(error("layer is nested deeper than its parent group"));
             }
             open.truncate(level);
             let parent = open.last().copied();
             if let Some(parent) = parent
                 && self.layers[parent].kind != LayerKind::Group
             {
-                return Err(error("a layer is inside a layer that isn't a group"));
+                return Err(error("layer has a non-group parent"));
             }
             self.layers[index].parent = parent;
             open.push(index);
@@ -439,7 +443,7 @@ impl Sprite {
     /// the chains, which are refused where they lead to nothing or round
     /// in a loop.
     fn resolve_links(&mut self) -> Result<()> {
-        let broken = || error("a linked cel leads to nothing, or round in a loop");
+        let broken = || error("linked cel target is missing or forms a loop");
         // for each frame's cels, the frame their links lead to, once known
         let mut resolved: Vec<Vec<Option<usize>>> =
             self.frames.iter().map(|(_, cels)| vec![None; cels.len()]).collect();
@@ -491,16 +495,18 @@ impl Sprite {
     fn check_cels(&self) -> Result<()> {
         for (_, cels) in &self.frames {
             for cel in cels {
-                let layer =
-                    self.layers.get(cel.layer).ok_or_else(|| error("a cel's layer is missing"))?;
+                let layer = self
+                    .layers
+                    .get(cel.layer)
+                    .ok_or_else(|| error("cel references a missing layer"))?;
                 match (&cel.content, layer.kind) {
                     (Content::Tilemap { .. }, LayerKind::Tilemap { tileset }) => {
                         if !self.tilesets.iter().any(|t| t.id == tileset) {
-                            return Err(error("a tilemap's tileset is missing"));
+                            return Err(error("tilemap references a missing tileset"));
                         }
                     }
                     (Content::Tilemap { .. }, _) => {
-                        return Err(error("a tilemap cel is on another kind of layer"));
+                        return Err(error("tilemap cel is on a non-tilemap layer"));
                     }
                     _ => {}
                 }
@@ -878,7 +884,7 @@ mod tests {
         }
         let refused = decode(&file(1, 1, 32, 1, &[deep]));
         assert!(
-            matches!(&refused, Err(Error::Decode { message, .. }) if message.contains("64 deep")),
+            matches!(&refused, Err(Error::Decode { message, .. }) if message.contains("64 levels deep")),
             "{refused:?}"
         );
     }

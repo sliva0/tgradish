@@ -1,6 +1,6 @@
-//! Size and quality for TGS animations, and how their art is read. To
-//! fit into 64 KiB the art itself may have to change, so what it may give
-//! up is the user's to choose.
+//! Size, quality, and sprite-sheet reading settings for TGS animations. Fitting
+//! within 64 KiB may require simplifying the artwork, so the user can choose
+//! which reductions are allowed.
 
 use eframe::egui;
 use tgradish_core::options::{Effort, Sheet};

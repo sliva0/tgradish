@@ -1,6 +1,6 @@
 [package]
 name = "tgradish-gui"
-description = "The tgradish GUI: converts with tgradish-core"
+description = "The tgradish GUI, converting with tgradish-core"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,12 +10,13 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["telegram", "sticker", "emoji", "egui", "pixel-art"]
 categories = ["multimedia::video", "multimedia::images"]
-# the art of the README's screenshot, which only a test reads
+# Art used only by the README screenshot test.
 exclude = ["/readme-art"]
 
 [dependencies]
 tgradish-core = { workspace = true, features = ["clipboard"] }
-# a result copied as a file, for pasting into Telegram; core pastes with it
+# Copies a result to the clipboard as a file, for pasting into Telegram;
+# core pastes with it too.
 arboard.workspace = true
 
 eframe.workspace = true
@@ -32,8 +33,8 @@ rust-embed.workspace = true
 shlex.workspace = true
 tempfile.workspace = true
 
-# the user's id, which the folder of the socket other instances reach
-# this one on must be
+# Check the current user ID to verify ownership of the single-instance
+# socket directory.
 [target.'cfg(unix)'.dependencies]
 rustix = { workspace = true, features = ["process"] }
 
@@ -41,22 +42,22 @@ rustix = { workspace = true, features = ["process"] }
 raw-window-handle.workspace = true
 rustix = { workspace = true, features = ["event"] }
 wayland-client.workspace = true
-# libwayland's own client, which can share winit's connection
+# Use system libwayland-client so we can share winit's display connection.
 wayland-backend = { workspace = true, features = ["client_system"] }
-# the window's icon, which winit doesn't set on Wayland
+# Set the window icon on Wayland (which winit does not set).
 wayland-protocols = { workspace = true, features = ["client", "staging"] }
 winit = { workspace = true, features = ["wayland"] }
-# libdbus, for the accent colour from the desktop portal
+# Load libdbus at runtime to query the system accent colour from the
+# desktop portal.
 libloading.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# the accent colour, from AppKit
+# Query the system accent colour from AppKit.
 objc2.workspace = true
 objc2-app-kit = { workspace = true, features = ["std", "NSColor", "NSColorSpace", "objc2-core-foundation"] }
 
 [target.'cfg(windows)'.dependencies]
-# the accent colour, from the registry, links opened through the shell,
-# and the pipe other instances reach this one on
+# Registry accent colour, ShellExecute links, and single-instance named pipe.
 windows-sys = { workspace = true, features = [
     "Win32_Foundation",
     "Win32_Security",
@@ -76,7 +77,7 @@ workspace = true
 [dev-dependencies]
 fluent-bundle.workspace = true
 fluent-syntax.workspace = true
-# the pictures of crates/gui/src/strings.rs, cut to their parts
+# Used by crates/gui/src/strings.rs to crop UI screenshots.
 image.workspace = true
 egui_kittest.workspace = true
 egui-wgpu.workspace = true

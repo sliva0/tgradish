@@ -1,12 +1,13 @@
-//! The files open in the GUI and their settings, kept across restarts:
-//! saved as the GUI runs and when it closes, read as it starts. Kept
-//! in the state directory (`~/.local/state/tgradish` on Linux), with
-//! copies of pasted images, whose own folders go when the GUI closes.
+//! Persists open files, per-item settings, and window layout across restarts.
 //!
-//! A session this version can't read, as one a newer tgradish kept, is
-//! set aside rather than written over, and the copies it may name are left
-//! alone. Only one instance at a time keeps a session, the first to start,
-//! which the others hand their files to where they can (see `instance`).
+//! Saved in the user state directory (`~/.local/state/tgradish` on Linux)
+//! while the GUI runs and on exit, alongside copies of pasted clipboard images
+//! (whose temporary folders are cleaned up when the GUI closes).
+//!
+//! If a session file cannot be parsed (e.g. written by a newer version), it is
+//! moved aside rather than overwritten, and any pasted image copies it may
+//! reference are preserved. The first running instance keeps the session and
+//! holds its lock; later instances hand their files to it (see `instance`).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
@@ -21,14 +22,15 @@ use crate::jobs::Job;
 use crate::media::Load;
 use crate::outputs::{FileVersion, Written};
 
-/// What the file says it is, so a session of another layout is left alone.
+/// Session format version; files with a different version are moved aside.
 const VERSION: u32 = 1;
 
-/// A session file as it is read: its items one by one, so that one this
-/// version can't read, as with an option it doesn't know, is left out alone.
-/// Anything this version doesn't know, an item's or the session's, makes
-/// what holds it unreadable, so that it is set aside whole rather than
-/// written again without what a newer version kept there.
+/// Raw session layout used on load: items are parsed individually so an item
+/// containing an unknown option from a newer version can be skipped without
+/// discarding the rest, while a backup copy of the full file is set aside so
+/// nothing is lost when saving. Any field this version doesn't know, in an
+/// item or the session, makes what holds it unreadable, so it is set aside
+/// whole rather than rewritten without what a newer version kept.
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Read {
@@ -44,37 +46,36 @@ struct Read {
 pub(crate) struct Session {
     version: u32,
     items: Vec<Saved>,
-    /// Which of them is selected.
+    /// Index of the selected item in `items`.
     selected: Option<usize>,
-    /// How the window was laid out.
+    /// Saved window geometry and splitter positions.
     #[serde(skip_serializing_if = "Option::is_none")]
     window: Option<Window>,
 }
 
-/// How the window was laid out, to open it so again: its size and place,
-/// and where the lines between its parts were. Sizes are in points as the
-/// system counts them, without tgradish's own scale.
+/// Saved window geometry and panel split positions. Window size and position
+/// are in OS logical points (excluding tgradish's internal UI scale).
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 pub(crate) struct Window {
-    /// Its size within its frame, as it was when last not maximised.
+    /// Inner window size when last unmaximised.
     pub(crate) size: [f32; 2],
-    /// Where its frame's corner was then, where the system says.
+    /// Outer top-left window position when last unmaximised, if reported by the OS.
     pub(crate) position: Option<[f32; 2]>,
     pub(crate) maximized: bool,
-    /// How wide the list of files was, in egui's own points.
+    /// Width of the file list panel in egui points.
     pub(crate) list: f32,
-    /// The share of the height beside the list the preview took.
+    /// Fraction of the main panel height occupied by the preview.
     pub(crate) preview: f32,
 }
 
-/// The most a size or place may be, past any screen.
+/// Upper bound on valid window dimensions and coordinates (past any screen).
 const FARTHEST: f32 = 32768.0;
 
 impl Window {
-    /// As it may be used: no smaller than the window goes, nor larger than
-    /// any screen, the preview's share as the line under it may put it, and
-    /// its place, where it is anywhere a screen may be.
+    /// Clamps the window size (no smaller than the window's minimum), the
+    /// list width and the preview share (within the divider's limits), and
+    /// drops a position that no screen could have.
     pub(crate) fn clamped(self) -> Window {
         let within = |value: f32, least: f32, most: f32| {
             if value.is_finite() { value.clamp(least, most) } else { least }
@@ -99,9 +100,8 @@ impl Window {
     }
 }
 
-/// How the window was laid out as the session at `path` keeps it, if it
-/// does and can be read: to open the window so, before anything else of
-/// the session is read.
+/// Reads only the [`Window`] layout from the session file at `path` so the
+/// native window can be sized and positioned before the rest of the session loads.
 pub(crate) fn window(path: &Path) -> Option<Window> {
     let text = std::fs::read_to_string(path).ok()?;
     let mut read: serde_json::Value = serde_json::from_str(&text).ok()?;
@@ -114,14 +114,14 @@ pub(crate) fn window(path: &Path) -> Option<Window> {
 struct Saved {
     inputs: Vec<PathBuf>,
     sequence: bool,
-    /// A pasted image: its copy's name in the session's folder.
-    // the session file's key for it since its first version
+    /// Filename of the copied clipboard image inside the `pasted/` directory.
+    // Serialised as `"pasted"` since version 1.
     #[serde(rename = "pasted")]
     pasted_copy: Option<String>,
     format: Format,
     format_guessed: bool,
     choices: Choices,
-    /// The last result, and what it was made with.
+    /// Last completed conversion result and its recipe.
     result: Option<SavedResult>,
 }
 
@@ -129,83 +129,81 @@ struct Saved {
 #[serde(rename_all = "kebab-case", deny_unknown_fields)]
 struct SavedResult {
     output: PathBuf,
-    /// The file as the GUI wrote it, by which it knows its own result
-    /// again; `None` for one it found.
+    /// File version recorded when the GUI wrote `output` (`None` for a result
+    /// found on disk rather than written by the GUI).
     written: Option<FileVersion>,
-    /// What it was made with, in the format it was made in, to tell
-    /// whether it is still what converting would make.
+    /// Effective conversion recipe used to produce `output`, for staleness checks.
     recipe: Recipe,
 }
 
-/// A session's files, open again.
+/// Items and metadata restored from a saved session.
 pub(crate) struct Restored {
     pub(crate) items: Vec<Item>,
     pub(crate) selected: Option<u64>,
-    /// How many were left out because their files are gone.
+    /// Number of saved items skipped because their input files no longer exist.
     pub(crate) gone: usize,
-    /// The results among them that an earlier run wrote, for the items
-    /// that have them now.
+    /// Output files written by an earlier run for the restored items.
     pub(crate) written: Vec<(PathBuf, Written)>,
 }
 
-/// Where pasted images are kept, next to the session file.
+/// Returns the `pasted/` directory path next to the session file.
 fn pasted_dir(path: &Path) -> PathBuf {
     path.with_file_name("pasted")
 }
 
-/// Whether `name` is a file's name alone, so a session file can't point
-/// copies anywhere else.
+/// Returns true if `name` is a single normal path component (preventing path
+/// traversal outside `pasted/`).
 fn plain_name(name: &str) -> bool {
     let mut parts = Path::new(name).components();
     matches!((parts.next(), parts.next()), (Some(Component::Normal(_)), None))
 }
 
-/// What a session file held.
+/// Result of reading a session file from disk.
 #[derive(Default)]
 pub(crate) struct Loaded {
     pub(crate) session: Session,
-    /// Set when some or all of it couldn't be read.
+    /// Populated when part or all of the session file could not be parsed.
     pub(crate) unreadable: Option<Unreadable>,
 }
 
-/// A session file this version of tgradish couldn't read all of.
+/// Details about a session file that could not be parsed in full.
 pub(crate) struct Unreadable {
-    /// How many of its files were left out; `None` when none of it could
-    /// be read.
+    /// Count of individual items skipped (`None` when the entire file was
+    /// unreadable).
     pub(crate) files: Option<usize>,
-    /// Where the file is kept as it was.
+    /// Path where the original session file was backed up.
     pub(crate) aside: PathBuf,
 }
 
-/// The session file this instance holds: where it is, what it last wrote
-/// there, and which copies of pasted images are its own to remove.
+/// Active session file store: tracks the last serialised JSON, owned pasted
+/// image copies, and the advisory lock file.
 pub(crate) struct Store {
     path: PathBuf,
-    /// The session as last written or read, so it is only written again
-    /// when it changes.
+    /// Last JSON read or written, used to skip redundant disk writes.
     written: String,
-    /// The copies of pasted images this instance read of or made. Others in
-    /// the folder may belong to a session that was set aside.
+    /// Filenames in `pasted/` owned by this session. Other files in `pasted/`
+    /// may belong to a backed-up unreadable session.
     copies: HashSet<String>,
-    /// Held while the GUI runs, so no other instance keeps a session here.
+    /// Advisory lock file held while the GUI is running, so no other instance
+    /// keeps a session here.
     lock: Option<std::fs::File>,
-    /// The sessions set aside as they were last read, and what they name,
-    /// so they are read again only when one comes, goes or changes rather
-    /// than at every save.
+    /// Cached metadata and referenced pasted-image names for `.unreadable*`
+    /// backup sessions so they are only re-read when modified.
     aside_read: Option<(Vec<AsideFile>, AsideNames)>,
 }
 
-/// A session set aside as it was seen: its path, size and time of change.
+/// Path, byte length, and modification timestamp of a `.unreadable*` session file.
 type AsideFile = (PathBuf, u64, SystemTime);
 
-/// The copies of pasted images the sessions set aside name, or `None`
-/// where that can't be told, as when one can't be read or isn't JSON.
+/// Pasted image filenames referenced by `.unreadable*` session files, or `None`
+/// if any backup file could not be parsed as JSON.
 type AsideNames = Option<HashSet<String>>;
 
 impl Drop for Store {
-    // Closing the file alone may not let go: a process being started at
-    // that moment shares it until it runs its program, as ffmpeg's are
-    // while another instance, or test, opens the session.
+    // Explicitly unlock before closing: a child process (such as `ffmpeg`)
+    // spawned concurrently inherits file descriptors briefly between `fork`
+    // and `exec`, which would keep an implicit close-based lock alive while
+    // another instance or test opens the session.
     fn drop(&mut self) {
         if let Some(lock) = &self.lock {
             let _ = lock.unlock();
@@ -214,9 +212,9 @@ impl Drop for Store {
 }
 
 impl Store {
-    /// The session at `path`, for this instance alone: `None` while
-    /// another has it, as two would write over each other's files and
-    /// remove each other's pasted images.
+    /// Opens the session store at `path` if no other instance holds its lock:
+    /// two would overwrite each other's session and remove each other's pasted
+    /// images.
     pub(crate) fn open(path: PathBuf) -> Option<Store> {
         let lock = lock(&path).ok()?;
         Some(Store { path, written: String::new(), copies: HashSet::new(), lock, aside_read: None })
@@ -226,22 +224,20 @@ impl Store {
         &self.path
     }
 
-    /// Whether it is this instance's alone for certain: not where there is
-    /// no telling whether another runs, as the folder's file system has no
-    /// locks.
+    /// Returns true if an exclusive file lock is held (false if the filesystem
+    /// does not support locking).
     pub(crate) fn locked(&self) -> bool {
         self.lock.is_some()
     }
 
-    /// The name a session that couldn't be read is kept under, with a
-    /// number after it for every one but the first.
+    /// Base filename prefix for backed-up unreadable session files.
     fn aside_name(&self) -> String {
         let name = self.path.file_name().unwrap_or_default().to_string_lossy();
         format!("{name}.unreadable")
     }
 
-    /// Keeps `bytes`, a session that couldn't be read, beside it under a
-    /// name no other has, and gives where.
+    /// Writes `bytes` to a fresh `<session>.unreadable` (or `.unreadable-N`)
+    /// backup file and returns its path.
     fn set_aside(&self, bytes: &[u8]) -> std::io::Result<PathBuf> {
         let first = self.path.with_file_name(self.aside_name());
         for number in 1.. {
@@ -269,8 +265,8 @@ impl Store {
         unreachable!("a name is found before the numbers run out")
     }
 
-    /// The sessions set aside beside this one, or `None` where the folder
-    /// can't be listed, and so there is no telling whether there are any.
+    /// Lists all `.unreadable*` backup session files in the session directory,
+    /// or returns `None` if the directory cannot be listed.
     fn set_aside_sessions(&self) -> Option<Vec<PathBuf>> {
         let name = self.aside_name();
         let Some(dir) = self.path.parent() else { return Some(Vec::new()) };
@@ -290,9 +286,9 @@ impl Store {
         Some(aside)
     }
 
-    /// The copies of pasted images the sessions set aside at `aside` name,
-    /// or `None` where that can't be told of one of them. They are read
-    /// again only when their files differ from when they were last read.
+    /// Returns the pasted-image filenames referenced by the backup files in
+    /// `aside` (using cached results unless file sizes or mtimes changed), or
+    /// `None` if any backup file could not be inspected.
     fn aside_names(&mut self, aside: &[PathBuf]) -> AsideNames {
         let seen: Option<Vec<AsideFile>> = aside
             .iter()
@@ -314,16 +310,14 @@ impl Store {
                 names
             });
         }
-        // one whose size or time can't be had is read at every save, as
-        // nothing would tell when it changed
+        // Only cache if all file metadata was readable.
         self.aside_read = seen.map(|seen| (seen, names.clone()));
         names
     }
 
-    /// Reads the session, if there is one. A file that can't be read is
-    /// moved aside, and one that can only be read in part is copied there
-    /// first, so that nothing is lost when the session is next written;
-    /// an error where that can't be done.
+    /// Loads the session from disk if present. Completely unreadable files are
+    /// moved aside; partially readable files are copied aside before saving
+    /// can overwrite them. Returns an error when setting aside fails.
     pub(crate) fn read(&mut self) -> std::io::Result<Loaded> {
         let bytes = match std::fs::read(&self.path) {
             Ok(bytes) => bytes,
@@ -346,9 +340,8 @@ impl Store {
         Ok(Loaded { session, unreadable })
     }
 
-    /// Copies the pasted image of item `id` next to the session file, so
-    /// it can be opened again, and gives the copy's name, which no
-    /// other has had.
+    /// Copies the pasted clipboard image for item `id` into `pasted/` under a
+    /// unique filename and returns that filename.
     pub(crate) fn copy_pasted(&mut self, id: u64, image: &Path) -> std::io::Result<String> {
         let time = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_nanos();
         let extension = image.extension().and_then(|e| e.to_str()).unwrap_or("png");
@@ -360,10 +353,9 @@ impl Store {
         Ok(name)
     }
 
-    /// Writes `session` if it changed, whole or not at all, and removes
-    /// the copies of pasted images it no longer has, but for those `held`
-    /// names: the copies of files removed a moment ago, which may yet be
-    /// put back.
+    /// Atomically writes `session` if it changed and prunes unreferenced
+    /// pasted-image copies (retaining any listed in `held` for recently
+    /// removed items that can still be restored via Undo).
     pub(crate) fn save(
         &mut self,
         session: &Session,
@@ -373,8 +365,8 @@ impl Store {
         let mut named: HashSet<String> =
             session.items.iter().filter_map(|item| item.pasted_copy.clone()).collect();
         named.extend(held);
-        // the copies are looked over again when files that could be put
-        // back no longer can, though the session is as it was
+        // Re-check copies when recently removed items expire from `held` even
+        // if `session` itself did not change.
         if json == self.written && named == self.copies {
             return Ok(());
         }
@@ -382,16 +374,15 @@ impl Store {
             if let Some(dir) = self.path.parent() {
                 std::fs::create_dir_all(dir)?;
             }
-            // whole or not at all, and on the disk before it replaces the last
+            // Write and sync atomically before replacing the previous file.
             tgradish_core::fsutil::write_file(&self.path, json.as_bytes(), true)?;
             self.written = json;
         }
-        // copies nobody names are left over, unless a session set aside
-        // may name them: then only this instance's own go, and of those not
-        // the ones a session set aside names, as one read in part does
-        // the copies of the files this instance took from it. Where there is
-        // no telling what one names, as a session set aside is often one
-        // that isn't whole, or whether there are any, none go.
+        // Delete unreferenced copies in `pasted/`, taking care not to delete
+        // files belonging to `.unreadable*` backup sessions: if backups exist
+        // and can all be parsed, delete only copies owned by this instance
+        // that no backup names; if any backup cannot be parsed (or the
+        // directory cannot be listed), keep all copies.
         let leftover = match self.set_aside_sessions() {
             Some(aside) if aside.is_empty() => Leftover::All,
             Some(aside) => match self.aside_names(&aside) {
@@ -421,26 +412,26 @@ impl Store {
     }
 }
 
-/// Which copies of pasted images that the session no longer names go when
-/// it is saved.
+/// Policy for pruning unreferenced files in `pasted/` during [`Store::save`].
 enum Leftover {
-    /// Every one, as no session set aside may name them.
+    /// Remove all unreferenced files (no `.unreadable*` backup sessions exist).
     All,
-    /// This instance's own, but for those sessions set aside name.
+    /// Remove only files owned by this instance that are not in the given
+    /// backup-referenced set.
     MineBut(HashSet<String>),
-    /// None, as there is no telling which a session set aside names.
+    /// Remove nothing (a backup session could not be inspected).
     None,
 }
 
-/// Another instance holds the session.
+/// Error indicating another running instance holds the session lock.
 struct Held;
 
-/// Takes the lock beside the session at `path`, which lasts until the
-/// store lets go of it or the file is closed, as when the process ends in
-/// any way. No file where there is
-/// no telling whether another instance runs, as the folder can't be
-/// written to or its file system has no locks: the session is kept as if
-/// there were none, and where it can't be, writing it says so.
+/// Takes a non-blocking exclusive lock on the session's `.lock` sibling
+/// (`path` with its extension replaced), held until the store unlocks it or
+/// the process ends. Returns `Ok(None)` where there is no telling whether
+/// another instance runs (the lock file can't be created, or the filesystem
+/// has no locks): the session is then kept unlocked, and a failed write says
+/// so.
 fn lock(path: &Path) -> Result<Option<std::fs::File>, Held> {
     if let Some(dir) = path.parent() {
         let _ = std::fs::create_dir_all(dir);
@@ -454,11 +445,10 @@ fn lock(path: &Path) -> Result<Option<std::fs::File>, Held> {
     }
 }
 
-/// The copies of pasted images a session file names, of any version that
-/// names them as this one does, read from its JSON as it is rather than
-/// as this version's items, which some of them may not be. `None` where
-/// that can't be told: it isn't JSON, or doesn't hold its items and their
-/// copies as this version does.
+/// Extracts all `"pasted"` filenames from a raw JSON session file without
+/// deserialising full item structs (so items from newer versions still report
+/// their copies). Returns `None` if `bytes` is not valid JSON with an `"items"`
+/// array.
 fn copies_named(bytes: &[u8]) -> Option<HashSet<String>> {
     use serde_json::Value;
     let session = serde_json::from_slice::<Value>(bytes).ok()?;
@@ -475,12 +465,12 @@ fn copies_named(bytes: &[u8]) -> Option<HashSet<String>> {
     Some(named)
 }
 
-/// The session `text` holds and how many of its items couldn't be read, or
-/// `None` where it isn't a session of this layout at all.
+/// Parses `text` as a version-matching [`Session`], returning the parsed
+/// session and the count of individual items that failed to deserialise.
 fn parse(text: &str) -> Option<(Session, usize)> {
     let read: Read =
         serde_json::from_str(text).ok().filter(|read: &Read| read.version == VERSION)?;
-    // a window it can't read is left out alone
+    // Ignore an invalid `window` field without rejecting the items.
     let window = read.window.and_then(|window| serde_json::from_value(window).ok());
     let mut session = Session { version: VERSION, items: Vec::new(), selected: None, window };
     let mut unread = 0;
@@ -498,17 +488,16 @@ fn parse(text: &str) -> Option<(Session, usize)> {
     Some((session, unread))
 }
 
-/// Whether the session can hold `item`: JSON can't name files whose paths
-/// aren't Unicode, and a pasted image is only there again if it was
-/// copied.
+/// Returns true if `item` can be saved in JSON (all input paths are valid
+/// UTF-8 and any pasted clipboard image has a persistent copy in `pasted/`).
 fn keeps(item: &Item) -> bool {
     item.inputs.iter().all(|input| input.to_str().is_some())
         && (item.paste_dir.is_none() || item.pasted_copy.is_some())
 }
 
 impl Session {
-    /// What `items` are, `selected` the one selected, without those the
-    /// session can't hold. `written` are the results the GUI wrote.
+    /// Builds a serialisable [`Session`] from `items`, `selected`, and
+    /// `written`, omitting items that cannot be represented in JSON.
     pub(crate) fn of(
         items: &[Item],
         selected: Option<u64>,
@@ -519,11 +508,11 @@ impl Session {
             .iter()
             .map(|item| {
                 let made = item.last_result().filter(|made| made.job.output.to_str().is_some());
-                // every result has one: a conversion that has none fails
-                // as it starts
+                // Every result has a recipe: a conversion without one fails as
+                // it starts.
                 let made = made.and_then(|made| Some((made, made.recipe.clone()?)));
                 Saved {
-                    // a pasted image is opened from its copy
+                    // Pasted images are restored from their copy in `pasted/`.
                     inputs: if item.pasted_copy.is_some() {
                         Vec::new()
                     } else {
@@ -549,7 +538,7 @@ impl Session {
         Session { version: VERSION, items: saved, selected, window: None }
     }
 
-    /// The session with how the window is laid out.
+    /// Attaches the current [`Window`] layout to `self`.
     pub(crate) fn with_window(self, window: Option<Window>) -> Session {
         Session { window, ..self }
     }
@@ -558,7 +547,7 @@ impl Session {
         serde_json::to_string(self)
     }
 
-    /// The items again, numbered from `next_id`.
+    /// Restores saved items with IDs starting at `next_id`.
     pub(crate) fn restore(self, path: &Path, mut next_id: u64) -> Restored {
         let mut restored =
             Restored { items: Vec::new(), selected: None, gone: 0, written: Vec::new() };
@@ -585,8 +574,8 @@ impl Session {
 fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
     let (inputs, pasted) = match &saved.pasted_copy {
         Some(name) if !plain_name(name) => return None,
-        // a pasted image goes back into a folder of its own, under the
-        // name it was pasted with, which its result is named after
+        // Copy a pasted image back into its own temporary directory under
+        // `PASTED_IMAGE_NAME` so default output naming matches the original paste.
         Some(name) => {
             let dir = tempfile::Builder::new().prefix("tgradish-pasted-").tempdir().ok()?;
             let image = dir.path().join(PASTED_IMAGE_NAME);
@@ -604,7 +593,7 @@ fn restore_item(saved: Saved, path: &Path, id: u64) -> Option<Item> {
     item.format = saved.format;
     item.format_guessed = saved.format_guessed;
     item.choices = saved.choices;
-    // read again as frames are drawn, as the file may have gone or changed
+    // Re-verify the previous output file asynchronously in `work::pump`.
     item.earlier = saved.result.map(|result| {
         (Conversion::earlier(Job::waiting(result.output), result.recipe), Load::Idle)
     });

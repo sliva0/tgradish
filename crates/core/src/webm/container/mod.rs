@@ -1,18 +1,16 @@
-//! WebM inspection and in-place metadata patching.
+//! WebM container inspection and in-place metadata patching.
 //!
-//! Patching never changes the file length. The Segment Info element is
-//! rebuilt inside the space it already occupies plus any padding (Void
-//! elements) right next to it. ffmpeg leaves such padding after the SeekHead,
-//! so Info can grow by a few dozen bytes. If Info has to move, the SeekHead
-//! entry pointing at it is updated. Nothing after Info moves.
+//! Patching preserves the exact file length so byte offsets in `SeekHead` and
+//! `Cues` stay valid. The Segment `Info` element is rebuilt inside its own
+//! span plus any adjacent `Void` padding (ffmpeg leaves padding after
+//! `SeekHead`, giving a few dozen bytes of headroom). If `Info` moves within
+//! that span, its `SeekHead` entry is updated; nothing after `Info` moves.
 //!
-//! Spoofing is such a patch: Telegram refuses video stickers longer than 3
-//! seconds by the Duration in Segment Info, while players play every frame
-//! whatever it says. So a shorter Duration gets a longer sticker through.
-//! ffmpeg also writes a DURATION tag for each track, patched to match, so
-//! tools reading those see the same; [`WebmInfo::content_duration`] keeps
-//! the truth, from the frames' own timestamps. Byte offsets in the SeekHead
-//! and the Cues are why the file's length must never change.
+//! Duration spoofing uses this mechanism: Telegram rejects video stickers
+//! whose Segment `Info` `Duration` exceeds 3 seconds, whereas players play all
+//! frames regardless. Track `DURATION` tags written by ffmpeg are patched to
+//! match, while [`WebmInfo::content_duration`] reports the true duration from
+//! frame timestamps.
 
 pub(crate) mod ebml;
 mod inspect;
@@ -30,57 +28,57 @@ use thiserror::Error;
 /// Default TimestampScale: durations are in milliseconds.
 const DEFAULT_TIMESTAMP_SCALE: u64 = 1_000_000;
 
-/// What is wrong with a WebM's bytes, for reading or patching them.
+/// Errors returned when inspecting or patching a WebM container.
 #[derive(Debug, Error)]
 #[non_exhaustive]
 pub enum WebmError {
-    /// Its EBML doesn't parse. Not `#[from]`, which would make it the
-    /// source too, and the message say it twice where its chain is
-    /// printed.
+    /// Underlying EBML parsing error (no `#[from]` so error chains do not
+    /// print it twice).
     #[error("malformed WebM: {0}")]
     Ebml(EbmlError),
-    /// It doesn't start with an EBML header.
+    /// File does not begin with an EBML header.
     #[error("not a WebM file: no EBML header")]
     NotEbml,
-    /// It has no Segment, which holds everything else.
+    /// File contains no Segment element.
     #[error("no Segment element found")]
     NoSegment,
-    /// Its Segment has no Info, which holds the duration.
+    /// Segment contains no Info element.
     #[error("no Info element found in the Segment")]
     NoInfo,
-    /// A fake duration, in seconds, not above 0 or past
-    /// [`MAX_FAKE_DURATION`].
-    #[error("fake duration must be more than 0 and at most {MAX_FAKE_DURATION} seconds, got {0}")]
+    /// Spoofed duration is not in `(0, MAX_FAKE_DURATION]`.
+    #[error(
+        "fake duration must be greater than 0 and at most {MAX_FAKE_DURATION} seconds (got {0})"
+    )]
     InvalidDuration(f64),
-    /// Its `TimestampScale` is 0, so no duration can be written in it.
-    #[error("the file has an invalid TimestampScale")]
+    /// Segment `TimestampScale` is 0, so no duration can be written.
+    #[error("file has an invalid TimestampScale")]
     InvalidTimestampScale,
-    /// A value to write is longer than an EBML element holds.
+    /// Field exceeds the maximum EBML element size.
     #[error("{field} is too long ({len} bytes)")]
     ValueTooLong {
-        /// What: `title`, `muxing app`, `writing app` or the whole `Info`.
+        /// Field name (`title`, `muxing app`, `writing app`, or `Info`).
         field: &'static str,
-        /// Its length in bytes.
+        /// Byte length of the value.
         len: usize,
     },
-    /// The patched Info doesn't fit where the old one and the padding
-    /// around it were.
+    /// Not enough adjacent `Void` padding around `Info` to hold the rebuilt
+    /// metadata.
     #[error(
-        "not enough padding around the Info element for the new metadata: \
-         need {needed} bytes, have {available}"
+        "not enough padding around the Info element for the new metadata (need {needed} bytes, \
+         have {available})"
     )]
     NoRoom {
-        /// Bytes it needs.
+        /// Bytes required.
         needed: usize,
-        /// Bytes there are.
+        /// Bytes available.
         available: usize,
     },
-    /// The Info moved, and the SeekHead's position of it has too few
-    /// bytes for where it is now.
-    #[error("the SeekHead entry for Info is too narrow to store its new position")]
+    /// `SeekHead`'s `SeekPosition` integer is too narrow to hold the moved
+    /// `Info` offset.
+    #[error("SeekHead entry for Info is too narrow to store its new position")]
     SeekPositionTooNarrow,
-    /// Larger than [`MAX_INSPECTED_BYTES`], which isn't read.
-    #[error("it has more than {} MiB, far more than a sticker", MAX_INSPECTED_BYTES >> 20)]
+    /// File exceeds [`MAX_INSPECTED_BYTES`].
+    #[error("file exceeds {} MiB, far larger than a sticker", MAX_INSPECTED_BYTES >> 20)]
     TooLarge,
 }
 

@@ -1,6 +1,6 @@
-//! The list of files on the left: a row for each, with its input, its
-//! result and how converting it went, under the buttons that add files,
-//! switch the theme, and open the menu of Settings and the rest.
+//! File list panel on the left: one row per item showing input thumbnail,
+//! output format, conversion status, and result thumbnail, below the header bar
+//! (Add files, theme toggle, and main menu).
 
 use std::path::PathBuf;
 

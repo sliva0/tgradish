@@ -1,10 +1,12 @@
-//! Where each of the GUI's messages is shown, for reviewing their words
-//! and for translators: `TGRADISH_STRINGS=/tmp/x cargo test -p tgradish-gui
-//! -- --ignored strings` takes the GUI through the screenshots' states,
-//! hovers whatever might say more, and writes `window.json`: what each
-//! message said and where, in pictures of the GUI under `pictures`.
-//! `cargo xtask strings` makes a page of it. Needs a GPU wgpu can use, and
-//! ffmpeg; `TGRADISH_LANG` shows another language.
+//! Records where each GUI message is shown, for reviewing wording and for
+//! translators.
+//!
+//! `TGRADISH_STRINGS=/tmp/x cargo test -p tgradish-gui -- --ignored strings`
+//! steps the GUI through the screenshot states, hovers widgets for tooltips,
+//! and writes `window.json` (each message and its cropped screenshots under
+//! `pictures/`). `cargo xtask strings` builds an HTML page from that output.
+//! Requires a wgpu-capable GPU and ffmpeg; set `TGRADISH_LANG` to render
+//! another language.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -18,17 +20,18 @@ use crate::app::App;
 use crate::l10n::record;
 use crate::screenshots::walk;
 
-/// Pictures kept of each message, at most.
+/// Maximum screenshots kept per message.
 const PLACES: usize = 2;
-/// Room around a message in its picture, so its surroundings show.
+/// Padding around a message in its cropped screenshot so surrounding UI is
+/// visible.
 const AROUND: f32 = 40.0;
-/// Largest a widget can be to be hovered: larger are panels and areas,
-/// whose hovers say nothing of their own.
+/// Maximum widget size to hover; larger nodes are panels or containers
+/// without tooltips of their own.
 const WIDGET: egui::Vec2 = egui::vec2(420.0, 120.0);
-/// Most times a state is scrolled down for more of it to show.
+/// Maximum scroll steps per state to reveal off-screen controls.
 const SCROLLS: usize = 6;
-/// Frames for a state to settle: for dialogs to finish moving into place,
-/// so that hovering finds their widgets where they were.
+/// Frames to run before capturing a state so dialog animations finish and
+/// widget bounds match their hovered positions.
 const SETTLE: usize = 10;
 
 #[test]
@@ -47,11 +50,10 @@ fn strings() {
     std::fs::write(out.join("window.json"), json).unwrap();
 }
 
-/// States of the GUI the screenshots leave out, for the messages they
-/// show: a notice, the queue at work, conversions that failed or were
-/// stopped, emoji, the folded settings open, other stickers inspected,
-/// long and slowed videos, a picture read as pixel art, settings checked
-/// and saved, and preset names that won't do.
+/// Extra GUI states not covered by `screenshots`, for the messages they
+/// expose: notices, active queue, failed/cancelled conversions, emoji targets,
+/// expanded advanced sections, WebM/image inspection, long and slowed videos,
+/// static pixel art, checked/saved settings, and invalid preset names.
 fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     use crate::config::Config;
     use tgradish_core::ffmpeg::FfmpegChoice;
@@ -77,8 +79,7 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     let mut config = Config::default();
     config.gui.output_dir = Some(dir.path().join("out"));
     config.ffmpeg.choice = FfmpegChoice::System;
-    // each turn of the wheel scrolled all the way at once, before what it
-    // shows is noted
+    // Disable smooth scrolling so each wheel step lands immediately before capture.
     config.gui.motion = false;
     let mut harness =
         Harness::builder().with_size([1280.0, 820.0]).wgpu().build_eframe(move |cc| {
@@ -272,53 +273,51 @@ fn more(mut save: impl FnMut(&mut Harness<App>, &str)) {
     }
 }
 
-/// What a message said, and where.
+/// Recorded text and screenshot locations for a message ID.
 #[derive(Default, Serialize)]
 struct Shown {
     text: String,
     places: Vec<Place>,
 }
 
-/// A part of a picture where a message shows: the state of the GUI it
-/// is of, the part to look at, and the message's outlines in it, in the
-/// picture's pixels.
+/// Cropped screenshot showing a message: state name, image filename, crop
+/// bounds, and highlight rectangles in image pixels.
 #[derive(Serialize)]
 struct Place {
     state: String,
     picture: String,
     view: [f32; 4],
     marks: Vec<[f32; 4]>,
-    /// What it said there: another picture of the same words is no more
-    /// use.
+    /// Exact text rendered here, used to skip duplicate captures of the same
+    /// wording.
     #[serde(skip)]
     said: String,
 }
 
-/// A message the GUI showed, with where it drew it.
+/// Message ID, rendered text, and bounding boxes from one frame.
 type Seen = (&'static str, String, Vec<Rect>);
 
 #[derive(Default)]
 struct Found {
     messages: BTreeMap<String, Shown>,
     pictures: usize,
-    /// The messages given so far, by what they say, for finding those the
-    /// GUI keeps and shows later; and how many of them are in it.
+    /// Messages formatted earlier, indexed by text so retained strings (such
+    /// as banners and stored errors) can be matched when drawn later.
     kept: std::collections::HashMap<String, Vec<&'static str>>,
     taken: usize,
 }
 
 impl Found {
-    /// Notes the messages `harness` shows in the state `name`, scrolled
-    /// down as far as more show, and those its widgets show when hovered,
-    /// with pictures of where they are.
+    /// Captures all visible and tooltip messages in state `name`, scrolling
+    /// down until no new message IDs appear (at most [`SCROLLS`] times).
     fn state(&mut self, harness: &mut Harness<App>, name: &str, pictures: &Path) {
-        // hovers at once, as the pointer moves on
+        // Show tooltips immediately on pointer move.
         harness.ctx.all_styles_mut(|style| {
             style.interaction.tooltip_delay = 0.0;
             style.interaction.show_tooltips_only_when_still = false;
         });
         let screen = harness.ctx.content_rect();
-        // dialogs ease into place as they open
+        // Let dialog opening animations settle.
         harness.run_steps(SETTLE);
         let mut known = BTreeSet::new();
         for _ in 0..SCROLLS {
@@ -331,12 +330,12 @@ impl Found {
             self.view(harness, name, pictures, shown, &mut known);
             scroll(harness, -screen.height() * 0.6);
         }
-        // back to the top, for the states after this one
+        // Scroll back to the top for subsequent states.
         scroll(harness, 100_000.0);
     }
 
-    /// Notes what the GUI shows as it is scrolled now, `shown`, and
-    /// what its widgets say when hovered that isn't `known` yet.
+    /// Captures the current scroll position (`shown`) and hovers widgets to
+    /// record any tooltips not yet in `known`.
     fn view(
         &mut self,
         harness: &mut Harness<App>,
@@ -349,7 +348,7 @@ impl Found {
         if self.wanted(name, &shown) {
             self.picture(harness, name, pictures, screen, None, shown);
         }
-        // what each widget says on hover
+        // Hover each small visible widget to trigger its tooltip.
         let ppp = harness.ctx.pixels_per_point();
         let widgets: Vec<Rect> = harness
             .query_all(by())
@@ -381,8 +380,8 @@ impl Found {
         }
     }
 
-    /// Saves a picture of the GUI for `shown`, of all of it, or of the
-    /// part around a hovered `widget` and what it says.
+    /// Renders and saves a screenshot for `shown` (either the full window or
+    /// the region around a hovered `widget` and its tooltip).
     fn picture(
         &mut self,
         harness: &mut Harness<App>,
@@ -415,8 +414,8 @@ impl Found {
         let bounds = Rect::from_min_size(egui::Pos2::ZERO, part.size());
         for (id, text, rects) in shown {
             let rects: Vec<Rect> = rects.iter().map(|rect| rect.translate(-offset)).collect();
-            // a hover's part shows all of it; a whole window, the message's
-            // surroundings
+            // A hover's picture shows all of its crop; a whole-window picture
+            // shows the message and its surroundings.
             let view = match widget {
                 Some(_) => bounds,
                 None => rects.iter().fold(Rect::NOTHING, |all, rect| all.union(*rect)),
@@ -426,9 +425,9 @@ impl Found {
         }
     }
 
-    /// The messages the last frame showed, with where it drew them: those
-    /// it gave, and with `kept`, any given before that it shows as kept,
-    /// as notices and errors.
+    /// Returns messages rendered in the next frame along with their bounding
+    /// boxes. When `kept` is true, also matches previously formatted strings
+    /// (such as banners and stored errors) against painted text galleys.
     fn shown(&mut self, harness: &mut Harness<App>, kept: bool) -> Vec<Seen> {
         record::start();
         harness.step();
@@ -449,13 +448,15 @@ impl Found {
             for (id, text) in new {
                 self.kept.entry(text).or_default().push(id);
             }
-            // each text drawn, as a whole, after a mark, or after a colon
+            // Match each painted galley as a whole, after a leading symbol, or
+            // after a colon.
             for (text, rect) in galleys(shapes) {
                 let after_mark = text
                     .split_once(' ')
                     .filter(|(mark, _)| !mark.chars().any(char::is_alphanumeric))
                     .map(|(_, rest)| rest);
-                // after the first colon or the last, as messages hold others
+                // Check after both the first and last colon because outer
+                // messages may wrap inner ones.
                 let first = text.split_once(": ").map(|(_, rest)| rest);
                 let last = text.rsplit_once(": ").map(|(_, rest)| rest);
                 let parts = [Some(text.as_str()), after_mark, first, last];
@@ -471,14 +472,15 @@ impl Found {
         shown
     }
 
-    /// Whether any of `shown` still wants a picture of the state `name`.
+    /// Returns true if any message in `shown` still needs a screenshot from
+    /// state `name`.
     fn wanted(&self, name: &str, shown: &[Seen]) -> bool {
         shown.iter().any(|(id, text, _)| self.wants(id, text, name))
     }
 
-    /// Whether `id` saying `text` wants a picture of the state `name`: one
-    /// of each state at most, a few in all, and another only where it says
-    /// something else.
+    /// Returns true if `id` with `text` still needs a capture from state
+    /// `name`: at most [`PLACES`] captures in total, at most one per state,
+    /// and never two with identical wording.
     fn wants(&self, id: &str, text: &str, name: &str) -> bool {
         self.messages.get(id).is_none_or(|message| {
             message.places.len() < PLACES
@@ -486,9 +488,8 @@ impl Found {
         })
     }
 
-    /// Notes that `id` said `text` at `rects` in `picture` of the state
-    /// `name`, whose part `view` shows it, in points; unless a picture of
-    /// it saying that is kept already.
+    /// Records that `id` rendered `text` at `rects` in `picture` of state
+    /// `name` (with viewport `view` in points), unless already satisfied.
     #[allow(clippy::too_many_arguments)]
     fn place(
         &mut self,
@@ -519,8 +520,8 @@ impl Found {
     }
 }
 
-/// Scrolls the settings under the preview, or a dialog's, and the column
-/// beside the preview by `delta`, up where positive.
+/// Scrolls the lower settings area (or open dialog) and the side column by
+/// `delta` points (positive scrolls up).
 fn scroll(harness: &mut Harness<App>, delta: f32) {
     let screen = harness.ctx.content_rect();
     let settings = egui::pos2(screen.center().x + 120.0, screen.max.y - 160.0);
@@ -539,10 +540,10 @@ fn scroll(harness: &mut Harness<App>, delta: f32) {
     harness.run_steps(2);
 }
 
-/// Where `shapes` draw `text`: the text of a whole galley, or, for longer
-/// messages, the part of one that it is, beside marks, numbers and units
-/// rather than other words. Short words only count whole, as they are in
-/// longer ones too.
+/// Finds where `shapes` draw `text`: either an entire galley, or (for strings
+/// of at least 8 characters) a substring bounded only by symbols, numbers, or
+/// units rather than other words. Short words must match a whole galley so
+/// they do not match inside longer messages.
 fn drawn(text: &str, shapes: &[egui::epaint::ClippedShape]) -> Vec<Rect> {
     fn walk(text: &str, shape: &egui::Shape, clip: Rect, found: &mut Vec<Rect>) {
         match shape {
@@ -565,7 +566,7 @@ fn drawn(text: &str, shapes: &[egui::epaint::ClippedShape]) -> Vec<Rect> {
                     let end = start + text.chars().count();
                     let first = galley.pos_from_cursor(egui::text::CCursor::new(start));
                     let last = galley.pos_from_cursor(egui::text::CCursor::new(end));
-                    // on one row, just its part; across rows, all of it
+                    // Single-line substring: use its span; multi-line: use the whole galley.
                     Some(if (first.min.y - last.min.y).abs() < 1.0 {
                         Rect::from_min_max(first.min, last.max)
                     } else {
@@ -590,7 +591,7 @@ fn drawn(text: &str, shapes: &[egui::epaint::ClippedShape]) -> Vec<Rect> {
     found
 }
 
-/// Each text `shapes` draw, with where, as far as it shows.
+/// Returns every visible text galley in `shapes` and its clipped bounding box.
 fn galleys(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
     fn walk(shape: &egui::Shape, clip: Rect, found: &mut Vec<(String, Rect)>) {
         match shape {
@@ -615,7 +616,7 @@ fn galleys(shapes: &[egui::epaint::ClippedShape]) -> Vec<(String, Rect)> {
     found
 }
 
-/// Whether `text` has words in it: three letters in a row.
+/// Returns true if `text` contains at least three consecutive letters.
 fn wordy(text: &str) -> bool {
     let mut run = 0;
     text.chars().any(|c| {

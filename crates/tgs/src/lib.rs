@@ -1,55 +1,57 @@
-//! Turns pixel art animations into Telegram animated stickers (`.tgs`,
-//! gzipped Lottie JSON), in pure Rust, checks `.tgs` files, and previews
-//! its own. The art is decoded from GIF, PNG and APNG, WebP, JPEG, BMP or
-//! Aseprite files, sprite sheets or image sequences ([`frames`]), read on
-//! its own pixel grid ([`normalise()`]), drawn as rectangles in layers,
-//! reduced until it fits Telegram's 64 KiB when that is allowed
-//! ([`reduce`]), packed, and checked against Telegram's limits
-//! ([`check`]). [`make`] does all but the decoding:
+//! Converts pixel art animations into Telegram animated stickers (`.tgs`,
+//! gzipped Lottie JSON) in pure Rust, checks `.tgs` files, and renders
+//! previews of its own output.
+//!
+//! Input art is decoded from GIF, PNG/APNG, WebP, JPEG, BMP, Aseprite files,
+//! sprite sheets, or image sequences ([`frames`]), normalised onto its own
+//! pixel grid ([`normalise()`]), drawn as layered rectangles, reduced until it
+//! fits Telegram's 64 KiB limit when permitted ([`reduce`]), compressed, and
+//! checked against Telegram's limits ([`check`]). [`make`] runs every step
+//! after decoding:
 //!
 //! ```
 //! use tgradish_tgs::frames::{DecodeOptions, Limits, decode};
 //! use tgradish_tgs::{Options, make};
 //!
-//! // a GIF of one black pixel
+//! // A 1x1 black pixel GIF.
 //! let gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
 //! let animation = decode(gif, &DecodeOptions::default(), &Limits::default())?;
 //! let sticker = make(animation, &Options::default(), &mut |_progress| {}, &|| false)?;
 //! assert!(sticker.fits());
-//! // the .tgs file, gzipped
+//! // Gzipped .tgs output.
 //! assert_eq!(sticker.tgs[..2], [0x1f, 0x8b]);
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 //!
-//! [`check`] checks any Lottie against Telegram's limits too, as a `.tgs`
-//! unpacks by [`file::unpack`]. What a sticker shows is drawn for previews
-//! by [`picture`], from the art it is made of or, the same, from the Lottie
-//! of a `.tgs` tgradish wrote.
+//! [`check`] validates any Lottie document against Telegram's limits; unpack a
+//! `.tgs` file first with [`file::unpack`]. [`picture`] renders preview frames
+//! from either the normalised art or the Lottie JSON of a `.tgs` file that
+//! tgradish wrote.
 //!
-//! What decoding may allocate is bounded by [`frames::Limits`], so hostile
-//! files fail rather than exhaust memory. Aseprite files can be read for
-//! their tags and layers first, with [`frames::aseprite::Sprite`].
+//! Decoding memory is bounded by [`frames::Limits`], so hostile inputs fail
+//! instead of exhausting RAM. Aseprite files can be inspected for tags and
+//! layers first with [`frames::aseprite::Sprite`].
 //!
-//! Pure Rust that builds for `wasm32-unknown-unknown`: no ffmpeg,
-//! processes, filesystem or `tgradish-core`. The `threads` feature tries
-//! fitting's candidates, and packs, in threads of their own, except on
-//! wasm; [`make`] says what that means for callers. The `schema` feature
-//! gives JSON Schemas of its options and reports, which are all written in
-//! kebab-case.
+//! This crate is pure Rust and compiles for `wasm32-unknown-unknown`: it has
+//! no ffmpeg, subprocess, filesystem, or `tgradish-core` dependencies. The
+//! `threads` feature runs candidate fitting and compression in parallel
+//! threads (except on wasm); see [`make`] for caller requirements. The
+//! `schema` feature derives JSON Schemas for options and reports (all
+//! serialised in kebab-case).
 //!
-//! The `internals` feature makes the encoder's interior public, for
-//! tgradish's own research tools: it is unstable, and exempt from semver.
+//! The `internals` feature exposes internal encoder modules for tgradish's own
+//! research tools. It is unstable and exempt from semver.
 
 #![warn(missing_docs)]
-// docs.rs says which items need which features
+// Annotate feature-gated items on docs.rs.
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 use std::time::Duration;
 
 use thiserror::Error;
 
-/// Declares a function of the interior: public with the `internals`
-/// feature, the crate's own without it.
+/// Declares an internal function: `pub` with the `internals` feature,
+/// `pub(crate)` without it.
 macro_rules! internal {
     ($(#[$attr:meta])* pub fn $($rest:tt)*) => {
         #[cfg(feature = "internals")]
@@ -64,7 +66,7 @@ pub mod encode;
 pub mod file;
 pub mod frames;
 pub mod limits;
-// tgradish-core's own, and none of the API it promises
+// Internal helper for tgradish-core; not part of the public API.
 #[doc(hidden)]
 pub mod mark;
 pub mod normalise;
@@ -74,7 +76,7 @@ pub mod sticker;
 
 mod grid;
 
-// the interior, with the `internals` feature
+// Internal modules exposed by the `internals` feature.
 #[cfg(feature = "internals")]
 pub mod layout;
 #[cfg(not(feature = "internals"))]
@@ -91,69 +93,70 @@ mod scene;
 pub use normalise::{PixelAnim, normalise};
 pub use sticker::{Options, Progress, Sticker, make};
 
-/// Why a sticker couldn't be made.
+/// Error returned when a sticker cannot be built.
 #[derive(Debug, Clone, PartialEq, Error)]
 #[non_exhaustive]
 pub enum Error {
     /// [`normalise::Options::start`] is at or past the end of the input.
-    #[error("the start ({start:?}) is not before the end of the input ({length:?})")]
+    #[error("start ({start:?}) must be before the end of the input ({length:?})")]
     StartPastEnd {
-        /// Where it was to start.
+        /// Requested start time.
         start: Duration,
-        /// How long the input is.
+        /// Total input duration.
         length: Duration,
     },
     /// [`normalise::Options::length`] is zero.
-    #[error("the length is zero")]
+    #[error("length must be greater than zero")]
     ZeroLength,
-    /// A tempo outside [`normalise::TEMPOS`].
-    #[error("the tempo {0} is not from 0.1 to 10")]
+    /// Tempo is outside [`normalise::TEMPOS`].
+    #[error("tempo {0} must be between 0.1 and 10")]
     Tempo(f64),
-    /// Nothing to see, which is no sticker.
+    /// Every pixel is transparent, in the input or after cropping, squaring or
+    /// snapping.
     #[error("every pixel is transparent")]
     Invisible,
-    /// A crop that reaches outside the input.
+    /// The requested crop extends outside the input bounds or is empty.
     #[error(
-        "the crop {}x{}+{}+{} is not within the {width}×{height} input",
+        "crop {}x{}+{}+{} does not fit within the {width}×{height} input",
         crop.width, crop.height, crop.x, crop.y
     )]
     CropOutside {
-        /// The crop asked for.
+        /// Requested crop rectangle.
         crop: normalise::Rect,
-        /// The input's width.
+        /// Input width in pixels.
         width: u32,
-        /// The input's height.
+        /// Input height in pixels.
         height: u32,
     },
-    /// A pixel scale of 0, given or in [`reduce::Reduction::SnapToGrid`].
-    #[error("the pixel scale must be at least 1")]
+    /// Pixel scale is 0 (in options or [`reduce::Reduction::SnapToGrid`]).
+    #[error("pixel scale must be at least 1")]
     ZeroScale,
-    /// [`reduce::Reduction::Downscale`] by a factor outside its range.
-    #[error("the downscale factor {0} is not between 0 and 1")]
+    /// [`reduce::Reduction::Downscale`] factor is outside `(0, 1)`.
+    #[error("downscale factor {0} must be between 0 and 1")]
     DownscaleFactor(f64),
-    /// [`reduce::Reduction::MergeColours`] by a distance outside its range.
-    #[error("the colour distance {0} is not a number from 0 up")]
+    /// [`reduce::Reduction::MergeColours`] distance is negative or non-finite.
+    #[error("colour distance {0} must be a finite number, 0 or greater")]
     ColourDistance(f64),
-    /// [`reduce::Reduction::MergeFrames`] by a share outside its range.
-    #[error("the share of the picture that may change, {0}, is not from 0 to 1")]
+    /// [`reduce::Reduction::MergeFrames`] share is outside `0..=1`.
+    #[error("share of pixels that may change ({0}) must be between 0 and 1")]
     ChangedShare(f64),
-    /// [`reduce::Reduction::DropFrames`] by a share outside its range.
-    #[error("the share of frames to drop, {0}, is not from 0 to 1")]
+    /// [`reduce::Reduction::DropFrames`] share is outside `0..=1`.
+    #[error("dropped frame share {0} must be between 0 and 1")]
     DroppedShare(f64),
-    /// More colours than a palette index holds.
-    #[error("more than 65535 colours: this is not pixel art")]
+    /// The input has more distinct colours than a `u16` palette can hold.
+    #[error("more than 65535 colours (input is not pixel art)")]
     TooManyColours,
-    /// The encoder couldn't draw the art within Telegram's limits.
+    /// The encoder could not represent the art within Telegram's limits.
     #[error(transparent)]
     Encode(encode::EncodeError),
-    /// [`sticker::Cancelled`] said to stop.
+    /// [`sticker::Cancelled`] requested cancellation.
     #[error("cancelled")]
     Cancelled,
 }
 
 impl From<encode::EncodeError> for Error {
-    /// A stopped encode is a stopped sticker, so callers check for one
-    /// [`Error::Cancelled`] whatever stopped.
+    /// Maps encoder cancellation to [`Error::Cancelled`] so callers only check
+    /// one variant.
     fn from(err: encode::EncodeError) -> Error {
         match err {
             encode::EncodeError::Cancelled => Error::Cancelled,
@@ -162,5 +165,5 @@ impl From<encode::EncodeError> for Error {
     }
 }
 
-/// What this crate's functions return.
+/// Result type for this crate.
 pub type Result<T> = std::result::Result<T, Error>;

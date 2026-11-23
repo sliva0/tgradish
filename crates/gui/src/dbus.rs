@@ -1,14 +1,15 @@
-//! libdbus, loaded when it is needed, as the file dialogs load it too, so
-//! tgradish starts without it: the session bus, for the desktop portal's
-//! accent colour and for the file manager.
+//! Dynamically loaded `libdbus-1.so.3` bindings for querying the desktop
+//! portal accent colour and revealing files via `org.freedesktop.FileManager1`.
+//! Loaded on demand (like file dialogs) so `tgradish` starts even when
+//! `libdbus` is not installed.
 
 use std::ffi::{CStr, c_char, c_int, c_void};
 
 pub(crate) type Connection = c_void;
 pub(crate) type Message = c_void;
 
-/// libdbus's DBusError and DBusMessageIter, which callers allocate: opaque
-/// here, and larger than libdbus's own on any machine, as aligned.
+/// Opaque caller-allocated buffers for `DBusError` and `DBusMessageIter`,
+/// sized and 8-byte aligned to exceed `libdbus`'s struct sizes on all targets.
 #[repr(C)]
 pub(crate) struct Error(pub(crate) [u64; 8]);
 

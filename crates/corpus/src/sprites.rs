@@ -1,4 +1,4 @@
-//! The sprites, each drawn for a case real pixel art has.
+//! Procedural pixel-art sprites covering common real-world cases.
 
 use std::f32::consts::TAU;
 
@@ -25,8 +25,7 @@ const SLIME: Colour = [90, 200, 110, 255];
 const SLIME_SHADE: Colour = [50, 150, 80, 255];
 const SLIME_LIGHT: Colour = [180, 240, 170, 255];
 
-/// A person walking in place, 32 by 32, at `phase` of a step cycle from 0
-/// to 1, with an outline.
+/// Draws an outlined 32x32 walking figure at `phase` (0.0 to 1.0).
 pub fn person(phase: f32, blink: bool, shirt: (Colour, Colour)) -> Canvas {
     let mut canvas = Canvas::new(32, 32);
     figure(&mut canvas, (0, 0), (phase, blink, shirt), None);
@@ -34,10 +33,10 @@ pub fn person(phase: f32, blink: bool, shirt: (Colour, Colour)) -> Canvas {
     canvas
 }
 
-/// Draws a person, 32 by 32 from `at`, with no outline: at `phase` of a
-/// step cycle from 0 to 1, and with `wave`, its arm on the right raised and
-/// waving at that point of a cycle from 0 to 1, its hand up to 10 pixels
-/// above the 32.
+/// Draws an un-outlined 32x32 figure with origin `(x0, y0)`.
+/// `phase` (0.0 to 1.0) controls the walk cycle. When `wave` is `Some`, the
+/// right arm is raised and waves through a 0.0 to 1.0 cycle, reaching up to
+/// 10 pixels above `y0`.
 fn figure(
     canvas: &mut Canvas,
     (x0, y0): (i32, i32),
@@ -93,14 +92,13 @@ fn figure(
     }
 }
 
-/// Eight steps of a walk, 100 ms each, blinking once.
+/// 8-frame walk cycle at 100 ms per frame, with one blink.
 pub fn walker() -> (Vec<Canvas>, Vec<u32>) {
     let frames = (0..8).map(|i| person(i as f32 / 8.0, i == 5, (SHIRT, SHIRT_SHADE))).collect();
     (frames, vec![100; 8])
 }
 
-/// A hammer swung down onto stone, 104 by 69 art pixels, with sparks where
-/// it lands.
+/// 104x69 hammer swinging down onto stone, with sparks on impact.
 pub fn hammer() -> (Vec<Canvas>, Vec<u32>) {
     let angles: [f32; 7] = [-110.0, -75.0, -40.0, -5.0, 30.0, 55.0, 55.0];
     let frames = angles
@@ -142,7 +140,7 @@ pub fn hammer() -> (Vec<Canvas>, Vec<u32>) {
     (frames, vec![80, 80, 80, 80, 80, 80, 100])
 }
 
-/// A slime squashing and stretching, 30 by 24.
+/// 30x24 squashing and stretching slime.
 pub fn slime() -> (Vec<Canvas>, Vec<u32>) {
     let frames = (0..6)
         .map(|i| {
@@ -163,8 +161,8 @@ pub fn slime() -> (Vec<Canvas>, Vec<u32>) {
     (frames, vec![120; 6])
 }
 
-/// The slime at twice the size, with a few pixels per frame off the grid
-/// of 2, as art scaled up and touched up by hand.
+/// 2x-scaled slime with four off-grid pixels per frame, simulating hand
+/// touch-ups.
 pub fn slime_jittered() -> (Vec<Canvas>, Vec<u32>) {
     let (frames, delays) = slime();
     let mut random = Random::new(7);
@@ -175,7 +173,7 @@ pub fn slime_jittered() -> (Vec<Canvas>, Vec<u32>) {
             let mut touched = 0;
             while touched < 4 {
                 let (x, y) = (random.below(big.width) as i32, random.below(big.height) as i32);
-                // one pixel, alone in its block, inside the slime
+                // Place one off-grid highlight pixel inside the slime body.
                 if x % 2 == 1 && big.get(x, y) == SLIME {
                     big.set(x, y, SLIME_LIGHT);
                     touched += 1;
@@ -187,8 +185,7 @@ pub fn slime_jittered() -> (Vec<Canvas>, Vec<u32>) {
     (frames, delays)
 }
 
-/// A king bowing and rising, 44 by 83, over almost 10 seconds: facing
-/// right in a long robe, a hand on his chest, bending at the waist.
+/// 44x83 bowing king animation lasting 9.85 s (43 frames).
 pub fn bow() -> (Vec<Canvas>, Vec<u32>) {
     const ROBE: Colour = [196, 60, 84, 255];
     const ROBE_SHADE: Colour = [150, 40, 60, 255];
@@ -255,7 +252,7 @@ pub fn bow() -> (Vec<Canvas>, Vec<u32>) {
     (frames, delays)
 }
 
-/// A glowing orb, 48 by 48, its halo partly transparent and pulsing.
+/// 48x48 glowing orb with a pulsing semi-transparent halo.
 pub fn glow() -> (Vec<Canvas>, Vec<u32>) {
     let frames = (0..5)
         .map(|i| {
@@ -273,8 +270,8 @@ pub fn glow() -> (Vec<Canvas>, Vec<u32>) {
     (frames, vec![170; 5])
 }
 
-/// A dancer with sparkles and lit floor tiles, 40 by 42, changing a lot
-/// from frame to frame.
+/// 40x42 dancer with sparkles and flashing floor tiles (high frame-to-frame
+/// change).
 pub fn dance() -> (Vec<Canvas>, Vec<u32>) {
     let tiles: [Colour; 4] =
         [[230, 80, 160, 255], [80, 200, 230, 255], [250, 210, 80, 255], [140, 90, 220, 255]];
@@ -305,8 +302,7 @@ pub fn dance() -> (Vec<Canvas>, Vec<u32>) {
     (frames, vec![60; 46])
 }
 
-/// A sunrise over hills in a dithered sky, 64 by 48: bands of colour mixed
-/// in a 4 by 4 Bayer pattern.
+/// 64x48 sunrise with a 4x4 Bayer-dithered sky.
 pub fn sunrise() -> (Vec<Canvas>, Vec<u32>) {
     const BAYER: [[u32; 4]; 4] = [[0, 8, 2, 10], [12, 4, 14, 6], [3, 11, 1, 9], [15, 7, 13, 5]];
     let sky: [Colour; 5] = [
@@ -339,8 +335,7 @@ pub fn sunrise() -> (Vec<Canvas>, Vec<u32>) {
     (frames, vec![100; 12])
 }
 
-/// A waterfall by palette cycling, 40 by 48: the shape stays, its four
-/// blues move down it.
+/// 40x48 waterfall using palette cycling across four shades of blue.
 pub fn waterfall() -> (Vec<Canvas>, Vec<u32>) {
     let water: [Colour; 4] =
         [[40, 90, 200, 255], [70, 140, 230, 255], [140, 200, 250, 255], [230, 245, 255, 255]];
@@ -363,7 +358,7 @@ pub fn waterfall() -> (Vec<Canvas>, Vec<u32>) {
     (frames, vec![80; 8])
 }
 
-/// A ball bouncing, 32 by 32, its shadow partly transparent.
+/// 32x32 bouncing ball with a semi-transparent shadow.
 pub fn bounce() -> (Vec<Canvas>, Vec<u32>) {
     let frames = (0..10)
         .map(|i| {
@@ -381,8 +376,7 @@ pub fn bounce() -> (Vec<Canvas>, Vec<u32>) {
     (frames, vec![50; 10])
 }
 
-/// Four steps, 27 by 31, the second and fourth the same: the frames of an
-/// image sequence.
+/// 4-frame 27x31 walk sequence where frames 2 and 4 are identical.
 pub fn steps() -> Vec<Canvas> {
     [0.0, 0.25, 0.5, 0.25]
         .iter()
@@ -392,8 +386,7 @@ pub fn steps() -> Vec<Canvas> {
         .collect()
 }
 
-/// Eight frames of a wave, 28 by 42: another image sequence, of another
-/// size.
+/// 8-frame 28x42 waving sequence.
 pub fn wave() -> Vec<Canvas> {
     (0..8)
         .map(|i| {

@@ -1,5 +1,5 @@
-//! Reading what a WebM holds: its streams, its metadata and tgradish's
-//! signature.
+//! Parses WebM container metadata, stream properties, frame counts and
+//! tgradish signatures.
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -10,71 +10,71 @@ use super::ebml::{self, Element, ids};
 use super::{DEFAULT_TIMESTAMP_SCALE, EbmlError, Result, SIGNATURE_PREFIX, WebmError};
 use crate::art::read_failed;
 
-/// A WebM's video track, as its `TrackEntry` says.
+/// Video track metadata parsed from a WebM `TrackEntry`.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct VideoTrack {
-    /// Its `TrackNumber`, which its blocks name it by.
+    /// Matroska `TrackNumber` referenced by block headers.
     pub number: u64,
-    /// Its Matroska codec ID, as `V_VP9`.
+    /// Matroska `CodecID` (e.g. `V_VP9`).
     pub codec_id: String,
-    /// Its `PixelWidth`.
+    /// Video `PixelWidth`.
     pub width: u64,
-    /// Its `PixelHeight`.
+    /// Video `PixelHeight`.
     pub height: u64,
-    /// Whether its `AlphaMode` says it has transparency.
+    /// True if `AlphaMode` is non-zero.
     pub alpha: bool,
-    /// Frame duration declared by the track, in nanoseconds.
+    /// Declared frame duration in nanoseconds (`DefaultDuration`).
     pub default_duration_ns: Option<u64>,
-    /// The track's UID. Left out of what `inspect` prints.
+    /// Track UID (omitted from `inspect` JSON output).
     #[serde(skip)]
     pub uid: Option<u64>,
 }
 
-/// What a WebM's container says of it, as [`inspect`] reads it.
+/// Container metadata and stream summary returned by [`inspect`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct WebmInfo {
-    /// The EBML header's `DocType`: `webm` or `matroska`.
+    /// EBML header `DocType` (`webm` or `matroska`).
     pub doc_type: String,
-    /// Its size in bytes.
+    /// Total file size in bytes.
     pub file_size: u64,
-    /// Nanoseconds a timestamp unit stands for.
+    /// Nanoseconds per timestamp unit (`TimestampScale`).
     pub timestamp_scale_ns: u64,
-    /// Duration from the Segment Info header, in seconds. This is the value
-    /// that duration spoofing changes.
+    /// Duration declared in Segment `Info`, in seconds (modified by spoofing).
     pub header_duration: Option<f64>,
-    /// Duration of the video frames, in seconds, measured from block
-    /// timestamps.
+    /// Actual video duration in seconds measured from block timestamps.
     pub content_duration: Option<f64>,
-    /// The Info header's `Title`.
+    /// Segment `Info` `Title`.
     pub title: Option<String>,
-    /// The Info header's `MuxingApp`.
+    /// Segment `Info` `MuxingApp`.
     pub muxing_app: Option<String>,
-    /// The Info header's `WritingApp`.
+    /// Segment `Info` `WritingApp`.
     pub writing_app: Option<String>,
-    /// Values of `DURATION` tags, which ffmpeg writes for each track.
+    /// `DURATION` tag values written per track by ffmpeg.
     pub duration_tags: Vec<String>,
-    /// tgradish signature found in padding, see [`Patch::signature`](super::Patch::signature).
+    /// tgradish signature found in `Void` padding (see
+    /// [`Patch::signature`](super::Patch::signature)).
     pub signature: Option<String>,
-    /// The first video track.
+    /// First video track, if present.
     pub video: Option<VideoTrack>,
-    /// Frames of the video track, counted in its blocks.
+    /// Number of video frames counted across cluster blocks.
     pub video_frames: u64,
-    /// How many audio tracks it has.
+    /// Number of audio tracks.
     pub audio_tracks: u32,
-    /// How many tracks it has that are neither video nor audio.
+    /// Number of non-video, non-audio tracks.
     pub other_tracks: u32,
-    /// Some element claimed to be longer than the file.
+    /// True if any element declared a size extending past the end of the file.
     pub truncated: bool,
 }
 
 impl WebmInfo {
-    /// Whether the header says it is shorter than its frames last, as
-    /// spoofing makes it. Unspoofed, the two differ by less than a frame,
-    /// as the header is rounded and the last frame's length guessed.
+    /// Returns true if the header duration is more than 50 ms shorter than the
+    /// content duration, as spoofing makes it. Unspoofed, the two differ by
+    /// less than a frame (the header is rounded and the last frame's length
+    /// estimated).
     pub fn spoofed(&self) -> bool {
         matches!(
             (self.header_duration, self.content_duration),
@@ -82,8 +82,9 @@ impl WebmInfo {
         )
     }
 
-    /// What it would be: emoji are the only video stickers of their box's
-    /// size, square 100 px.
+    /// Infers [`Target::Emoji`](crate::telegram::Target::Emoji) for 100x100
+    /// video tracks and [`Target::Sticker`](crate::telegram::Target::Sticker)
+    /// otherwise.
     pub fn target(&self) -> crate::telegram::Target {
         use crate::telegram::Target;
         let (width, height) = Target::Emoji.box_size();
@@ -94,8 +95,8 @@ impl WebmInfo {
         }
     }
 
-    /// Its frame rate: from the video track's frame duration, or else
-    /// its frames over how long they last.
+    /// Returns the video frame rate from `DefaultDuration`, or falls back to
+    /// `video_frames / content_duration`.
     pub fn fps(&self) -> Option<f64> {
         if let Some(ns) = self.video.as_ref().and_then(|v| v.default_duration_ns)
             && ns > 0
@@ -471,12 +472,12 @@ pub fn inspect(buf: &[u8]) -> Result<WebmInfo> {
 /// How a WebM file starts: the EBML header's ID.
 const EBML_MAGIC: [u8; 4] = [0x1A, 0x45, 0xDF, 0xA3];
 
-/// The largest file [`inspect_file`] reads, in bytes: far more than any
-/// sticker, so a video it is pointed at isn't read into memory whole.
+/// Maximum file size read by [`inspect_file`] (256 MiB) so accidentally
+/// inspecting a multi-gigabyte video does not exhaust memory.
 pub const MAX_INSPECTED_BYTES: u64 = 256 << 20;
 
-/// [`inspect`] of the file at `path`, which is read only if it starts as
-/// WebM does and has at most [`MAX_INSPECTED_BYTES`].
+/// Inspects the WebM file at `path` (verifying its EBML magic header and
+/// enforcing [`MAX_INSPECTED_BYTES`]).
 pub fn inspect_file(path: &Path) -> crate::Result<WebmInfo> {
     starts_as_webm(path)?;
     let bytes = crate::fsutil::read_at_most(path, MAX_INSPECTED_BYTES)

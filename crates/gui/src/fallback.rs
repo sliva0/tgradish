@@ -1,12 +1,12 @@
-//! The system's fonts, for characters tgradish's own fonts lack: CJK,
-//! Arabic, Hebrew, Thai, Indic and other scripts in file names. A font is
-//! looked for when such a character first shows up, read on another
-//! thread, and added behind tgradish's own, so nothing is loaded for
-//! names that don't need it.
+//! On-demand system font fallback for scripts not covered by tgradish's
+//! bundled fonts (CJK, Arabic, Hebrew, Thai, Indic, etc. in filenames).
 //!
-//! Linux asks fontconfig for a font with the character; Windows and macOS
-//! try the fonts they come with. Colour emoji fonts are bitmaps egui can't
-//! draw, so emoji are only shown where a font has them as outlines.
+//! When an uncovered character first appears, a background thread searches
+//! system fonts (via `fc-match` on Linux or standard system font paths on
+//! Windows and macOS) and appends any matching font behind tgradish's bundled
+//! fonts, avoiding startup overhead when filenames only use covered scripts.
+//! Colour bitmap emoji fonts are skipped because egui only renders outline
+//! glyphs.
 
 use std::collections::HashSet;
 use std::path::PathBuf;

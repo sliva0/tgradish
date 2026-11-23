@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
-  <!-- build.rs writes Cargo.toml's version in place of the noughts -->
+  <!-- build.rs replaces 0.0.0.0 with the version from Cargo.toml. -->
   <assemblyIdentity type="win32" name="tgradish" version="0.0.0.0"/>
   <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
     <application>
@@ -10,7 +10,7 @@
   </compatibility>
   <dependency>
     <dependentAssembly>
-      <!-- themed file dialogues -->
+      <!-- Enable modern themed Windows file dialogues. -->
       <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0"
         processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
     </dependentAssembly>
@@ -19,8 +19,8 @@
     <windowsSettings>
       <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">PerMonitorV2</dpiAwareness>
       <longPathAware xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">true</longPathAware>
-      <!-- no console of its own when started from Explorer (Windows 11
-           24H2 and later); in a terminal it still prints there -->
+      <!-- Do not open a console window when launched from Explorer (Windows 11 24H2+).
+           Output still goes to the terminal when launched from one. -->
       <consoleAllocationPolicy xmlns="http://schemas.microsoft.com/SMI/2024/WindowsSettings">detached</consoleAllocationPolicy>
     </windowsSettings>
   </application>

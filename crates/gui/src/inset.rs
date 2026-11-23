@@ -1,7 +1,6 @@
-//! The small picture of what the result will look like, beside the input
-//! or over its corner: where it goes, its label and the buttons on it,
-//! dragging it to another corner, and easing it into place as it moves.
-//! What it shows is predicted in [`crate::predict`].
+//! Live result preview inset shown beside or over a corner of the input
+//! preview: layout, label and size buttons, corner dragging, and transition
+//! easing. The preview image itself is rendered by [`crate::predict`].
 
 use crate::config::Corner;
 use eframe::egui::{self, Color32, CursorIcon, Pos2, Rect, Sense, Stroke, Vec2, pos2, vec2};

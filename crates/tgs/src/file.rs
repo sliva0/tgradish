@@ -1,29 +1,29 @@
-//! `.tgs` files: gzipped Lottie JSON.
+//! `.tgs` container: gzipped Lottie JSON.
 
 use std::io::Read;
 use std::num::NonZeroU64;
 
 use thiserror::Error;
 
-/// Lottie JSON larger than this is refused when reading: Telegram's gzip
-/// unpacker allows 5 MiB, so nothing larger works anywhere.
+/// Maximum unpacked Lottie JSON size. Telegram's gzip unpacker stops at 5 MiB
+/// unpacked, so nothing larger works anywhere.
 pub const MAX_UNPACKED: usize = 5 * 1024 * 1024;
 
-/// Why a `.tgs` couldn't be unpacked.
+/// Error returned when a `.tgs` file cannot be unpacked.
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 #[non_exhaustive]
 pub enum ReadError {
-    /// It isn't gzip, as flate2 says.
-    #[error("not gzip data: {0}")]
+    /// Invalid gzip stream reported by `flate2`.
+    #[error("invalid gzip data: {0}")]
     Gzip(String),
-    /// It unpacks to more than [`MAX_UNPACKED`].
-    #[error("unpacks to more than {} MiB", MAX_UNPACKED >> 20)]
+    /// Unpacked JSON exceeds [`MAX_UNPACKED`].
+    #[error("unpacked JSON exceeds {} MiB", MAX_UNPACKED >> 20)]
     TooLarge,
 }
 
 internal! {
-/// Gzip with zopfli, which beats `gzip -9` by 8-15% on stickers.
-/// `iterations` trades time for size: 15 is zopfli's default.
+/// Compresses `json` with zopfli, which beats `gzip -9` by 8–15% on stickers.
+/// `iterations` trades speed for smaller output (15 is zopfli's default).
 pub fn pack(json: &[u8], iterations: u64) -> Vec<u8> {
     let options = zopfli::Options {
         iteration_count: NonZeroU64::new(iterations.max(1)).unwrap(),
@@ -37,8 +37,8 @@ pub fn pack(json: &[u8], iterations: u64) -> Vec<u8> {
 }
 
 internal! {
-/// `json` as a `.tgs` packed by `gzip -9`: much quicker than [`pack`],
-/// and a little larger.
+/// Compresses `json` with `gzip -9`. Much faster than [`pack`] and slightly
+/// larger.
 pub fn pack_quick(json: &[u8]) -> Vec<u8> {
     use std::io::Write;
     let mut encoder = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::best());
@@ -47,16 +47,15 @@ pub fn pack_quick(json: &[u8]) -> Vec<u8> {
 }
 }
 
-/// About how large `json` packs: its `gzip -9` size, much quicker than
-/// [`pack`], and close enough to how zopfli ranks candidates to compare
-/// them by; how much smaller zopfli packs varies with the art (see
-/// [`crate::sticker`]).
+/// Estimates the compressed size of `json` using `gzip -9`. Much faster than
+/// [`pack`] and close enough to zopfli's ordering for comparing candidates;
+/// the exact zopfli saving varies with the art (see [`crate::sticker`]).
 #[cfg(feature = "internals")]
 pub fn quick_size(json: &[u8]) -> usize {
     pack_quick(json).len()
 }
 
-/// The Lottie JSON in a `.tgs`.
+/// Unpacks the Lottie JSON from a gzipped `.tgs` buffer.
 pub fn unpack(tgs: &[u8]) -> Result<Vec<u8>, ReadError> {
     let mut json = Vec::new();
     flate2::read::GzDecoder::new(tgs)

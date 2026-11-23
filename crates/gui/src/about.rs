@@ -1,6 +1,6 @@
-//! The About dialog: tgradish's version, and the notices of what it is
-//! built from, whose licences ask for them to go with every copy. The CLI
-//! prints the same notices, so `notices` is public.
+//! About dialog: tgradish's version and the third-party notices whose
+//! licences require them in every copy. [`notices`] is public because
+//! `tgradish licenses` prints the same list.
 
 use eframe::egui::{self, RichText, vec2};
 
@@ -9,29 +9,30 @@ use tgradish_core::licenses::{Kind, Notice};
 use crate::l10n::fl;
 use crate::{icon, widgets};
 
-/// Where feedback goes: the author's Telegram, which opens in its app
-/// where it is installed, as [`crate::system::browse`] opens it.
+/// The author's Telegram, for feedback; opens in the Telegram app where
+/// installed (see [`crate::system::browse`]).
 pub(crate) const FEEDBACK: &str = "https://t.me/s0untitled?direct";
 
-/// How wide About's content is, whatever the language: what is longer
+/// Target content width of the About dialog across all languages; longer text
 /// wraps.
 pub(crate) const WIDTH: f32 = 600.0;
 
-/// The height of what is around the notices in About, but for what is
-/// said over them, measured as it wraps taller where About is narrower:
-/// its title, its button, its margins and the room kept around it in the
-/// window; and the least and the most the notices are given.
+/// Fixed vertical chrome around the notice list (title, button, margins and
+/// the room kept around the dialog; excluding the dynamic header height, which
+/// wraps taller in narrow windows), plus minimum and maximum scroll-area
+/// heights for the notices.
 const CHROME: f32 = 154.0;
 const LEAST_ROOM: f32 = 80.0;
 const MOST_ROOM: f32 = 360.0;
 
-/// tgradish's version and the licences of what it is made of.
+/// Renders the About dialog body (version, links, and collapsible licence
+/// notices).
 pub(crate) fn about(ui: &mut egui::Ui) {
     ui.horizontal(|ui| {
         icon::show(ui, 96.0);
         ui.vertical(|ui| {
             ui.label(RichText::new(format!("tgradish {}", env!("CARGO_PKG_VERSION"))).heading());
-            // wrapped: on one line, a longer summary would widen About
+            // Wrap so a long translated summary does not widen the dialog.
             ui.horizontal_wrapped(|ui| {
                 ui.label(fl!("about-summary"));
                 widgets::link(ui, fl!("source-code"), tgradish_core::REPOSITORY);
@@ -42,7 +43,7 @@ pub(crate) fn about(ui: &mut egui::Ui) {
     ui.add_space(6.0);
     widgets::note(ui, fl!("about-notices"));
     ui.add_space(4.0);
-    // as tall as About fits the window, short of the most
+    // Size the notice scroll area to fit the window, clamped to LEAST_ROOM..=MOST_ROOM.
     let chrome = CHROME + ui.min_rect().height();
     let room = (ui.ctx().content_rect().height() - chrome).clamp(LEAST_ROOM, MOST_ROOM);
     let area = egui::ScrollArea::vertical().auto_shrink([false, false]).max_height(room);
@@ -69,7 +70,7 @@ pub(crate) fn about(ui: &mut egui::Ui) {
                         ),
                     );
                 }
-                // the crates' list is long: a section for each licence
+                // Split the third-party crate list into one sub-header per licence.
                 let rule = format!("\n{}\n", "-".repeat(80));
                 let blocks: Vec<&str> = notice.text.split(rule.as_str()).collect();
                 if blocks.len() > 1 {
@@ -101,9 +102,9 @@ pub(crate) fn about(ui: &mut egui::Ui) {
     });
 }
 
-/// A notice's title, wrapped within the room `ui` has beside the fold's
-/// arrow: egui keeps a fold's title on one line, which would widen About
-/// in a narrow window.
+/// Wraps a [`egui::CollapsingHeader`] title to the available width beside the
+/// fold arrow (egui otherwise keeps header titles on a single line, widening
+/// the dialog in narrow windows).
 fn wrapped(ui: &egui::Ui, title: String) -> std::sync::Arc<egui::Galley> {
     let room = ui.available_width() - ui.spacing().indent - ui.spacing().button_padding.x;
     egui::WidgetText::from(title).into_galley(
@@ -114,9 +115,10 @@ fn wrapped(ui: &egui::Ui, title: String) -> std::sync::Arc<egui::Galley> {
     )
 }
 
-/// The licence notices of this build: tgradish's, its fonts', and those
-/// [`tgradish_core::licenses`] has. Their titles are in English, as the
-/// command line prints them; About words them in the GUI's language.
+/// Returns all licence notices for this build: tgradish's own licence, its
+/// bundled GUI font licences, and those from [`tgradish_core::licenses`].
+/// [`Notice::title`] returns English titles for the CLI; the GUI localises
+/// them via `title`.
 pub fn notices() -> Vec<Notice> {
     let fonts = [
         (
@@ -133,7 +135,7 @@ pub fn notices() -> Vec<Notice> {
         ),
     ];
     let mut notices = tgradish_core::licenses::notices();
-    // before the long list of crates
+    // Insert font notices right before the long Rust crate list.
     let at = notices.iter().position(|notice| notice.kind == Kind::Crates).unwrap_or(notices.len());
     for (offset, (kind, text)) in fonts.into_iter().enumerate() {
         notices.insert(at + offset, Notice::new(kind, text));
@@ -141,7 +143,8 @@ pub fn notices() -> Vec<Notice> {
     notices
 }
 
-/// A notice's title in the GUI's language, the names in it as they are.
+/// Formats a notice [`Kind`] in the current GUI language, keeping the names in
+/// it as they are.
 pub(crate) fn title(kind: Kind) -> String {
     match kind {
         Kind::Tgradish => "tgradish".to_owned(),
@@ -154,14 +157,13 @@ pub(crate) fn title(kind: Kind) -> String {
         Kind::Sources { of } => fl!("notice-sources", name = of),
         Kind::Crates => fl!("notice-crates"),
         Kind::Font { name, subsets } => fl!("notice-font", name = name, subsets = subsets),
-        // a kind core has gained since, in English until the GUI words it
+        // Fall back to English for any future Kind variant added in core.
         _ => kind.to_string(),
     }
 }
 
-/// A licence's section named after the crates it covers, as many as
-/// read at a glance: the crates are the lines after the first of `head`,
-/// each a name and a version.
+/// Formats a crate-licence section header listing up to three crate names from
+/// `head` (lines after the first are `"  <crate> <version>"`).
 fn licence_title(licence: &str, head: &str) -> String {
     let crates: Vec<&str> =
         head.lines().skip(1).filter_map(|line| line.split_whitespace().next()).collect();
@@ -178,12 +180,12 @@ fn licence_title(licence: &str, head: &str) -> String {
     }
 }
 
-/// `text` small and monospaced, as licences are, its web addresses links.
+/// Renders licence `text` in small monospace with clickable HTTP(S) links.
 fn text_with_links(ui: &mut egui::Ui, text: &str) {
     let mono = |text: &str| RichText::new(text).monospace().size(11.5);
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        // lines without addresses together, as one label
+        // Batch consecutive plain-text lines into a single label.
         let mut plain = String::new();
         for line in text.lines() {
             let parts = links(line);
@@ -212,7 +214,7 @@ fn text_with_links(ui: &mut egui::Ui, text: &str) {
     });
 }
 
-/// `line` in parts, each a web address or not.
+/// Splits `line` into `(is_url, substring)` segments.
 fn links(line: &str) -> Vec<(bool, &str)> {
     let mut parts = Vec::new();
     let mut rest = line;
@@ -221,7 +223,7 @@ fn links(line: &str) -> Vec<(bool, &str)> {
         let length = rest[at..]
             .find(|c: char| c.is_whitespace() || "<>\"'()[]".contains(c))
             .unwrap_or(rest.len() - at);
-        // punctuation after it is the sentence's
+        // Strip trailing sentence punctuation from the URL.
         let address = rest[at..at + length].trim_end_matches(['.', ',', ';', ':']);
         if at > 0 {
             parts.push((false, &rest[..at]));

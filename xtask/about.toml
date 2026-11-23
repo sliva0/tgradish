@@ -1,6 +1,6 @@
-# Licences of the crates in release binaries, which `cargo xtask licenses`
-# lists with `cargo about`. Of a crate's choices, the first one accepted
-# here is used.
+# Licences accepted for crates bundled in release binaries
+# (`cargo xtask licenses` via `cargo about`). For dual-licensed crates,
+# the first matching entry is chosen.
 accepted = [
     "MIT",
     "Apache-2.0",
@@ -13,7 +13,7 @@ accepted = [
     "BSL-1.0",
     "Unicode-3.0",
     "MPL-2.0",
-    # ffmpeg-next, with ffmpeg linked in
+    # Used by ffmpeg-next when ffmpeg is linked in.
     "WTFPL",
 ]
 targets = [

@@ -1,6 +1,6 @@
-//! Encoders: a [normalised animation](crate::PixelAnim) in, a scene of paint
-//! groups out. Only how hard they work and how they fail are public
-//! without the `internals` feature.
+//! Encoders converting a [normalised animation](crate::PixelAnim) into a scene
+//! of paint groups. Without the `internals` feature, only [`Effort`] and
+//! [`EncodeError`] are public.
 
 mod cover;
 mod mask;
@@ -20,10 +20,9 @@ use crate::normalise::PixelAnim;
 #[cfg(any(test, feature = "internals"))]
 use crate::scene::{Group, Layer, Scene, Shape};
 
-/// The simplest correct encoding, a baseline for tests and benchmarks:
-/// every frame is its own layer, with one group per colour made of the
-/// colour's horizontal runs. It breaks the seam invariant wherever two
-/// colours meet.
+/// Simple baseline encoder for tests and benchmarks: emits one layer per frame
+/// and one group per colour using horizontal pixel runs. Does not maintain the
+/// seam invariant between adjacent colours.
 #[cfg(any(test, feature = "internals"))]
 pub fn runs(anim: &PixelAnim) -> Scene {
     let width = anim.width();

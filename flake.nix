@@ -13,8 +13,8 @@
       flake-utils,
     }:
     {
-      # built with the Rust and ffmpeg of the nixpkgs it is added to,
-      # overlays on them included
+      # Builds tgradish with the caller's nixpkgs Rust and ffmpeg (including
+      # overlays).
       overlays.default = final: prev: {
         tgradish = final.callPackage ./packaging/nix/package.nix { };
       };
@@ -37,10 +37,10 @@
           inherit (pkgs) tgradish;
         };
 
-        # cargo, clippy and rustfmt from nixpkgs, ffmpeg's libraries for
-        # `--features linked`, what `cargo xtask ffmpeg` builds with, and
-        # cmake for tgs-lab's rlottie. Not cargo-about: `cargo xtask
-        # licenses` takes 0.9.2 alone, and nixpkgs has another
+        # Provides cargo, clippy and rustfmt from nixpkgs, ffmpeg dev libraries
+        # for `--features linked`, build tools for `cargo xtask ffmpeg`, and
+        # cmake for tgs-lab's rlottie. Omits cargo-about because
+        # `cargo xtask licenses` requires exact version 0.9.2.
         devShells.default = pkgs.mkShell {
           inputsFrom = [ pkgs.tgradish ];
           packages = with pkgs; [

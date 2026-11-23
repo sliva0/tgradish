@@ -5,23 +5,23 @@ use console::style;
 use tgradish_core::telegram::{Issue, Severity, Target};
 use tgradish_core::webm::{Params, Rate};
 
-/// A line like cargo's: `verb`, coloured and right-aligned in 12 columns,
-/// then `text`.
+/// Formats a cargo-style status line: `verb` right-aligned in 12 columns and
+/// coloured green, followed by `text`.
 pub fn status(verb: &str, text: impl std::fmt::Display) -> String {
     format!("{} {text}", style(format!("{verb:>12}")).green().bold())
 }
 
-/// [`status`] for something that went wrong without stopping everything.
+/// Like [`status`], coloured red for a non-fatal failure.
 pub fn status_bad(verb: &str, text: impl std::fmt::Display) -> String {
     format!("{} {text}", style(format!("{verb:>12}")).red().bold())
 }
 
-/// A line of `key: value` facts, the key coloured.
+/// Formats an aligned `key  value` line with a coloured key.
 pub fn field(key: &str, value: impl std::fmt::Display) -> String {
     format!("  {} {value}", style(format!("{key:<11}")).cyan())
 }
 
-/// Help in cargo's colours.
+/// Clap help styles matching cargo's colour scheme.
 pub const fn help_styles() -> clap::builder::Styles {
     use clap::builder::styling::AnsiColor;
     clap::builder::Styles::styled()
@@ -34,14 +34,15 @@ pub const fn help_styles() -> clap::builder::Styles {
         .invalid(AnsiColor::Yellow.on_default().bold())
 }
 
-/// Details, weaker than what they explain.
+/// Dims secondary detail text.
 pub fn dim(text: impl std::fmt::Display) -> String {
     style(text).dim().to_string()
 }
 
-/// What `tgradish` alone prints: a note on the GUI above the help, which
-/// goes to stdout unless `to_stderr`, as where it stands in for the GUI,
-/// which couldn't start.
+/// Prints the GUI notice banner and top-level CLI help.
+///
+/// Writes help to stderr when `to_stderr` is true (for example when launched
+/// without a display).
 pub fn introduce(to_stderr: bool) {
     use clap::CommandFactory;
     if cfg!(feature = "gui") {
@@ -57,7 +58,7 @@ pub fn introduce(to_stderr: bool) {
         );
         eprintln!(
             "  {}",
-            style("It also opens when tgradish starts from a file manager or a menu.").cyan()
+            style("It also opens when tgradish starts from a file manager or menu.").cyan()
         );
         eprintln!("{}", style(&line).cyan());
         eprintln!();
@@ -74,9 +75,8 @@ pub fn introduce(to_stderr: bool) {
     }
 }
 
-/// `message` about the file at `path`, put after its name, linked: once,
-/// where the message starts with the name already, as "nope.mp4: no such
-/// file" and "a.gif isn't a WebM file" do.
+/// Prefixes `message` with a clickable link to `path`, avoiding duplication if
+/// `message` already starts with `path`.
 pub fn about(path: &std::path::Path, message: &str) -> String {
     let name = path.display().to_string();
     let link = crate::term::link(&name, path);
@@ -86,16 +86,16 @@ pub fn about(path: &std::path::Path, message: &str) -> String {
     }
 }
 
-/// What `tgradish gui` says where a GUI ran already and took the `files`
-/// it was given, of which `first` is the first, named as given.
+/// Formats the message printed when `tgradish gui` hands files to an already
+/// running GUI window.
 #[cfg_attr(not(feature = "gui"), allow(dead_code))]
 pub fn handed_over(files: usize, first: Option<&std::path::Path>) -> String {
     let what = match (files, first) {
-        (0, _) => "brought it to the front".to_owned(),
+        (0, _) => "brought window to the front".to_owned(),
         (1, Some(file)) => format!("added {} to it", crate::term::link(file.display(), file)),
         (files, _) => format!("added {} to it", count(files, "file")),
     };
-    format!("tgradish is already open: {what}")
+    format!("tgradish is already running: {what}")
 }
 
 pub fn error_label() -> console::StyledObject<&'static str> {
@@ -106,7 +106,7 @@ pub fn warning_label() -> console::StyledObject<&'static str> {
     style("warning:").yellow().bold()
 }
 
-/// The label of what is said with `severity`: an error, or a warning.
+/// Returns the styled `error:` or `warning:` label for `severity`.
 fn severity_label(severity: Severity) -> console::StyledObject<&'static str> {
     match severity {
         Severity::Error => error_label(),
@@ -114,31 +114,29 @@ fn severity_label(severity: Severity) -> console::StyledObject<&'static str> {
     }
 }
 
-/// An issue a result has, as a line on stderr under it: what only a
-/// `.tgs` is checked for labelled by its severity, and the kinds every
-/// format has as what Telegram refuses.
+/// Formats a result issue for stderr: `.tgs`-specific issues use their
+/// severity label; shared limit issues are warned as Telegram rejections.
 pub fn issue(issue: &Issue) -> String {
     match issue {
         Issue::Lottie(_) => format!("{} {issue}", severity_label(issue.severity())),
-        _ => format!("{} Telegram will refuse it: {issue}", warning_label()),
+        _ => format!("{} Telegram will reject it: {issue}", warning_label()),
     }
 }
 
-/// What Telegram would say of a file with `issues`, as `inspect` prints it
-/// under what it holds: that it takes it, as `target` where the file was
-/// judged as one; or else, of the kinds every format has, that it refuses
-/// it and why, and what only a `.tgs` is checked for, each labelled by its
-/// severity.
+/// Formats Telegram's verdict on a file with `issues` for `inspect`: either
+/// accepted (naming `target` when checked as one), or rejected with shared
+/// limit failures listed under the rejection and `.tgs`-only issues labelled
+/// by their severity.
 pub fn verdict(issues: &[Issue], target: Option<Target>) -> Vec<String> {
     let named = target.map_or(String::new(), |target| format!(" as {}", target.name()));
     if issues.is_empty() {
-        return vec![field("telegram", format!("{}{named}", style("✔ accepts it").green()))];
+        return vec![field("telegram", format!("{}{named}", style("✔ accepted").green()))];
     }
     let (lottie, shared): (Vec<&Issue>, Vec<&Issue>) =
         issues.iter().partition(|issue| matches!(issue, Issue::Lottie(_)));
     let mut lines = Vec::new();
     if !shared.is_empty() {
-        lines.push(field("telegram", format!("{}{named}:", style("✖ refuses it").red())));
+        lines.push(field("telegram", format!("{}{named}:", style("✖ rejected").red())));
         lines.extend(
             shared.iter().map(|issue| format!("              {} {issue}", style("-").red())),
         );
@@ -149,12 +147,13 @@ pub fn verdict(issues: &[Issue], target: Option<Target>) -> Vec<String> {
     lines
 }
 
-/// A size, and how much of `limit` it uses, like `252.4 KiB (98.6%)`.
+/// Formats a byte size and percentage of `limit`, e.g. `252.4 KiB (98.6%)`.
 pub fn size_within(bytes: u64, limit: u64) -> String {
     format!("{} ({:.1}%)", kib(bytes), bytes as f64 / limit as f64 * 100.0)
 }
 
-/// `n` and what it counts, which takes an "s" for any number but one.
+/// Formats `n` with a singular or plural noun (appending `"s"` unless
+/// `n == 1`).
 pub fn count(n: impl std::fmt::Display, what: &str) -> String {
     let n = n.to_string();
     format!("{n} {what}{}", if n == "1" { "" } else { "s" })

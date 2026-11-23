@@ -317,7 +317,7 @@ impl Sprite {
                         #[cfg(test)]
                         super::TILES.set(super::TILES.get() + 1);
                         if tile & flip_mask != 0 {
-                            return Err(error("flipped tiles aren't supported"));
+                            return Err(error("flipped tiles are not supported"));
                         }
                         // checked when reading: the mask is one run of bits,
                         // whose lowest is an id's lowest
@@ -329,7 +329,7 @@ impl Sprite {
                         }
                         let id = id as usize;
                         if id >= set.count {
-                            return Err(error(format!("tile {id} isn't in its tileset")));
+                            return Err(error(format!("tile {id} is missing from its tileset")));
                         }
                         let at = (
                             cel.x + column as i64 * set.width as i64,

@@ -1,4 +1,5 @@
-//! Changing a WebM's metadata in place, as spoofing its duration does.
+//! In-place WebM metadata patching (duration spoofing, title, app tags,
+//! padding signature and track UID).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -35,23 +36,22 @@ pub struct Patch {
     pub track_uid: Option<u64>,
 }
 
-/// What [`patch`] changed.
+/// Summary of edits applied by [`patch`].
 #[derive(Debug, Clone, PartialEq, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct PatchReport {
-    /// The Info header's duration before, in seconds.
+    /// Segment `Info` duration before patching, in seconds.
     pub old_duration: Option<f64>,
-    /// And after.
+    /// Segment `Info` duration written by patching, in seconds.
     pub new_duration: Option<f64>,
-    /// `DURATION` tags rewritten.
+    /// Number of track `DURATION` tags rewritten.
     pub duration_tags_patched: usize,
-    /// `DURATION` tags with too little space for the new value.
+    /// Number of track `DURATION` tags skipped due to insufficient space.
     pub duration_tags_skipped: usize,
-    /// Whether Info moved within the padding around it, and the SeekHead
-    /// was changed to find it there.
+    /// True if `Info` moved within adjacent padding and `SeekHead` was updated.
     pub info_moved: bool,
-    /// Whether the signature fitted into the padding.
+    /// True if the signature fitted into the remaining `Void` padding.
     pub signature_written: bool,
 }
 

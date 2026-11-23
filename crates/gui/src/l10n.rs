@@ -1,11 +1,11 @@
-//! The GUI's words in its user's language: a Fluent file for each
-//! language in `i18n`, built into the binary. English is complete, and what
-//! another language lacks is shown in English.
+//! GUI localisation backed by embedded Fluent resources in `i18n/`. British
+//! English (`en-GB`) is complete and serves as the fallback for missing strings
+//! in other languages.
 //!
-//! `fl!("message-id")`, `fl!("message-id", "attribute")` and either with
-//! `name = value` arguments give a message, checked at compile time
-//! against the English file: the message, the attribute and the names of
-//! the arguments must all be there.
+//! `fl!("message-id")`, `fl!("message-id", "attribute")`, and forms with
+//! `name = value` arguments look up a localised string and are checked at
+//! compile time against the English resource: the message, the attribute and
+//! every argument name must exist.
 
 use std::borrow::Cow;
 use std::sync::LazyLock;

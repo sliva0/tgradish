@@ -1,6 +1,6 @@
-//! The GUI's state and its frame: the files open, what waits to be
-//! converted, the dialogs and the theme. The other modules add their parts
-//! to `App`; this holds what they share, and draws them in turn.
+//! Application state and top-level frame: open files, conversion queue,
+//! dialogs, and theme. Other modules extend `App`; this module holds shared
+//! state and drives the frame loop.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -421,12 +421,12 @@ impl App {
         }
     }
 
-    /// Keeps the scale and its setting together: the setting is applied
-    /// as the GUI starts, and as Settings changes it, which
-    /// keeps it once saved, as it does the theme; a change by egui's keys,
-    /// Ctrl++ (or Ctrl+=) and Ctrl+- and Ctrl+0, is saved at once, as the theme's button
-    /// saves its change. egui applies a scale asked of it from the next
-    /// frame, which `scale_shown`, what was last asked or seen, awaits.
+    /// Keeps UI scale and `config.gui.scale` in sync. The configured scale is
+    /// applied on startup and when changed in Settings (which saves on confirm,
+    /// like theme changes). Zooming via egui's shortcuts (`Ctrl++`/`Ctrl+=`,
+    /// `Ctrl+-`, `Ctrl+0`) saves immediately, like the theme toggle button.
+    /// Because egui applies a requested zoom factor on the next frame,
+    /// `scale_shown` tracks the last requested or observed value.
     fn follow_scale(&mut self, ctx: &egui::Context) {
         let zoom = ctx.zoom_factor();
         let set = self.config.gui.scale as f32;
@@ -975,11 +975,11 @@ pub(crate) fn not_pasted(err: &tgradish_core::Error) -> Message {
     }
 }
 
-/// Copies the settings file at `path`, which can't be read, to
-/// `config.toml.unreadable` beside it, before it is written over; gives
-/// where. A copy kept earlier of something else is never written over:
-/// this one goes to `config.toml.unreadable-2` and on, unless one of them
-/// holds the same already.
+/// Copies an unreadable config file at `path` to `config.toml.unreadable`
+/// beside it before overwriting, and returns the backup path. Existing backups
+/// with different contents are never overwritten; instead this uses
+/// `config.toml.unreadable-2`, `-3`, etc., unless an existing backup already
+/// has identical bytes.
 pub(crate) fn keep_aside(path: &Path) -> tgradish_core::Result<PathBuf> {
     use std::io::{ErrorKind, Write};
     use tgradish_core::{Error, FileAction};

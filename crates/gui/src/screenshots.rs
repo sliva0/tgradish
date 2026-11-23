@@ -1,11 +1,13 @@
-//! Pictures of the GUI, for a look at its layout and for the README.
-//! Ignored unless asked for, as they need a GPU wgpu can use and somewhere
-//! to put them. This makes both:
+//! Ignored screenshot tests for visually inspecting the GUI layout and
+//! generating the README screenshot.
+//!
+//! Run with:
 //! `TGRADISH_SCREENSHOTS=/tmp/x cargo test -p tgradish-gui -- --ignored screenshots`
-//! With `TGRADISH_LANG` they are in that language, as `pseudo` for English
-//! made longer, to see where longer words would not fit; with
-//! `TGRADISH_SCALE`, those drawn at the usual scale are drawn at that many
-//! screen pixels to a point instead, as `0.75`.
+//! (requires a wgpu-capable GPU).
+//!
+//! Set `TGRADISH_LANG` to render another language (or `pseudo` for lengthened
+//! English to check truncation), and `TGRADISH_SCALE` (e.g. `0.75`) to draw
+//! the shots taken at the usual scale at that pixels-per-point instead.
 
 use std::path::PathBuf;
 use std::time::Duration;
@@ -27,9 +29,8 @@ use crate::testing::{convert, finish, square, video};
 use crate::timeline::PastLimit;
 use crate::{inspect, preset_dialogs, settings_dialog};
 
-/// Renders the GUI to `$TGRADISH_SCREENSHOTS/*.png` for a look at
-/// the layout: `TGRADISH_SCREENSHOTS=/tmp cargo test -p tgradish-gui
-/// screenshots -- --ignored`. Needs a GPU wgpu can use, and ffmpeg.
+/// Renders the full GUI screenshot suite to `$TGRADISH_SCREENSHOTS/tgradish-*.png`.
+/// Requires a wgpu-capable GPU and `ffmpeg`.
 #[test]
 #[ignore]
 fn screenshots() {
@@ -48,8 +49,7 @@ fn screenshots() {
     manipulation(&mut save);
 }
 
-/// Only the pictures of [`accents`], to `$TGRADISH_SCREENSHOTS` as
-/// [`screenshots`] makes them.
+/// Renders only the [`accents`] screenshots to `$TGRADISH_SCREENSHOTS`.
 #[test]
 #[ignore]
 fn accent_screenshots() {
@@ -62,8 +62,7 @@ fn accent_screenshots() {
     });
 }
 
-/// Only the pictures of [`states`], to `$TGRADISH_SCREENSHOTS` as
-/// [`screenshots`] makes them.
+/// Renders only the [`states`] screenshots to `$TGRADISH_SCREENSHOTS`.
 #[test]
 #[ignore]
 fn state_screenshots() {
@@ -76,8 +75,7 @@ fn state_screenshots() {
     });
 }
 
-/// Only the pictures of [`tgs_progress`], to `$TGRADISH_SCREENSHOTS` as
-/// [`screenshots`] makes them.
+/// Renders only the [`tgs_progress`] screenshots to `$TGRADISH_SCREENSHOTS`.
 #[test]
 #[ignore]
 fn tgs_progress_screenshots() {
@@ -90,8 +88,8 @@ fn tgs_progress_screenshots() {
     });
 }
 
-/// A `.tgs` at work: fitted, then tried again after the result missed the
-/// limit, once and twice.
+/// Captures a `.tgs` conversion in progress: fitting, then retrying once and
+/// twice after exceeding the size limit.
 fn tgs_progress(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     let dir = tempfile::tempdir().unwrap();
     let frames = dir.path().join("dance");
@@ -168,8 +166,7 @@ fn tgs_progress(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
 }
 
-/// Only the pictures of [`empties`], to `$TGRADISH_SCREENSHOTS` as
-/// [`screenshots`] makes them.
+/// Renders only the [`empties`] screenshots to `$TGRADISH_SCREENSHOTS`.
 #[test]
 #[ignore]
 fn empty_screenshots() {
@@ -182,10 +179,9 @@ fn empty_screenshots() {
     });
 }
 
-/// The settings of a video made into each format, in one column at the
-/// usual size and the smallest, and in two on a wide screen, scrolled down
-/// to them too, to see how they share the columns: to
-/// `$TGRADISH_SCREENSHOTS` as [`screenshots`] makes them. Needs ffmpeg.
+/// Captures the settings for a video in each output format (single-column at
+/// standard and minimum window sizes, and two-column on a wide screen, both
+/// top and scrolled) to `$TGRADISH_SCREENSHOTS`. Requires `ffmpeg`.
 #[test]
 #[ignore]
 fn settings_screenshots() {
@@ -238,9 +234,8 @@ fn settings_screenshots() {
     }
 }
 
-/// The GUI without files, and its icon over the list: at the smallest
-/// size, a little larger and the usual one, at whole and fractional
-/// scales, in both themes.
+/// Captures the empty window state and header icon across window sizes, integer
+/// and fractional DPI scales, and dark/light themes.
 fn empties(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::config::Theme;
     let sizes = [
@@ -269,8 +264,7 @@ fn empties(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
 }
 
-/// Only the pictures of [`notices`], to `$TGRADISH_SCREENSHOTS` as
-/// [`screenshots`] makes them.
+/// Renders only the [`notices`] screenshots to `$TGRADISH_SCREENSHOTS`.
 #[test]
 #[ignore]
 fn notice_screenshots() {
@@ -283,11 +277,9 @@ fn notice_screenshots() {
     });
 }
 
-/// What passes in the corner over the list, and what stays at the
-/// bottom: files removed, with a short list and a full one; two and more
-/// at once; nothing to paste, and the open files not kept, which say why
-/// in tgradish's words and in the system's; at the usual size and the
-/// smallest, in both themes.
+/// Captures transient info notices and persistent bottom banners across window
+/// sizes and themes (removed files on short and scrolling lists, stacked info
+/// notices, clipboard errors, and OS session-save errors).
 fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::banner::Message;
     use crate::config::Theme;
@@ -359,12 +351,10 @@ fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
 }
 
-/// The timeline of a video whose used part runs past Telegram's 3
-/// seconds, and of one within them, in each of Plasma's accents and two of
-/// one's own, a light and a dark one, in both themes: as a WebM spoofed
-/// and one cut at 3 s, and as a `.tgs` sped up to fit and one at a speed
-/// set, so cut; and the limit's mark hovered in each. To
-/// `$TGRADISH_SCREENSHOTS` as [`screenshots`] makes them. Needs ffmpeg.
+/// Captures the timeline for a video trimmed over and within Telegram's 3 s
+/// limit across all Plasma and custom light/dark accents in both themes (WebM
+/// spoofed vs cut, `.tgs` sped up vs cut, plus hovering the 3 s limit tick).
+/// Requires `ffmpeg`.
 #[test]
 #[ignore]
 fn limit_screenshots() {
@@ -451,8 +441,7 @@ fn limit_screenshots() {
     }
 }
 
-/// Only the pictures of [`manipulation`], to `$TGRADISH_SCREENSHOTS` as
-/// [`screenshots`] makes them.
+/// Renders only the [`manipulation`] screenshots to `$TGRADISH_SCREENSHOTS`.
 #[test]
 #[ignore]
 fn manipulation_screenshots() {
@@ -466,9 +455,9 @@ fn manipulation_screenshots() {
     });
 }
 
-/// `image` of what `harness` shows with the pointer drawn on it where it
-/// is, as the usual arrow at its usual size, for a look at what it hides:
-/// a window's own pictures leave it out.
+/// Composites a standard arrow cursor onto `image` at `harness`'s current
+/// pointer position so screenshots show what the cursor overlaps (rendered
+/// frames leave the pointer out).
 fn with_pointer(harness: &Harness<App>, mut image: image::RgbaImage) -> image::RgbaImage {
     let Some(at) = harness.ctx.input(|input| input.pointer.hover_pos()) else { return image };
     let scale = harness.ctx.pixels_per_point();
@@ -509,8 +498,8 @@ fn with_pointer(harness: &Harness<App>, mut image: image::RgbaImage) -> image::R
     image
 }
 
-/// Only the pictures of [`moments`], to `$TGRADISH_SCREENSHOTS` as
-/// [`screenshots`] makes them, the pointer drawn where it is. Needs ffmpeg.
+/// Renders only the [`moments`] screenshots to `$TGRADISH_SCREENSHOTS`,
+/// including the pointer cursor. Requires `ffmpeg`.
 #[test]
 #[ignore]
 fn moment_screenshots() {
@@ -524,13 +513,11 @@ fn moment_screenshots() {
     });
 }
 
-/// What lasts a moment, or only while a button is held, at the usual
-/// width in both themes and at the narrowest: a number being typed, and
-/// one refused; a stepper held; the timeline's readout at either end of
-/// the bar and while its playhead is dragged; Undo in the menu; rows,
-/// a notice and Settings fading in, a row glowing as its result is made;
-/// the settings under the preview, the list and Settings scrolled to their
-/// ends. Needs ffmpeg.
+/// Captures transient and pointer-held states at standard and minimum window
+/// widths: typing or refusing a number, holding a stepper, timeline readouts
+/// at the bar ends and during playhead drag, Undo in the main menu, fade-ins
+/// for list rows/notices/Settings, completion row glow, and scroll areas at
+/// their bottom bounds. Requires `ffmpeg`.
 fn moments(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::banner::Message;
     use crate::config::Theme;
@@ -723,8 +710,8 @@ fn moments(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
 }
 
-/// The bar of the timeline under the preview, which says what is past the
-/// limit, as long as the limit is on it.
+/// Returns the bounding rectangle of the timeline bar under the preview (found
+/// by its past-limit AccessKit description).
 fn timeline_bar(harness: &Harness<App>) -> egui::Rect {
     use egui_kittest::kittest::NodeT;
     let said = [PastLimit::Spoofed, PastLimit::SpedUp, PastLimit::Cut].map(PastLimit::text);
@@ -734,8 +721,8 @@ fn timeline_bar(harness: &Harness<App>) -> egui::Rect {
     bar.expect("the timeline says what is past the limit").rect()
 }
 
-/// Where the input is shown on the preview, and how many points a pixel
-/// of it takes.
+/// Returns the screen rectangle of the input image on the preview stage and
+/// its point-per-pixel scale.
 fn input_picture(harness: &Harness<App>) -> (egui::Rect, f32) {
     let item = &harness.state().items[0];
     let zoom = &item.view.input_zoom;
@@ -743,8 +730,8 @@ fn input_picture(harness: &Harness<App>) -> (egui::Rect, f32) {
     crate::canvas::layout(fit_in, item.input_size().unwrap(), zoom)
 }
 
-/// Presses the primary button at `from` and moves the pointer by `by`, a
-/// step at a time, without letting go.
+/// Presses the primary mouse button at `from` and drags by `by` in four steps
+/// without releasing.
 fn press_and_move(harness: &mut Harness<App>, from: egui::Pos2, by: egui::Vec2) {
     harness.event(egui::Event::PointerMoved(from));
     harness.event(egui::Event::PointerButton {
@@ -760,7 +747,7 @@ fn press_and_move(harness: &mut Harness<App>, from: egui::Pos2, by: egui::Vec2) 
     }
 }
 
-/// Lets go of the primary button at `at`.
+/// Releases the primary mouse button at `at`.
 fn let_go(harness: &mut Harness<App>, at: egui::Pos2) {
     harness.event(egui::Event::PointerButton {
         pos: at,
@@ -771,8 +758,9 @@ fn let_go(harness: &mut Harness<App>, at: egui::Pos2) {
     harness.run_steps(2);
 }
 
-/// What the pointer does on the timeline and the preview, as it does it:
-/// an end of a short part of a long video hovered. Needs ffmpeg.
+/// Captures pointer interactions on the timeline and preview stage (hovering
+/// and dragging a short trim range, crop snapping and keyboard focus, maximum
+/// zoom and ease-out). Requires `ffmpeg`.
 fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     let dir = tempfile::tempdir().unwrap();
     let mut config = Config::default();
@@ -894,8 +882,7 @@ fn manipulation(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     settle(&mut harness);
 }
 
-/// Only the pictures of [`scroll_bars`], to `$TGRADISH_SCREENSHOTS` as
-/// [`screenshots`] makes them.
+/// Renders only the [`scroll_bars`] screenshots to `$TGRADISH_SCREENSHOTS`.
 #[test]
 #[ignore]
 fn scroll_bar_screenshots() {
@@ -908,11 +895,9 @@ fn scroll_bar_screenshots() {
     });
 }
 
-/// Every place that scrolls with its bar showing, scrolled part of the
-/// way: the list, the column beside the preview and the settings under it,
-/// of pixel art made into an animated sticker, at the narrowest window, the
-/// usual one, and one tall enough that only the list scrolls; in both
-/// themes, with a purple accent and the grey, then Settings scrolled.
+/// Captures every scrollable region partially scrolled (file list, side column,
+/// lower settings, and Settings dialog) across window sizes, dark/light themes,
+/// and purple/grey accents, plus hovered and dragged scroll handles.
 fn scroll_bars(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::config::{Accent, Theme};
     let dir = tempfile::tempdir().unwrap();
@@ -1038,16 +1023,15 @@ fn scroll_bars(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
 }
 
-/// Screen pixels to a point of the pictures drawn at the usual scale: 1,
-/// or as `TGRADISH_SCALE` says.
+/// Returns the pixel-per-point scale for standard screenshots (`1.0` or
+/// `$TGRADISH_SCALE`).
 fn scale() -> f32 {
     std::env::var("TGRADISH_SCALE").ok().and_then(|scale| scale.parse().ok()).unwrap_or(1.0)
 }
 
-/// The GUI drawn as the screenshots draw it, of `config`, in a window
-/// `size` large.
+/// Builds a wgpu-backed screenshot harness of `size` with `config`.
 fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
-    // filtering as the GUI does it, so pixel art stays sharp
+    // Use the app's texture filtering so pixel art stays nearest-neighbour sharp.
     let filtering = egui_wgpu::RendererOptions {
         predictable_texture_filtering: false,
         ..egui_wgpu::RendererOptions::PREDICTABLE
@@ -1060,10 +1044,9 @@ fn window(config: Config, size: egui::Vec2) -> Harness<'static, App> {
     })
 }
 
-/// The bar over the preview, at the narrowest window, the usual one and a
-/// wide one, where what the mouse does fits: a video made, its result and
-/// its input, then cropped, zoomed in and changed since; and the result's
-/// small picture of pixel art, at its smallest and largest. Needs ffmpeg.
+/// Captures the preview header bar across minimum, standard, and wide window
+/// widths (result, input, cropped+zoomed, and stale result) and the result
+/// inset at sizes 1, 3, and 5 for stickers and emoji. Requires `ffmpeg`.
 fn bars_and_insets(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::config::Corner;
     let dir = tempfile::tempdir().unwrap();
@@ -1129,8 +1112,8 @@ fn bars_and_insets(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     }
 }
 
-/// The states the GUI shows of what goes on around a conversion: a
-/// video made. Needs ffmpeg.
+/// Captures conversion states, blockers, narrow timeline/picker/action bars,
+/// missing `ffmpeg`, and queued batches. Requires `ffmpeg`.
 fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     bars_and_insets(save);
     let dir = tempfile::tempdir().unwrap();
@@ -1312,8 +1295,8 @@ fn states(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     shot(&mut harness, save, "state-queue-narrow");
 }
 
-/// Takes the GUI through each state worth a picture, handing each to
-/// `save` by name. Needs a GPU wgpu can use, and ffmpeg.
+/// Steps the GUI through its core visual states and passes each to `save`.
+/// Requires a wgpu-capable GPU and `ffmpeg`.
 pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     let dir = tempfile::tempdir().unwrap();
     let frames = dir.path().join("dance");
@@ -1648,10 +1631,10 @@ pub(crate) fn walk(mut save: impl FnMut(&mut Harness<App>, &str)) {
     save(&mut harness, "scaled");
 }
 
-/// The GUI where it is most likely to break: a result in a short
-/// window, the keyboard's focus, a result out of date, a conversion that
-/// failed, at the usual width and the narrowest, a long name, many presets
-/// of the user's own, and every section open. Needs ffmpeg.
+/// Captures layout edge cases: short windows, keyboard focus rings, stale
+/// results, failed conversions at normal and minimum width, long filenames,
+/// multiple user presets, and all collapsible sections expanded. Requires
+/// `ffmpeg`.
 fn edges(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::config::Theme;
     use crate::l10n::fl;
@@ -1781,10 +1764,9 @@ fn edges(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     shot(&mut harness, save, "edge-narrow-presets");
 }
 
-/// The banner of messages over the bottom of the window: a settings file
-/// of an older version that can't be read, its details folded and open,
-/// in the light theme, the dark one and the narrowest window; a line of
-/// information, which passes in the corner over the list; three messages;
+/// Captures the bottom banner and the info notices in the bottom-left corner
+/// over the list: an unreadable `config.toml` of an older version (folded and
+/// open, light/dark, narrowest window), a passing info notice, three messages,
 /// and one said three times.
 fn banners(
     harness: &mut Harness<App>,
@@ -1851,8 +1833,8 @@ fn banners(
     harness.run_steps(3);
 }
 
-/// The GUI at work, for the README: `TGRADISH_SCREENSHOTS` says
-/// where it goes.
+/// Generates `tgradish-readme.png` in `$TGRADISH_SCREENSHOTS` for the main
+/// `README.md`.
 #[test]
 #[ignore]
 fn readme_screenshot() {
@@ -1868,12 +1850,11 @@ fn readme_screenshot() {
         predictable_texture_filtering: false,
         ..egui_wgpu::RendererOptions::PREDICTABLE
     };
-    // narrow enough that the README, which shows it about 900 wide, keeps
-    // its smaller words readable, the settings in one column; wide enough
-    // for the timeline to stay on one row; as tall as the settings below
-    // the preview end between two of them rather than through one; drawn
-    // at twice the pixels, so that it is sharp as it is shown smaller and
-    // on screens of more pixels
+    // 1280×880 at 2x: narrow enough that small text stays readable at the
+    // README's ~900 px with the settings in one column; wide enough for a
+    // one-row timeline; tall enough that the lower settings end between rows.
+    // Drawn at twice the pixels so it stays sharp when shown smaller and on
+    // dense screens.
     let mut harness = Harness::builder()
         .with_size([1280.0, 880.0])
         .with_pixels_per_point(2.0)
@@ -1886,13 +1867,13 @@ fn readme_screenshot() {
         });
     harness.state_mut().add(inputs);
     finish(&mut harness);
-    // [frog, sparkle, fox, cherry, eagle, house, seaside]: the sparkle a
-    // custom emoji, the eagle a video sticker, the house a picture one
+    // [frog, sparkle, fox, cherry, eagle, house, seaside]: configure sparkle as
+    // custom emoji, eagle as WebM sticker, and house as static WebP sticker.
     let state = harness.state_mut();
     state.items[1].choices.target = tgradish_core::telegram::Target::Emoji;
     (state.items[4].format, state.items[4].format_guessed) = (Format::Webm, false);
     (state.items[5].format, state.items[5].format_guessed) = (Format::Webp, false);
-    // the sparkle and the cherry made, with the results' small pictures
+    // Convert sparkle and cherry so their result thumbnails appear in the list.
     for made in [1, 3] {
         let id = harness.state().items[made].id;
         harness.state_mut().select(id);
@@ -1901,9 +1882,8 @@ fn readme_screenshot() {
         harness.run_steps(2);
         finish(&mut harness);
     }
-    // the frog chosen, its idle tag, cropped to the frog and a little
-    // around it, 4:3, and made, with the result's small picture and what
-    // Telegram will make of it
+    // Select frog, pick its "idle" tag, apply a 4:3 crop with the result inset
+    // open, and convert it.
     let frog = harness.state().items[0].id;
     harness.state_mut().select(frog);
     let item = &mut harness.state_mut().items[0];
@@ -1914,21 +1894,19 @@ fn readme_screenshot() {
     convert(&harness);
     harness.run_steps(2);
     finish(&mut harness);
-    // said to go where pictures usually do, rather than to the test's
-    // temporary folder
+    // Display a clean `/home/user/Pictures/Stickers` output path instead of the tempdir.
     harness.state_mut().config.gui.output_dir = Some("/home/user/Pictures/Stickers".into());
-    // the input shown, with the crop over it
+    // Show the input view with the crop overlay paused on frame 0.
     let item = &mut harness.state_mut().items[0];
     item.view.show = crate::item::Show::Input;
     item.view.playing = false;
-    // its first frame, calm, in the preview and the result alike
     (item.view.time, item.view.result_time) = (0.0, 0.0);
     harness.event(egui::Event::PointerGone);
     harness.run_steps(3);
     std::thread::sleep(Duration::from_millis(300));
     harness.run_steps(3);
     let image = harness.render().expect("rendering needs a GPU");
-    // packed as tightly as PNG goes, for the README to load quickly
+    // Write with maximum PNG compression so the README loads quickly.
     let file = std::fs::File::create(out.join("tgradish-readme.png")).unwrap();
     let png = image::codecs::png::PngEncoder::new_with_quality(
         std::io::BufWriter::new(file),
@@ -1938,10 +1916,10 @@ fn readme_screenshot() {
     image.write_with_encoder(png).unwrap();
 }
 
-/// The README's inputs, written to `dir`: pixel art from ansimuz's Sunny
-/// Land (CC0, see readme-art/CREDITS.md) as a sticker artist would have it.
-/// The frog and the fox are Aseprite files of their sheets, tagged, and the
-/// seaside a video of a camera panning along the shore.
+/// Builds the input files for [`readme_screenshot`] in `dir` from ansimuz's
+/// CC0 Sunny Land pixel art (`readme-art/CREDITS.md`): tagged `.aseprite`
+/// files for `frog` and `fox`, GIF/PNG assets, and a panning `seaside.mp4`
+/// video.
 fn readme_inputs(dir: &std::path::Path) -> Vec<PathBuf> {
     use tgradish_corpus::{Canvas, Sprite};
     let art = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("readme-art");
@@ -2007,10 +1985,9 @@ fn readme_inputs(dir: &std::path::Path) -> Vec<PathBuf> {
     inputs
 }
 
-/// The GUI in accents of its own, in both themes: one of Plasma's, a
-/// light one and a dark one, a file chosen, its result out of date, a
-/// button with the keyboard's focus and one hovered; then Settings, where they are chosen, at the
-/// usual width and the narrowest, and the picker of one's own.
+/// Captures custom and Plasma accent colours in dark and light themes (with a
+/// stale-result badge, keyboard focus ring, hovered row, Settings swatches at
+/// normal/minimum width and 125% scale, and the custom colour picker).
 fn accents(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::config::{Accent, Theme};
     use crate::l10n::fl;

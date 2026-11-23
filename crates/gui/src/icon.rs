@@ -1,5 +1,6 @@
-//! tgradish's icon. It is pixel art, so it is only ever drawn with whole
-//! screen pixels for each of its own, which keeps them square and sharp.
+//! Application icon rendering. Because the icon is pixel art, it is always
+//! drawn at an integer number of screen pixels per art pixel so pixels stay
+//! square and sharp.
 
 use eframe::egui::{self, Color32, Rect, pos2, vec2};
 

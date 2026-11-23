@@ -1,7 +1,6 @@
-//! Stickers that find out what Telegram accepts and how its apps draw it,
-//! and a checklist for the results. Each probe
-//! changes one thing about what the encoder writes, so a rejection says
-//! which.
+//! Generates probe `.tgs` files and checklists to test Telegram's server
+//! limits and client rendering behaviour. Each probe varies one encoder
+//! property so any rejection pinpoints the cause.
 
 use std::fmt::Write as _;
 use std::path::Path;

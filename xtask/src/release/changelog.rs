@@ -1,7 +1,6 @@
-//! `CHANGELOG.md`, as Keep a Changelog lays it out: `## [Unreleased]` over
-//! a dated `## [X.Y.Z] - YYYY-MM-DD` section for each release, newest
-//! first, and at the bottom a link for each heading, to the changes since
-//! the release before.
+//! Parses and updates Keep a Changelog entries in `CHANGELOG.md`:
+//! `## [Unreleased]`, dated `## [X.Y.Z] - YYYY-MM-DD` sections (newest first),
+//! and bottom comparison links.
 
 use anyhow::{Context, Result, bail, ensure};
 
@@ -60,14 +59,14 @@ fn trimmed<'a, 'b>(lines: &'b [&'a str]) -> &'b [&'a str] {
 /// notes. Fails where it has no dated section, or an empty one.
 pub fn notes(text: &str, version: Version) -> Result<String> {
     let lines: Vec<&str> = text.lines().collect();
-    let (index, date) =
-        heading(&lines, version).with_context(|| format!("CHANGELOG.md has no {version}"))?;
+    let (index, date) = heading(&lines, version)
+        .with_context(|| format!("CHANGELOG.md has no section for {version}"))?;
     ensure!(
         date.is_some(),
-        "CHANGELOG.md's {version} isn't dated as `## [{version}] - YYYY-MM-DD`"
+        "CHANGELOG.md section for {version} has no valid date (`## [{version}] - YYYY-MM-DD`)"
     );
     let body = trimmed(body(&lines, index));
-    ensure!(!body.is_empty(), "CHANGELOG.md says nothing under {version}");
+    ensure!(!body.is_empty(), "CHANGELOG.md has no entries under {version}");
     Ok(body.join("\n") + "\n")
 }
 
@@ -95,7 +94,7 @@ fn unreleased_link(lines: &[&str]) -> Result<(usize, String, String)> {
 /// the changes since `version`, and `version`'s to those since `previous`.
 /// Fails where Unreleased says nothing, as a release with no notes would.
 pub fn release(text: &str, version: Version, previous: Version, date: &str) -> Result<String> {
-    ensure!(is_date(date), "{date:?} isn't a date as YYYY-MM-DD");
+    ensure!(is_date(date), "{date:?} is not a valid YYYY-MM-DD date");
     let lines: Vec<&str> = text.lines().collect();
     ensure!(heading(&lines, version).is_none(), "CHANGELOG.md already has a section for {version}");
     let unreleased = lines
@@ -104,12 +103,12 @@ pub fn release(text: &str, version: Version, previous: Version, date: &str) -> R
         .with_context(|| format!("CHANGELOG.md has no `{UNRELEASED}` section"))?;
     ensure!(
         !trimmed(body(&lines, unreleased)).is_empty(),
-        "CHANGELOG.md says nothing under Unreleased, which would be {version}'s notes"
+        "CHANGELOG.md has nothing under Unreleased for {version}"
     );
     let (link, repository, since) = unreleased_link(&lines)?;
     ensure!(
         since == previous.to_string(),
-        "CHANGELOG.md's [Unreleased] compares with v{since}, but the version is {previous}"
+        "CHANGELOG.md [Unreleased] link compares with v{since}, expected v{previous}"
     );
     let heading = format!("## [{version}] - {date}");
     let unreleased_link = format!("[Unreleased]: {repository}/compare/v{version}...HEAD");

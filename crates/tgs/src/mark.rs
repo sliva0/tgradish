@@ -1,29 +1,27 @@
-//! Writes bits as the order of rectangles within groups. A group's fill
-//! paints all of its rectangles together, so their order changes nothing
-//! that is drawn, and a JSON re-encoding keeps it.
+//! Encodes a byte payload in the ordering of rectangles within shape groups.
+//! A group's fill paints all its rectangles together, so reordering them does
+//! not affect rendering and survives JSON re-encoding.
 //!
-//! In each group the rectangles are sorted by their top, left, height and
-//! width; then each pair in that order, first and second, then third and
-//! fourth, and so on, holds a bit: 1 when the pair is written swapped.
-//! Groups are read in the order they are written. Pairs of equal
-//! rectangles hold nothing.
+//! Within each group, rectangles are sorted by
+//! `(2*top, 2*left, height, width)`.
+//! Each disjoint consecutive pair (`[0, 1]`, `[2, 3]`, ...) carries one bit:
+//! `1` if written swapped, `0` if kept in sorted order. Groups are read in the
+//! order they are written. Pairs of identical rectangles carry no bit.
 //!
-//! Stickers with too few rectangles for it carry the payload as the
-//! first layer's name (`ln`) instead, in hex: a few bytes more, and a
-//! name like any other.
+//! Stickers with too few rectangles store the hex-encoded payload in the first
+//! layer's `ln` field instead (adding only a few bytes, formatted like an
+//! ordinary layer name).
 
 use crate::lottie::{Animation, Item};
 
-/// Where a rectangle is, as the sort key: twice its top, twice its left,
-/// its height and its width, in millionths.
+/// Rectangle sort key: `[2*top, 2*left, height, width]` in millionths.
 ///
-/// Both sides work it out from the numbers as the JSON gives them, in
-/// whole millionths, so the writer's key is the reader's exactly: worked
-/// out from the unrounded numbers, two rectangles of one top could come
-/// apart once their centres and sizes were rounded to 6 decimals, as those
-/// of art pixels a crop cut to a third do, and sort the other way round.
-/// Wide enough that a file's numbers, which [`micro`] keeps within `i64`,
-/// can't overflow it.
+/// Both writer and reader compute the key from numbers rounded to 6 decimal
+/// places (matching JSON output) in whole millionths, so they always agree:
+/// computed from unrounded floats, two rectangles sharing a top edge (such as
+/// art pixels clipped to one-third by a crop) could round apart at 6 decimals
+/// and sort in different orders. Uses `i128` so inputs bounded by `i64` in
+/// [`micro`] cannot overflow.
 type Key = [i128; 4];
 
 fn key(centre: [i64; 2], size: [i64; 2]) -> Key {
@@ -31,28 +29,28 @@ fn key(centre: [i64; 2], size: [i64; 2]) -> Key {
     [2 * y - height, 2 * x - width, height, width]
 }
 
-/// A number the JSON holds in whole millionths. The reader's numbers have
-/// only the 6 decimals written, so this is exactly what was written.
+/// Converts a JSON number to whole millionths (exact for reader inputs, which
+/// are written with at most 6 decimal places).
 fn micro(value: f64) -> i64 {
     (value * 1e6).round() as i64
 }
 
-/// A number the writer prints, in whole millionths, as the reader finds it:
-/// [`crate::lottie`] writes rectangles with 6 decimals, rounding.
+/// Rounds `value` to 6 decimal places as [`crate::lottie`] writes it, then
+/// converts to whole millionths.
 fn written(value: f64) -> i64 {
     micro(format!("{value:.6}").parse().expect("Rust prints numbers it can read"))
 }
 
-/// The key of a rectangle as it is written.
+/// Sort key of a rectangle after JSON rounding.
 fn written_key(centre: [f64; 2], size: [f64; 2]) -> Key {
     key(centre.map(written), size.map(written))
 }
 
 internal! {
-/// Writes `payload` once as the order of `animation`'s rectangles, or as its
-/// first layer's name when they have no room for it. False when it has no
-/// layers either. Each copy would cost about 0.6% of a sticker's size, as
-/// swapped pairs break up repeats, so there is only the one.
+/// Embeds `payload` once in the rectangle order of `animation`, or in the
+/// first layer's `ln` field if capacity is insufficient. Returns `false` if
+/// `animation` has no layers. Only one copy is embedded because swapping pairs
+/// breaks deflate matches (~0.6% size overhead per copy).
 pub fn embed(animation: &mut Animation, payload: &[u8]) -> bool {
     if capacity(animation) < payload.len() * 8 {
         let Some(first) = animation.layers.first_mut() else { return false };
@@ -72,7 +70,8 @@ pub fn embed(animation: &mut Animation, payload: &[u8]) -> bool {
 }
 }
 
-/// The payload a sticker carries as its first layer's name, if it does.
+/// Decodes a hex payload from the first layer's `ln` field, if present and
+/// valid.
 pub fn layer_name(json: &[u8]) -> Option<Vec<u8>> {
     let value = serde_json::from_slice::<serde_json::Value>(json).ok()?;
     let name = value.get("layers")?.get(0)?.get("ln")?.as_str()?;
@@ -83,7 +82,7 @@ pub fn layer_name(json: &[u8]) -> Option<Vec<u8>> {
 }
 
 internal! {
-/// How many bits `animation`'s rectangles can hold.
+/// Returns how many bits `animation`'s rectangles can encode.
 pub fn capacity(animation: &Animation) -> usize {
     let groups = animation.layers.iter().flat_map(|layer| &layer.items);
     groups
@@ -107,12 +106,12 @@ fn keys(items: &[Item]) -> Vec<Key> {
     keys
 }
 
-/// Pairs of sorted keys that can hold a bit.
+/// Counts distinct consecutive pairs in `sorted` that can carry a bit.
 fn pairs(sorted: &[Key]) -> usize {
     sorted.as_chunks::<2>().0.iter().filter(|[a, b]| a != b).count()
 }
 
-/// Sorts a group's rectangles, swapping pairs for the bits taken.
+/// Sorts a group's rectangles and swaps pairs according to `bits`.
 fn write_group(items: &mut [Item], bits: &mut impl Iterator<Item = bool>) {
     let places: Vec<usize> =
         (0..items.len()).filter(|&i| matches!(items[i], Item::Rect { .. })).collect();
@@ -134,8 +133,8 @@ fn write_group(items: &mut [Item], bits: &mut impl Iterator<Item = bool>) {
     }
 }
 
-/// The bits the order of a Lottie document's rectangles holds, in order,
-/// or none when it doesn't parse.
+/// Extracts the bits encoded by rectangle order across all groups in `json`.
+/// Returns an empty vector if `json` is not valid JSON.
 pub fn order_bits(json: &[u8]) -> Vec<bool> {
     let Ok(value) = serde_json::from_slice::<serde_json::Value>(json) else { return Vec::new() };
     let mut bits = Vec::new();

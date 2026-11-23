@@ -1,7 +1,7 @@
-//! Converting into any of the three formats through one call: a
-//! [`Request`] with the options of the format to make, which [`convert`]
-//! hands to that format's own `convert`, reporting through the same
-//! [`Event`]s and returning the same [`Outcome`] as each does.
+//! Unified conversion entry point across all three output formats.
+//!
+//! Dispatches a [`Request`] to the format module selected by its options,
+//! reporting progress through [`Event`] and returning [`Outcome`].
 //!
 //! ```no_run
 //! # use tgradish_core::{backend::Backend, convert, input::Input, presets::FormatOptions, CancelToken};
@@ -9,7 +9,7 @@
 //!     Input::File("walk.gif".into()),
 //!     FormatOptions::Tgs(Default::default()),
 //! );
-//! // pixel art is read without ffmpeg
+//! // Pixel art does not need ffmpeg.
 //! let backend = match convert::needs_backend(&request) {
 //!     true => Some(Backend::select(Default::default(), None)?),
 //!     false => None,
@@ -30,43 +30,44 @@ use crate::presets::FormatOptions;
 use crate::{CancelToken, Event, Outcome};
 use crate::{tgs, webm, webp};
 
-/// A conversion into any format, which its options say: built as each
-/// format's own request is, from [`Request::new`].
+/// Conversion request for any output format (determined by `options`).
+/// Construct with [`Request::new`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
-    /// What to convert.
+    /// Input file or image sequence.
     pub input: Input,
-    /// Where the result goes: by default [`Input::default_output`], as
-    /// [`Request::output`] gives it.
+    /// Destination path; defaults to [`Input::default_output`] (see
+    /// [`Request::output`]).
     pub output: Option<PathBuf>,
-    /// What to make, and how.
+    /// Target format and format-specific options.
     pub options: FormatOptions,
-    /// Replace the output if it exists.
+    /// Replace an existing output file if present.
     pub overwrite: bool,
-    /// For WebM: keep intermediate files, as
-    /// [`webm::Request::keep_temp`] does; the other formats leave none.
+    /// Keep intermediate WebM files (see [`webm::Request::keep_temp`]).
+    /// Ignored for other formats.
     pub keep_temp: bool,
-    /// How many threads it uses.
+    /// Maximum threads used for this conversion.
     pub threads: Threads,
 }
 
 impl Request {
-    /// A conversion of `input` with `options`, beside it, not replacing
-    /// one there, intermediate files deleted.
+    /// Creates a request writing beside `input`, without overwriting or
+    /// keeping temporary files, using automatic thread count.
     pub fn new(input: Input, options: FormatOptions) -> Self {
         let (overwrite, keep_temp, threads) = (false, false, Threads::Auto);
         Self { input, output: None, options, overwrite, keep_temp, threads }
     }
 
-    /// Where the result goes, as asked or by default.
+    /// Returns the explicit output path, or the default path beside the input.
     pub fn output(&self) -> PathBuf {
         let (format, target) = (self.options.format(), self.options.target());
         self.output.clone().unwrap_or_else(|| self.input.default_output(format, target))
     }
 }
 
-/// Whether converting `request` needs ffmpeg: WebM and WebP always do, and
-/// a `.tgs` only of a video, as [`tgs::needs_ffmpeg`] says.
+/// Returns true if converting `request` requires ffmpeg. WebM and WebP always
+/// need ffmpeg; `.tgs` needs it only for video inputs (see
+/// [`tgs::needs_ffmpeg`]).
 pub fn needs_backend(request: &Request) -> bool {
     match &request.options {
         FormatOptions::Webm(_) | FormatOptions::Webp(_) => true,
@@ -74,10 +75,9 @@ pub fn needs_backend(request: &Request) -> bool {
     }
 }
 
-/// Converts `request` into the format its options are for, through that
-/// format's own `convert`. `backend` is ffmpeg, which only what
-/// [`needs_backend`] says needs it: asked to make WebM or WebP without
-/// one, this fails as [`Error::FfmpegNotFound`].
+/// Converts `request` by delegating to the format module selected by
+/// `request.options`. Pass `backend` whenever [`needs_backend`] returns true;
+/// omitting it when required returns [`Error::FfmpegNotFound`].
 pub fn convert(
     backend: Option<&Backend>,
     request: &Request,

@@ -1,6 +1,5 @@
-//! What a conversion of any format reports and makes: its [`Event`]s,
-//! the first [`Started`] and the last [`Finished`](Event::Finished) with
-//! its [`Outcome`], each the same of every format but for its details.
+//! Shared conversion progress events ([`Event`]) and final results
+//! ([`Outcome`]) across all three output formats.
 
 use std::path::PathBuf;
 
@@ -16,266 +15,247 @@ use crate::telegram::{Issue, Target};
 use crate::webm::{Decision, Params, Plan};
 use crate::webp::Encoding;
 
-/// What a conversion of any format reports as it goes, for front-ends to
-/// follow, which `convert --json` and `watch --json` print one a line:
-/// [`Event::Started`] first, then what the format says as it works, and
-/// [`Event::Finished`] once the result is written. WebM's fitting says
-/// what each encode does, and `.tgs`'s what fitting takes off and how far
-/// it all got; a WebP is made in one go, and says nothing between.
+/// Progress event emitted during conversion and printed as NDJSON by
+/// `convert --json` and `watch --json`.
+///
+/// Every conversion starts with [`Event::Started`] and ends with
+/// [`Event::Finished`]. Between them, WebM emits encoding and fitting events,
+/// `.tgs` emits fitting and progress events, and WebP only warnings (any
+/// format can emit [`Event::Warning`]).
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(tag = "event", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Event {
-    /// The conversion is about to make its result: the first event of
-    /// every conversion, with a WebM's plan or what reading a `.tgs`'s art
-    /// found.
+    /// First event of every conversion, carrying the WebM plan or `.tgs`
+    /// normalisation report.
     Started(Started),
-    /// WebM: an encode starts.
+    /// WebM: an encode attempt has started.
     AttemptStarted {
-        /// Which, from 1.
+        /// 1-based attempt number.
         attempt: u32,
-        /// With what settings.
+        /// Encoder parameters for this attempt.
         params: Params,
     },
-    /// WebM: progress of the current pass of an attempt, from 0 to 1.
+    /// WebM: progress (0.0 to 1.0) within the current encoding pass.
     Progress {
-        /// Which attempt.
+        /// 1-based attempt number.
         attempt: u32,
-        /// Which of its passes, from 1.
+        /// 1-based pass number.
         pass: u8,
-        /// How many it has: 2, or 1 where an earlier attempt's first pass
-        /// serves it.
+        /// Total passes (2, or 1 when reusing an earlier first pass).
         passes: u8,
-        /// How much of the pass is done.
+        /// Fraction of the pass completed (0.0 to 1.0).
         fraction: f64,
-        /// Whether an encode fits already, so that fitting can settle on
-        /// the best so far, see
-        /// [`CancelToken::settle`](crate::CancelToken::settle).
+        /// True when an earlier attempt already fits so fitting can settle
+        /// early (see [`CancelToken::settle`](crate::CancelToken::settle)).
         can_settle: bool,
     },
-    /// WebM: an encode is done.
+    /// WebM: an encode attempt has finished.
     AttemptFinished {
-        /// Which.
+        /// 1-based attempt number.
         attempt: u32,
-        /// With what settings.
+        /// Encoder parameters used.
         params: Params,
-        /// Its size in bytes.
+        /// Output size in bytes.
         bytes: u64,
-        /// Whether that is within the target's limit.
+        /// Whether `bytes` is within the target size limit.
         fits: bool,
-        /// Whether this or an earlier encode fits, so that fitting can
-        /// settle on the best so far.
+        /// True when this or an earlier attempt fits, so fitting can settle
+        /// early.
         can_settle: bool,
     },
-    /// WebM: SSIM of an attempt compared to the source, from 0 to 1.
+    /// WebM: SSIM quality score (0.0 to 1.0) comparing an attempt to the
+    /// source.
     Scored {
-        /// Which attempt.
+        /// 1-based attempt number.
         attempt: u32,
-        /// Its SSIM.
+        /// SSIM score.
         ssim: f64,
     },
-    /// WebM: fitting decided to stop, or to try a change: why, for
-    /// front-ends to say.
+    /// WebM: size-fitting decided to stop or adjust parameters.
     Decided {
-        /// What, and why.
+        /// Structured decision details.
         decision: Decision,
-        /// The same in English.
+        /// Human-readable explanation.
         message: String,
     },
-    /// WebM: a line of ffmpeg output.
+    /// WebM: a single line of ffmpeg stderr output.
     Log {
-        /// The line.
+        /// Output line text.
         line: String,
     },
-    /// `.tgs`: unchanged, the sticker would come to about this many bytes,
-    /// more than fits; fitting starts, unless `exact` keeps the art as it
-    /// is.
+    /// `.tgs`: estimated unreduced size exceeds the limit; size-fitting begins
+    /// unless `exact` is set.
     TooLarge {
-        /// The estimate, in bytes.
+        /// Estimated compressed size in bytes.
         bytes: u64,
     },
-    /// `.tgs`: fitting applied a reduction.
+    /// `.tgs`: size-fitting applied a reduction step.
     Reduced {
-        /// Which, and what it came to.
+        /// Applied step and its result.
         step: Step,
     },
-    /// `.tgs`: the result is being compressed.
+    /// `.tgs`: compressing the final Lottie JSON.
     Packing,
-    /// `.tgs`: the result missed the limit all the same, as fitting's
-    /// estimates were off: fitting tries again, aiming lower, then encodes
-    /// and compresses what that comes to, as a stage of its own, until it
-    /// fits or nothing is left to try.
+    /// `.tgs`: output still missed the limit because fitting's estimates were
+    /// off; fitting retries aiming lower, then encodes and compresses the
+    /// result as a stage of its own, until it fits or nothing is left to try.
     Missed {
-        /// How large it came to compressed; none where it was far too
-        /// large, or over Telegram's other limits, to be worth compressing.
+        /// Actual compressed size in bytes, or `None` if skipped before
+        /// compression (far too large or over another Telegram limit).
         bytes: Option<u64>,
-        /// The estimated size fitting now aims at, in bytes.
+        /// New target estimate in bytes.
         aim: u64,
     },
-    /// `.tgs`: how far making the sticker got, estimated, said often as
-    /// it goes and never less than before: each part of the work has a
-    /// share of the whole of about the time it takes, and moves through it
-    /// as far as the part can tell. Reading the input comes before it.
+    /// `.tgs`: estimated progress (0.0 to 1.0), emitted after reading the input
+    /// and never less than before. Each stage gets a share of the total roughly
+    /// proportional to the time it takes.
     Advanced {
-        /// Of all of it, from 0 to 1.
+        /// Overall progress fraction (0.0 to 1.0).
         fraction: f64,
-        /// Of the stage at work, from 0 to 1: since `started`, since
-        /// fitting started after `too-large`, unless the art is kept
-        /// exactly as it is, or since `packing`; once the result missed,
-        /// of each try again since its `missed`, all of it.
+        /// Progress fraction (0.0 to 1.0) within the current stage: drawing
+        /// since `started`, fitting after `too-large` (unless `exact` is on),
+        /// `packing`, or the whole retry stage (fitting, encoding and
+        /// compressing) after each `missed`.
         stage_fraction: f64,
     },
-    /// Something worth saying that doesn't stop the conversion: as options
-    /// that were adjusted or ignored, or what reading the art found; or
-    /// about more than one, as `watch` says of folders it can't read.
+    /// Non-fatal warning (adjusted or ignored options, pixel-art notes, or
+    /// unreadable watch directories).
     Warning {
-        /// What, in English.
+        /// Human-readable warning message.
         message: String,
     },
-    /// The result is written: what was made, as converting returns it.
+    /// Output written; carries the same [`Outcome`] returned by `convert`.
     Finished(Outcome),
-    /// A conversion, or the whole command, failed. Only printed by the
-    /// command line; the library returns errors instead.
+    /// Conversion or command failed. Emitted only by the CLI; library calls
+    /// return `Err` instead.
     Error(Failure),
 }
 
-/// A conversion of any format is about to make its result, which its
-/// `started` event says, the first of each conversion: what it makes of
-/// which input, where, and the limit it must fit, beside what only its
-/// format says then.
+/// Payload for [`Event::Started`]: input, output, format, target, size limit,
+/// and format-specific start details.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Started {
-    /// The input, the first picture of a sequence.
+    /// Input path (or first image/directory of a sequence).
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub input: PathBuf,
-    /// Where the result goes.
+    /// Destination output path.
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
-    /// What it makes.
+    /// Output format.
     pub format: Format,
-    /// What it makes it as.
+    /// Telegram target (sticker or emoji).
     pub target: Target,
-    /// The most Telegram takes of it, in bytes.
+    /// Telegram file size limit in bytes.
     pub limit: u64,
-    /// What only its format says as it starts, beside the rest.
+    /// Format-specific start metadata.
     #[serde(flatten)]
     pub details: StartDetails,
 }
 
-/// What only one format's [`Started`] says, serialised beside the rest of
-/// it, its `format` saying which.
+/// Format-specific fields flattened into [`Started`].
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(untagged, rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum StartDetails {
-    /// A WebM's: the conversion is planned and about to start encoding.
+    /// WebM conversion plan before encoding starts.
     Webm {
-        /// What the conversion will do.
+        /// Computed WebM plan.
         plan: Box<Plan>,
     },
-    /// A `.tgs`'s: the input is read.
+    /// `.tgs` normalisation report after reading the input.
     Tgs {
-        /// What normalising found and did.
+        /// Normalisation report.
         report: Box<Report>,
     },
-    /// A WebP's: the input was read, and the picture is about to be made;
-    /// nothing more is said of it.
+    /// WebP has no extra start metadata.
     Webp {},
 }
 
-/// What converting made, of any format, which its `finished` event says
-/// whether or not events were followed: the sticker or emoji written, how
-/// it measures up to Telegram's limit for it, and what Telegram would
-/// still have a problem with, beside what only its format has.
+/// Final result of a successful conversion across any format.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Outcome {
-    /// The input, the first picture of a sequence, as every event about
-    /// one names it.
+    /// Input path (or first image/directory of a sequence).
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub input: PathBuf,
-    /// Where the result was written.
+    /// Path where the output was written.
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
-    /// What it is.
+    /// Output format.
     pub format: Format,
-    /// What it was made as.
+    /// Telegram target (sticker or emoji).
     pub target: Target,
-    /// Its size in bytes.
+    /// Output file size in bytes.
     pub bytes: u64,
-    /// The most Telegram takes of it, in bytes.
+    /// Telegram file size limit in bytes.
     pub limit: u64,
-    /// Whether anything visible was given up to fit the limit: for WebM, a
-    /// lower frame rate or a shorter length than planned, as fitting by
-    /// them makes; for `.tgs`, reductions, a forced pixel scale or the end
-    /// of a long input; for WebP, saving it lossy where lossless didn't
-    /// fit.
+    /// True if fitting compromised visible output to meet the size limit:
+    /// lowered frame rate or shortened duration for WebM; reductions, forced
+    /// pixel scale or trimmed duration for `.tgs`; lossy fallback for WebP.
     pub changed: bool,
-    /// What Telegram would still have a problem with; it refuses the
-    /// result for any error, as [`crate::telegram::refuses`] says.
+    /// Remaining Telegram validation issues; any error-severity issue means
+    /// Telegram will reject the file (see [`crate::telegram::refuses`]).
     pub issues: Vec<Issue>,
-    /// What only its format has, beside the rest.
+    /// Format-specific result metadata.
     #[serde(flatten)]
     pub details: Details,
 }
 
-/// What only one format's [`Outcome`] has, serialised beside the rest of
-/// it, its `format` saying which.
+/// Format-specific fields flattened into [`Outcome`].
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(untagged, rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Details {
-    /// A WebM's: the encode fitting kept, and how.
+    /// WebM result metadata.
     Webm {
-        /// The attempt that was kept.
+        /// 1-based number of the chosen attempt.
         attempt: u32,
-        /// Its settings.
+        /// Encoder parameters of the chosen attempt.
         params: Params,
-        /// Whether its header's duration was spoofed.
+        /// Whether the container header duration was spoofed.
         spoofed: bool,
-        /// Whether fitting was asked to stop early and kept the best
-        /// encode that fit so far, see
+        /// Whether size-fitting stopped early via
         /// [`CancelToken::settle`](crate::CancelToken::settle).
         settled: bool,
-        /// Where the intermediate files are, when they were kept.
+        /// Directory holding kept intermediate files, if `keep_temp` was set.
         #[serde(serialize_with = "crate::protocol::serialize_optional_path")]
         temp_dir: Option<PathBuf>,
     },
-    /// A `.tgs`'s: what its Lottie holds, and what fitting did.
+    /// `.tgs` result metadata.
     Tgs {
-        /// Size of the Lottie JSON inside.
+        /// Uncompressed Lottie JSON size in bytes.
         json_bytes: u64,
-        /// Reductions fitting applied, in order.
+        /// Reductions applied during fitting, in order.
         steps: Vec<Step>,
-        /// Lottie layers in it.
+        /// Number of Lottie layers.
         layers: u64,
-        /// Rectangles drawn in all of them.
+        /// Total rectangle shapes across all layers.
         rectangles: u64,
-        /// What the sticker shows, drawn for previews when asked, as
-        /// [`Outcome::preview`] draws it; not serialised.
+        /// Retained drawing data for [`Outcome::preview`]; not serialised.
         #[serde(skip)]
         drawing: crate::tgs::Drawing,
     },
-    /// A WebP's: the picture, and how it was encoded.
+    /// WebP result metadata.
     Webp {
-        /// Its width in pixels.
+        /// Output width in pixels.
         width: u32,
-        /// Its height in pixels.
+        /// Output height in pixels.
         height: u32,
-        /// How it was encoded to fit.
+        /// Chosen encoding mode and quality.
         encoding: Encoding,
     },
 }
 
 impl Outcome {
-    /// What a `.tgs` shows, drawn now from what it was made of, as
-    /// reading it back with [`crate::tgs::preview_file`] draws it; `None`
-    /// for the other formats, which are read from their files for
-    /// previews, as [`crate::webp::preview`] and
-    /// [`Backend::preview`](crate::backend::Backend::preview) read them.
+    /// Renders an in-memory preview for `.tgs` results (matching
+    /// [`crate::tgs::preview_file`]). Returns `None` for WebM and WebP, which
+    /// are decoded from disk via
+    /// [`Backend::preview`](crate::backend::Backend::preview) and
+    /// [`crate::webp::preview`].
     pub fn preview(&self) -> Option<Preview> {
         match &self.details {
             Details::Tgs { drawing, .. } => Some(drawing.draw()),

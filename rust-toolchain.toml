@@ -1,8 +1,8 @@
-# The newest stable rather than a pinned release: distributions build
-# tgradish with the stable Rust they ship, and CI following the newest
-# finds what a new release breaks before they do. The oldest release that
-# builds it is `rust-version` in Cargo.toml, which CI checks with too.
-# Release builds pin theirs, as RUSTUP_TOOLCHAIN in
+# Track latest stable rather than pinning a version: distributions build
+# tgradish with the stable Rust they ship, and tracking latest stable in CI
+# catches regressions from new Rust releases before distributions hit them.
+# The oldest supported Rust is `rust-version` in Cargo.toml (also checked in
+# CI). Release builds pin their toolchain via RUSTUP_TOOLCHAIN in
 # .github/workflows/release.yml.
 [toolchain]
 channel = "stable"

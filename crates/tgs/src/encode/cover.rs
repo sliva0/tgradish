@@ -1,23 +1,22 @@
-//! Covers a set of cells with few rectangles that stay inside a larger
-//! allowed set: the cells a paint group must fill, and those it may.
+//! Covers the cells a paint group must fill with disjoint rectangles inside
+//! those it may fill.
 //!
-//! The rectangles never overlap. Renderers anti-alias a path by adding up
-//! the coverage of its parts, so where two overlapping rectangles share an
-//! outer edge, the pixels along it count twice and come out too strong.
-//! Rectangles that only touch are fine: their shared edges cancel out.
+//! Rectangles never overlap. Renderers sum path anti-aliasing coverage across
+//! sub-shapes, so overlapping rectangles along an outer edge double-weight
+//! edge pixels. Edge-touching rectangles are safe because shared inner edges
+//! cancel out.
 
 use super::mask::Mask;
 
-/// `x, y, width, height` in cells.
+/// Rectangle `(x, y, width, height)` in cell coordinates.
 pub type Rect = (u32, u32, u32, u32);
 
-/// Disjoint rectangles inside `allowed` whose union holds every cell of
-/// `must` (which must be inside `allowed`), sorted by row, then column.
+/// Returns disjoint rectangles inside `allowed` whose union covers `must`
+/// (`must` must be a subset of `allowed`), sorted by `(y, x)`.
 ///
-/// Greedy: the first uncovered cell, in reading order, seeds a rectangle
-/// in the allowed cells no rectangle has taken yet; of the widest
-/// rectangles for each height it can reach, the one covering the most
-/// uncovered cells wins.
+/// Greedy algorithm: picks the first uncovered cell in reading order, tests
+/// the widest free rectangle inside `allowed` for each reachable height, and
+/// takes the one covering the most uncovered cells.
 pub fn cover(must: &Mask, allowed: &Mask) -> Vec<Rect> {
     debug_assert!(must.is_subset(allowed));
     let Some((left, top, width, height)) = must.bounds() else { return Vec::new() };

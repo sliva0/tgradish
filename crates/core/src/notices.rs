@@ -1,61 +1,59 @@
-// What each notice a build carries is, and the file in this crate it is
-// read from, shared by build.rs, which packs those files, and `licenses`,
-// which says what each one it unpacks is.
+// Shared notice catalogue included by both `build.rs` (to pack the files) and
+// `licenses.rs` (to label each unpacked notice).
 
-/// What a notice is the licence of, or about: front-ends word its title
-/// from it in their own language, keeping the names it holds as they are.
-/// Its `Display` is the title in English, as [`Notice::title`] gives it.
+/// Category of an embedded licence notice. Front-ends can localise titles from
+/// this enum while keeping component names verbatim. `Display` produces the
+/// English title returned by [`Notice::title`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[non_exhaustive]
 pub enum Kind {
     /// tgradish's own licence.
     Tgradish,
-    /// The licence of the work named.
+    /// Licence of the named component.
     Licence {
-        /// The work's name.
+        /// Component name.
         of: &'static str,
     },
-    /// A licence of the work named, given by its own name, in full.
+    /// Licence of the named component, with its full licence title.
     NamedLicence {
-        /// The work's name.
+        /// Component name.
         of: &'static str,
-        /// The licence's name.
+        /// Full licence title.
         licence: &'static str,
     },
-    /// Notes on how the work named is licensed.
+    /// Licensing notes for the named component.
     LicenceNotes {
-        /// The work's name.
+        /// Component name.
         of: &'static str,
     },
-    /// The patent grant of the work named.
+    /// Patent grant for the named component.
     PatentGrant {
-        /// The work's name.
+        /// Component name.
         of: &'static str,
     },
-    /// What of the work named is built in, and where its sources are.
+    /// Built-in component summary and source availability notice.
     Sources {
-        /// The work's name.
+        /// Component name.
         of: &'static str,
     },
-    /// The licences of the Rust crates, the longest notice.
+    /// Combined third-party Rust crate licences.
     Crates,
-    /// The licence of the font named, of which a front-end has subsets
-    /// built in, as the GUI does.
+    /// Licence for an embedded font subset (used by the GUI).
     Font {
-        /// The font's name, or its styles' names.
+        /// Font family or style names.
         name: &'static str,
-        /// How many subsets of it there are.
+        /// Number of embedded subsets.
         subsets: u8,
     },
 }
 
-/// Each notice's file, whether only builds with ffmpeg built in carry it,
-/// and what it is, in the order they are listed: tgradish's own first.
+/// Bundled notice files in display order (`tgradish` first). Each tuple is
+/// `(relative_path, linked_static_only, kind)`.
 pub(crate) const FILES: &[(&str, bool, Kind)] = &[
     ("LICENSE.txt", false, Kind::Tgradish),
-    // only builds with the release's ffmpeg in them carry its notices:
-    // one linked to a distribution's libraries holds no copy of ffmpeg, and
-    // those aren't the build these files describe
+    // Only `linked-static` builds carry ffmpeg's notices: they describe the
+    // ffmpeg built for releases, which a build linked to a distribution's
+    // libraries holds no copy of.
     ("licenses/ffmpeg/SOURCES.txt", true, Kind::Sources { of: "ffmpeg" }),
     (
         "licenses/ffmpeg/ffmpeg-COPYING.LGPLv2.1",

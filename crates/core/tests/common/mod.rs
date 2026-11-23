@@ -1,7 +1,6 @@
-//! What the end-to-end tests share: the backends they run through, and
-//! the clips they convert. Without ffmpeg they are skipped, unless
-//! `TGRADISH_REQUIRE_FFMPEG=1` says it must be there, as CI does, where a
-//! skipped test would pass unseen.
+//! Shared helpers for integration tests: backend discovery and cached test
+//! clips. Tests skip when ffmpeg is missing unless `TGRADISH_REQUIRE_FFMPEG=1`
+//! is set (as in CI, where a skipped test would pass unseen).
 // each test binary uses its own part of this
 #![allow(dead_code)]
 

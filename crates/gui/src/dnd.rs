@@ -1,10 +1,11 @@
-//! Files dragged onto the window on Wayland.
+//! Wayland drag-and-drop file receiver.
 //!
-//! winit reports dropped files on X11, Windows and macOS, but not on
-//! Wayland. There, this listens for drags itself: on winit's connection,
-//! with a data device of its own read on a thread of its own, like the
-//! clipboard's. Compositors send a drag to every data device of the same
-//! client, so this one takes nothing from the clipboard's.
+//! winit reports dropped files on X11, Windows, and macOS, but not on Wayland.
+//! On Wayland, this module binds a dedicated `wl_data_device` on winit's
+//! display connection and dispatches its event queue on a background thread
+//! (similar to the clipboard). Wayland compositors broadcast drag events to
+//! every data device of the client, so this does not take anything from the
+//! clipboard's.
 
 use std::collections::HashMap;
 use std::io::{PipeReader, PipeWriter, Read, Write};

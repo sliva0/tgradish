@@ -1,36 +1,36 @@
 # tgradish
 
-Telegram video, static and animated stickers and emoji from videos, images or pixel art, in a GUI or on the command line:
+Convert videos, images, and pixel art into Telegram stickers and custom emoji using the GUI or command line:
 
-- video stickers and emoji (WebM) from any video, GIF or picture;
-- animated stickers and emoji (.tgs) from pixel art: GIF, APNG, WebP, Aseprite, a sprite sheet or a folder of frames;
-- static stickers and emoji (WebP) from a picture, or a frame of a video.
+- **Video stickers and emoji (WebM)** from any video, GIF, or image.
+- **Animated stickers and emoji (`.tgs`)** from pixel art: GIF, APNG, WebP, Aseprite, sprite sheets, or folders of frames.
+- **Static stickers and emoji (WebP)** from an image or a single video frame.
 
-Video stickers and emoji can run past Telegram's 3 second limit: tgradish spoofs the duration written in the file so Telegram accepts them.
+Video stickers and emoji can exceed Telegram's 3-second limit: tgradish spoofs the duration in the file metadata so Telegram accepts them.
 
 ![tgradish turning pixel art into animated stickers](.github/screenshot.png)
 
 ## Installation
 
-Every release is on [Releases](https://github.com/sliva0/tgradish/releases); the links below take the latest.
+All releases are on the [Releases](https://github.com/sliva0/tgradish/releases) page. The links below point to the latest release.
 
 ### Windows
 
-Only `x86-64` is supported. ffmpeg is built-in.
+Only `x86-64` is supported. Release builds include ffmpeg.
 
-- download [tgradish-windows-x86_64.zip](https://github.com/sliva0/tgradish/releases/latest/download/tgradish-windows-x86_64.zip), unpack it and run `tgradish.exe`; or
-- download [tgradish.exe](https://github.com/sliva0/tgradish/releases/latest/download/tgradish.exe) alone.
+- Download [tgradish-windows-x86_64.zip](https://github.com/sliva0/tgradish/releases/latest/download/tgradish-windows-x86_64.zip), unpack it, and run `tgradish.exe`; or
+- Download [tgradish.exe](https://github.com/sliva0/tgradish/releases/latest/download/tgradish.exe) by itself.
 
 ### Linux
 
-Works for both `x86-64` and `aarch64`: `$(uname -m)` picks the file for the machine.
+Both `x86-64` and `aarch64` are supported. `$(uname -m)` selects the file for your architecture.
 
 <details>
 <summary>
-<b>Debian, Ubuntu, Mint</b> and other Debian-based
+<b>Debian, Ubuntu, Mint</b> and other Debian-based distributions
 </summary>
 
-With ffmpeg built-in:
+Includes ffmpeg:
 
 ```shell
 wget https://github.com/sliva0/tgradish/releases/latest/download/tgradish-linux-$(uname -m).deb
@@ -41,10 +41,10 @@ sudo apt install ./tgradish-linux-$(uname -m).deb
 
 <details>
 <summary>
-<b>Fedora, openSUSE</b> and other rpm-based
+<b>Fedora, openSUSE</b> and other RPM-based distributions
 </summary>
 
-With ffmpeg built-in:
+Includes ffmpeg:
 
 ```shell
 curl -LO https://github.com/sliva0/tgradish/releases/latest/download/tgradish-linux-$(uname -m).rpm
@@ -60,11 +60,11 @@ sudo zypper install --allow-unsigned-rpm ./tgradish-linux-$(uname -m).rpm
 <b>Arch Linux</b>
 </summary>
 
-From the AUR:
+Available on the AUR:
 
-- `tgradish` builds from source;
-- `tgradish-bin` uses the system's ffmpeg;
-- `tgradish-static-bin` has ffmpeg built-in.
+- `tgradish` — builds from source, uses system ffmpeg
+- `tgradish-bin` — prebuilt binary, uses system ffmpeg
+- `tgradish-static-bin` — prebuilt binary with ffmpeg built in
 
 ```shell
 paru -S tgradish-bin
@@ -76,14 +76,14 @@ yay -S tgradish-bin
 
 <details>
 <summary>
-<b>NixOS, Nix</b>
+<b>NixOS and Nix</b>
 </summary>
 
-With nixpkgs' ffmpeg:
+Uses nixpkgs' ffmpeg:
 
 ```shell
-nix run github:sliva0/tgradish               # once
-nix profile install github:sliva0/tgradish   # to keep
+nix run github:sliva0/tgradish               # run once
+nix profile install github:sliva0/tgradish   # install permanently
 ```
 
 </details>
@@ -93,14 +93,14 @@ nix profile install github:sliva0/tgradish   # to keep
 <b>Any Linux</b> with glibc 2.28 or newer
 </summary>
 
-From a tarball, with ffmpeg built-in:
+Tarball with ffmpeg built in:
 
 ```shell
 curl -L https://github.com/sliva0/tgradish/releases/latest/download/tgradish-linux-$(uname -m).tar.gz | tar -xz
 install -Dm755 tgradish-*/tgradish ~/.local/bin/tgradish
 ```
 
-For musl, as on Alpine, take `tgradish-linux-musl-$(uname -m).tar.gz` instead, or `tgradish-linux-$(uname -m)-system-ffmpeg.tar.gz` to use the system's ffmpeg. The archives also have a menu entry, icons, man pages and shell completions.
+For musl systems (such as Alpine), use `tgradish-linux-musl-$(uname -m).tar.gz`. To use your system's ffmpeg on glibc systems, use `tgradish-linux-$(uname -m)-system-ffmpeg.tar.gz`. Archives also contain a `.desktop` file, icons, man pages, and shell completions.
 
 </details>
 
@@ -109,7 +109,7 @@ For musl, as on Alpine, take `tgradish-linux-musl-$(uname -m).tar.gz` instead, o
 <b>Cargo</b>
 </summary>
 
-With Rust 1.95 or newer and a C compiler, using the system's ffmpeg:
+Requires Rust 1.95 or newer and a C compiler; uses the system's ffmpeg:
 
 ```shell
 cargo install tgradish
@@ -122,7 +122,7 @@ cargo install tgradish
 <b>From source</b>
 </summary>
 
-With Rust 1.95 or newer and a C compiler, using the system's ffmpeg:
+Requires Rust 1.95 or newer and a C compiler; uses the system's ffmpeg:
 
 ```shell
 git clone https://github.com/sliva0/tgradish
@@ -134,9 +134,9 @@ cargo install --locked --path crates/cli
 
 ### macOS
 
-Untested: no release is built for it yet. If you want to help test tgradish on macOS, [contact me](#contributing).
+macOS is untested and has no prebuilt releases yet. If you can help test on macOS, [get in touch](#contributing).
 
-Building from source might work, with Homebrew's ffmpeg:
+Building from source with Homebrew's ffmpeg may work:
 
 ```shell
 brew install ffmpeg rust
@@ -145,54 +145,65 @@ cargo install tgradish
 
 ### 1.x
 
-The Python version, 1.x, is on the [`1.x`](https://github.com/sliva0/tgradish/tree/1.x) branch and on PyPI. Its command line was different: see [CHANGELOG.md](CHANGELOG.md).
+The older Python 1.x version lives on the [`1.x`](https://github.com/sliva0/tgradish/tree/1.x) branch and PyPI. Its command line differs from 2.x; see [CHANGELOG.md](CHANGELOG.md).
 
 ## Dependencies
 
-Release builds have ffmpeg built-in, as does `tgradish-static-bin`, but not the archives named `system-ffmpeg`. Those, the other AUR packages, Nix's and builds with cargo run `ffmpeg` and `ffprobe` from PATH, with libvpx, which the AUR and Nix packages install with them; `tgradish ffmpeg` shows which is used and whether it can make stickers.
+Release builds and `tgradish-static-bin` include ffmpeg. All other builds (`system-ffmpeg` tarballs, `tgradish`, `tgradish-bin`, Nix, and Cargo installs) run `ffmpeg` and `ffprobe` from `PATH`. They require **ffmpeg 6.0 or newer** with `libvpx` for VP9 encoding (the AUR and Nix packages install this automatically). Run `tgradish ffmpeg` to check which ffmpeg tgradish uses and whether it can make video stickers.
 
-Animated stickers from pixel art, `tgradish spoof` and `tgradish inspect` work without ffmpeg.
+These features work without ffmpeg:
+
+- Animated `.tgs` stickers from pixel art (images, GIF, APNG, WebP, Aseprite, sprite sheets, or frame folders)
+- `tgradish spoof`
+- `tgradish inspect` on stickers (WebM, WebP, TGS), images, animations, and Aseprite files (inspecting other videos requires ffmpeg)
 
 ## Usage examples
 
-`tgradish gui` opens the GUI, as does starting `tgradish` from a file manager or a menu. F1 lists its keyboard shortcuts.
+Run `tgradish gui` to open the GUI, or launch `tgradish` from a file manager or application menu. Press `F1` in the GUI to view keyboard shortcuts.
 
-On the command line:
+Command-line examples:
 
 ```shell
-tgradish convert clip.mp4                  # a video sticker, clip.sticker.webm
-tgradish convert clip.mp4 --target emoji   # an emoji, clip.emoji.webm
-tgradish convert walk.ase -f tgs           # an animated sticker, walk.sticker.tgs
-tgradish convert photo.jpg -f webp         # a static sticker, photo.sticker.webp
-tgradish watch ~/Videos -O ~/Stickers      # each new video or picture as it comes
-tgradish inspect clip.sticker.webm         # what Telegram would say of it
-tgradish spoof ready.webm long.webm        # a WebM made elsewhere, spoofed into long.webm
+tgradish convert clip.mp4                  # video sticker: clip.sticker.webm
+tgradish convert clip.mp4 --target emoji   # video emoji: clip.emoji.webm
+tgradish convert walk.ase -f tgs           # animated sticker: walk.sticker.tgs
+tgradish convert photo.jpg -f webp         # static sticker: photo.sticker.webp
+tgradish watch ~/Videos -O ~/Stickers      # convert new videos and images automatically
+tgradish inspect clip.sticker.webm         # check file details and Telegram limits
+tgradish spoof ready.webm long.webm        # spoof an existing WebM's duration into long.webm
 ```
 
-From an Aseprite file, only its `idle` tag, with its `sketch` layer hidden:
+Convert only the `idle` tag of an Aseprite file with the `sketch` layer hidden:
 
 ```shell
 tgradish convert walk.ase -f tgs --tag idle --hide-layers sketch
 ```
 
-`tgradish --help` lists the commands, and `tgradish <command> --help` their options. `tgradish config example` prints a config file to start from, each setting explained.
+Run `tgradish --help` for all commands, and `tgradish <command> --help` for each command's options.
+
+Shell completions: `tgradish completions bash|zsh|fish|nushell|powershell` (packages install them already). Your own presets go in the directory `tgradish preset path` prints.
+
+To configure defaults, run `tgradish config init` to create the config directory and write an annotated example config (it will not overwrite an existing file), or `tgradish config example` to print the example without writing it.
 
 ## Scripting
 
-`--json` prints JSON Lines, and `tgradish describe` gives the schemas of its events and options. `-q` prints only the paths of the files made.
+- `--json` outputs JSON Lines (one compact JSON object per line). Run `tgradish describe` for the event and option schemas.
+- `-q` prints only the paths of created files, one per line.
 
-The exit status is:
+Exit statuses:
 
-- `0` when done;
-- `1` when something failed;
-- `2` when the command line was wrong;
-- `3` when everything was made but Telegram would refuse a result;
-- `130` when `convert` is cancelled.
+- `0` — Success (or `watch` stopped by cancellation).
+- `1` — Error (takes precedence over `3` when processing multiple files).
+- `2` — Invalid command-line arguments.
+- `3` — All files were converted or read, but Telegram would reject a result or an inspected file.
+- `130` — `convert` was cancelled (Ctrl-C or `--cancel-on-stdin`).
+- `141` — Standard output pipe closed early on Unix (`1` on other platforms), for example when piped into `head`.
+- `128 + N` — Stopped by `SIGTERM` or `SIGHUP` on Unix (re-raised so the shell sees the signal, such as `143` for `SIGTERM`).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Feedback: [@s0untitled](https://t.me/s0untitled?direct) on Telegram, or open an issue on this repository.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Send feedback to [@s0untitled](https://t.me/s0untitled?direct) on Telegram or open an issue on GitHub.
 
 ## Licence
 
-[MIT License](LICENSE.txt). Builds with ffmpeg built-in also carry ffmpeg under the LGPL, its sources attached to each release; `tgradish licenses` prints every notice a build carries.
+[MIT License](LICENSE.txt). Builds that include ffmpeg also distribute ffmpeg under the LGPL, with source archives attached to each release. Run `tgradish licenses` to print all bundled licence notices.

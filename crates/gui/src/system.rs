@@ -1,18 +1,19 @@
-//! Folders and web addresses opened with the system's own programs, as a
-//! file manager or browser would open them; eframe opens links only with
-//! a dependency much larger than this. Tests note the addresses instead.
+//! System integration: opening folders and URLs in the user's file manager
+//! or browser (avoiding eframe's heavier URL-opening dependency), and copying
+//! files to the clipboard. Under `#[cfg(test)]`, opened URLs and copied files
+//! are recorded instead.
 
 use std::path::Path;
 
-/// Opens the folder holding `path`, with the file selected where the
-/// system can do that.
+/// Opens the folder containing `path`, selecting the file when supported.
 pub(crate) fn reveal(path: &Path) {
     #[cfg(target_os = "windows")]
     wait_for(std::process::Command::new("explorer").arg("/select,").arg(path).spawn());
     #[cfg(target_os = "macos")]
     wait_for(std::process::Command::new("open").arg("-R").arg(path).spawn());
-    // the file manager is asked over D-Bus, which may start it and so takes
-    // a while; the folder alone where none answers
+    // Ask the file manager over D-Bus on a background thread (launching it
+    // can take a while); fall back to opening the parent directory with
+    // xdg-open if no service responds.
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     {
         let path = path.to_path_buf();
@@ -33,8 +34,8 @@ pub(crate) fn reveal(path: &Path) {
     }
 }
 
-/// `path`, absolute, as a file:// address, its bytes beyond letters,
-/// digits and `-._~/` escaped.
+/// Formats an absolute `path` as a `file://` URI, percent-encoding any byte
+/// outside ASCII alphanumeric and `-._~/`.
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn file_uri(path: &Path) -> String {
     use std::os::unix::ffi::OsStrExt;
@@ -49,22 +50,23 @@ fn file_uri(path: &Path) -> String {
     uri
 }
 
-/// Opens a web address in the system's browser; anything else, which
-/// could be a file or an option, is left alone. A link to a Telegram chat
-/// opens in Telegram's app where one is installed, as [`telegram`] says.
+/// Opens an `http://` or `https://` URL in the system browser (ignoring other
+/// strings so file paths or CLI flags cannot be passed). Telegram chat links
+/// open in the desktop app when installed; see [`telegram`].
 pub(crate) fn browse(url: &str) {
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return;
     }
-    // tests only note it; the condition keeps what follows reachable
+    // In tests, record the URL; `if cfg!(test)` keeps the rest reachable to
+    // the compiler.
     #[cfg(test)]
     if cfg!(test) {
         BROWSED.lock().unwrap().push(url.to_owned());
         return;
     }
     match app_link(url) {
-        // the app asked about, and perhaps tried, on a thread of its own, as
-        // that runs programs and waits for them
+        // Probe and launch the Telegram app on a background thread because it
+        // spawns and waits on external processes.
         Some(app) => {
             let web = url.to_owned();
             let _ = std::thread::Builder::new()
@@ -75,7 +77,7 @@ pub(crate) fn browse(url: &str) {
     }
 }
 
-/// The program that opens `url` as the system's file manager would.
+/// Returns the system command to open `url`.
 fn opener(url: &str) -> std::process::Command {
     #[cfg(target_os = "windows")]
     let program = "explorer";
@@ -88,11 +90,10 @@ fn opener(url: &str) -> std::process::Command {
     command
 }
 
-/// The `tg:` link that opens the chat a `https://t.me/` link names in
-/// Telegram's app, as https://core.telegram.org/api/links has them: a
-/// username, `t.me/name`, is `tg://resolve?domain=name`, and the direct
-/// messages of a channel, `t.me/name?direct`, are that with `&direct`.
-/// Other links of t.me, and others, have none here.
+/// Converts a `https://t.me/` chat URL into a `tg:` deep link per
+/// <https://core.telegram.org/api/links>: `t.me/name` becomes
+/// `tg://resolve?domain=name`, and `t.me/name?direct` appends `&direct`.
+/// Returns `None` for other `t.me` paths or non-Telegram URLs.
 pub(crate) fn app_link(url: &str) -> Option<String> {
     let rest = url.strip_prefix("https://t.me/")?;
     let (name, query) = rest.split_once('?').unwrap_or((rest, ""));
@@ -108,24 +109,22 @@ pub(crate) fn app_link(url: &str) -> Option<String> {
     }
 }
 
-/// What the system says of Telegram's app, and the way it opens links.
+/// Queries and opens `tg:` and web links on the host OS.
 pub(crate) trait Telegram {
-    /// Whether a program takes `tg:` links, where the system can say;
-    /// `None` where it can't.
+    /// Returns whether a handler for `tg:` URLs is registered, or `None` if
+    /// the platform cannot tell ahead of time.
     fn takes_tg_links(&self) -> Option<bool>;
-    /// Whether an unknown answer is worth trying: where opening a link no
-    /// program takes fails, so the web one can follow, rather than leave a
-    /// dialog of its own up.
+    /// Returns whether trying `tg:` blindly is safe when `takes_tg_links` is
+    /// `None` (true when an unhandled scheme fails cleanly instead of showing
+    /// an OS error dialog).
     fn may_try(&self) -> bool;
-    /// Opens `url`, and whether that went: ran and ended well, as far as the
-    /// system says.
+    /// Opens `url` and returns true if the launcher succeeded.
     fn open(&self, url: &str) -> bool;
 }
 
-/// Opens a chat in Telegram's app, by `app`, its `tg:` link, where the
-/// system says a program takes those, or can't say and failing there
-/// shows; else, or where that fails, on the web, by `web`. Something is
-/// always opened.
+/// Opens a Telegram link via `app` (`tg://...`) when a handler is registered
+/// (or safe to try), falling back to `web` (`https://t.me/...`) if none is
+/// registered or opening `app` fails. Something is always opened.
 pub(crate) fn telegram(system: &dyn Telegram, app: &str, web: &str) {
     let tried = match system.takes_tg_links() {
         Some(takes) => takes,
@@ -136,16 +135,15 @@ pub(crate) fn telegram(system: &dyn Telegram, app: &str, web: &str) {
     }
 }
 
-/// The system tgradish runs on, as [`Telegram`] asks of it.
+/// Host implementation of [`Telegram`].
 struct Host;
 
 impl Telegram for Host {
-    /// Linux and the like: the desktop's default for `x-scheme-handler/tg`,
-    /// as `xdg-mime` reads it, unless in a Flatpak or Snap sandbox, which
-    /// knows nothing of the system's programs and opens links through the
-    /// desktop portal. Windows: a `tg` protocol registered, which Telegram
-    /// Desktop's installer does for the user or the machine. macOS: not
-    /// asked, as `open` fails where no app takes the link.
+    /// On Linux/BSD, queries `xdg-mime` for `x-scheme-handler/tg` unless
+    /// running inside a Flatpak or Snap sandbox (which cannot see host apps
+    /// and routes links through the desktop portal). On Windows, checks the
+    /// `tg` URL protocol in the registry. On macOS, returns `None` because
+    /// `open` exits with an error when no app claims the scheme.
     fn takes_tg_links(&self) -> Option<bool> {
         #[cfg(target_os = "windows")]
         return Some(windows_takes_tg());
@@ -168,8 +166,8 @@ impl Telegram for Host {
     }
 
     fn may_try(&self) -> bool {
-        // where xdg-mime is missing but not in a sandbox, xdg-open fails
-        // as plainly as macOS's `open`
+        // Outside a sandbox, xdg-open fails cleanly like macOS `open` if
+        // xdg-mime was unavailable.
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         return !sandboxed();
         #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -177,8 +175,8 @@ impl Telegram for Host {
     }
 
     fn open(&self, url: &str) -> bool {
-        // through the shell, which says whether it opened it: Explorer
-        // ends with 1 either way
+        // Use ShellExecuteW on Windows because `explorer.exe` exits with code 1
+        // even on success.
         #[cfg(target_os = "windows")]
         return windows_open(url);
         #[cfg(not(target_os = "windows"))]
@@ -189,9 +187,8 @@ impl Telegram for Host {
     }
 }
 
-/// Opens `url` as the shell opens it, and whether that went: a `tg:` link
-/// whose registered program is gone fails here, rather than nothing
-/// happening, so the web link can follow.
+/// Opens `url` via `ShellExecuteW` and returns whether it succeeded, so a
+/// stale `tg:` registration whose binary was deleted falls back to the web URL.
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)]
 fn windows_open(url: &str) -> bool {
@@ -202,10 +199,9 @@ fn windows_open(url: &str) -> bool {
     use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
     let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
     let (verb, file) = (wide("open"), wide(url));
-    // SAFETY: COM is set up for this thread, which the shell may need for
-    // the program a link opens with, as Microsoft asks before
-    // ShellExecute; both strings end in a NUL, and the null window and
-    // parameters are allowed
+    // SAFETY: Initialise apartment-threaded COM on this thread as required by
+    // ShellExecuteW; both UTF-16 strings are NUL-terminated, and null HWND /
+    // parameter pointers are valid.
     let opened = unsafe {
         let flags = (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32;
         CoInitializeEx(std::ptr::null(), flags);
@@ -218,13 +214,14 @@ fn windows_open(url: &str) -> bool {
             SW_SHOWNORMAL,
         )
     };
-    // a value above 32 is success, as ShellExecute has it
+    // ShellExecuteW returns a value > 32 on success.
     opened as usize > 32
 }
 
-/// The program of a command line as the registry keeps one for opening a
-/// link, `"C:\path\Telegram.exe" -- "%1"` or `C:\path\Telegram.exe -- %1`:
-/// the quoted part, or else up to the first `.exe` and the rest.
+/// Extracts the executable path from a Windows registry command string such as
+/// `"C:\path\Telegram.exe" -- "%1"` or `C:\path\Telegram.exe -- %1`: takes the
+/// first quoted string, or up to the first `.exe`, or the first whitespace-
+/// delimited token.
 #[cfg(any(target_os = "windows", test))]
 pub(crate) fn command_program(command: &str) -> Option<std::path::PathBuf> {
     let command = command.trim();
@@ -241,7 +238,7 @@ pub(crate) fn command_program(command: &str) -> Option<std::path::PathBuf> {
     (!program.is_empty()).then(|| std::path::PathBuf::from(program))
 }
 
-/// Whether tgradish runs in a Flatpak or Snap sandbox.
+/// Returns true if running inside a Flatpak or Snap sandbox.
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 fn sandboxed() -> bool {
     Path::new("/.flatpak-info").exists()
@@ -249,9 +246,9 @@ fn sandboxed() -> bool {
         || std::env::var_os("SNAP").is_some()
 }
 
-/// Whether a `tg` URL protocol is registered, for the user or the machine,
-/// with a command to open it with whose program is there: one left behind
-/// by a Telegram since removed opens nothing.
+/// Returns true if the `tg` URL protocol is registered in `HKEY_CLASSES_ROOT`
+/// and its open command points to an existing file on disk (ignoring stale
+/// keys left behind after uninstalling Telegram).
 #[cfg(target_os = "windows")]
 #[allow(unsafe_code)]
 fn windows_takes_tg() -> bool {
@@ -259,7 +256,8 @@ fn windows_takes_tg() -> bool {
         HKEY_CLASSES_ROOT, RRF_RT_ANY, RRF_RT_REG_SZ, RegGetValueW,
     };
     let wide = |text: &str| text.encode_utf16().chain([0]).collect::<Vec<u16>>();
-    // the value's size, or with `data` its text, where it is there
+    // Returns the value's byte size, and writes its UTF-16 contents into
+    // `data` when provided.
     let value = |key: &str, name: Option<&str>, data: Option<&mut Vec<u16>>| {
         let key = wide(key);
         let name = name.map(wide);
@@ -269,8 +267,8 @@ fn windows_takes_tg() -> bool {
             Some(data) => (RRF_RT_REG_SZ, data.as_mut_ptr().cast()),
             None => (RRF_RT_ANY, std::ptr::null_mut()),
         };
-        // SAFETY: the key and the name, where given, end in a NUL; `size`
-        // says how many bytes `pointer` has room for, none where it is null
+        // SAFETY: `key` and `name` (when non-null) are NUL-terminated UTF-16,
+        // and `size` matches the byte capacity of `pointer` (0 when null).
         let status = unsafe {
             RegGetValueW(
                 HKEY_CLASSES_ROOT,
@@ -298,16 +296,15 @@ fn windows_takes_tg() -> bool {
     command_program(&command).is_some_and(|program| program.is_file())
 }
 
-/// Web addresses tests asked to open, rather than opening them.
-/// The clipboard, kept while the GUI runs: on Linux what is copied
-/// is there only while the program that copied it holds it.
+/// Persistent clipboard handle kept alive for the lifetime of the GUI (on X11
+/// and Wayland, clipboard contents vanish when the owning handle is dropped).
 #[derive(Default)]
 pub(crate) struct Clipboard(Option<arboard::Clipboard>);
 
 impl Clipboard {
-    /// Puts the file at `path` on the clipboard as a file, as a file
-    /// manager copies one, for pasting into Telegram or a folder: a list of
-    /// its URI on Linux, a drop of it on Windows, its URL on macOS.
+    /// Copies `path` to the clipboard as a file (URI list on Linux, `CF_HDROP`
+    /// on Windows, file URL on macOS) for pasting into Telegram or a file
+    /// manager.
     pub(crate) fn copy_file(&mut self, path: &Path) -> Result<(), String> {
         let path = std::path::absolute(path).map_err(|err| err.to_string())?;
         #[cfg(test)]
@@ -327,16 +324,17 @@ impl Clipboard {
     }
 }
 
-/// The files the tests copied.
+/// Files copied to the clipboard during tests.
 #[cfg(test)]
 pub(crate) static COPIED: std::sync::Mutex<Vec<std::path::PathBuf>> =
     std::sync::Mutex::new(Vec::new());
 
+/// URLs opened during tests.
 #[cfg(test)]
 pub(crate) static BROWSED: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
 
-/// Waits for a program started to open something to end, on a thread of
-/// its own, so it doesn't linger as a zombie.
+/// Reaps a spawned launcher process on a background thread so it does not
+/// remain a zombie.
 fn wait_for(started: std::io::Result<std::process::Child>) {
     if let Ok(mut child) = started {
         std::thread::spawn(move || child.wait());

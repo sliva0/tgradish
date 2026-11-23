@@ -1,8 +1,7 @@
-//! The two ways of running ffmpeg: as separate `ffmpeg` and `ffprobe`
-//! processes, or through libraries linked into the binary, which users
-//! and callers know as the built-in ffmpeg. The cargo features `linked`
-//! and `linked-static` and the module `linked` keep the implementation's
-//! name for it, which packaging builds by.
+//! Runs ffmpeg either as external `ffmpeg`/`ffprobe` processes or via linked
+//! libraries (the built-in ffmpeg). The Cargo features `linked` and
+//! `linked-static` and the `linked` module retain the internal name for
+//! packaging compatibility.
 
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -26,13 +25,13 @@ pub(crate) enum Pass<'a> {
     Second(&'a Path),
 }
 
-/// `path` from the root, as ffmpeg is given every file it reads. It takes
-/// a name as a URL, so in one relative to the working directory what
-/// comes before a colon, as in `2026-11-12T10:30:00.png`, is read as a
-/// protocol, and its programs take one that starts with a dash for an
-/// option. From the root a name starts with neither, on Windows with a
-/// drive's letter, which ffmpeg knows. Links are left as they are, and so
-/// is a path that can't be made absolute, as an empty one.
+/// Resolves `path` to an absolute path before passing it to ffmpeg.
+///
+/// ffmpeg treats relative names with a colon (such as
+/// `2026-11-12T10:30:00.png`) as URL protocols, and its CLI tools treat
+/// leading dashes as flags. Absolute paths avoid both issues (ffmpeg
+/// recognises Windows drive letters). Symlinks are preserved; paths that
+/// cannot be made absolute are returned unchanged.
 fn absolute(path: &Path) -> Cow<'_, Path> {
     if path.is_absolute() {
         return Cow::Borrowed(path);
@@ -40,7 +39,7 @@ fn absolute(path: &Path) -> Cow<'_, Path> {
     std::path::absolute(path).map_or(Cow::Borrowed(path), Cow::Owned)
 }
 
-/// `plan` with its input as [`absolute`] makes it.
+/// Returns `plan` with its input resolved via [`absolute`].
 fn reading_absolute(plan: &Plan) -> Cow<'_, Plan> {
     match absolute(&plan.input) {
         Cow::Borrowed(_) => Cow::Borrowed(plan),
@@ -48,8 +47,7 @@ fn reading_absolute(plan: &Plan) -> Cow<'_, Plan> {
     }
 }
 
-/// `result` with its error naming `given` again, where it names the path
-/// [`absolute`] made of it: errors name files as the user did.
+/// Restores the user-supplied path `given` in any error that refers to `read`.
 fn naming<T>(result: Result<T>, given: &Path, read: &Path) -> Result<T> {
     let named = |path: PathBuf| if path == read { given.to_path_buf() } else { path };
     result.map_err(|err| match err {
@@ -60,37 +58,36 @@ fn naming<T>(result: Result<T>, given: &Path, read: &Path) -> Result<T> {
     })
 }
 
-/// The ffmpeg that reads videos and encodes WebM, which every conversion
-/// and inspection that needs one is given.
+/// Selected ffmpeg backend used for reading video and encoding WebM.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Backend {
-    /// ffmpeg and ffprobe executables.
+    /// External `ffmpeg` and `ffprobe` executables.
     Process(Ffmpeg),
-    /// The built-in ffmpeg: its libraries linked into tgradish, with the
-    /// `linked` feature.
+    /// Built-in ffmpeg libraries linked via the `linked` feature.
     #[cfg(feature = "linked")]
     #[cfg_attr(docsrs, doc(cfg(feature = "linked")))]
     Builtin,
 }
 
-/// Which backend is used, for status output.
+/// Summary of the active ffmpeg backend, for status output.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum BackendInfo {
-    /// [`Backend::Process`].
+    /// External [`Backend::Process`] executables.
     Process {
-        /// Its executables, and where they were found.
+        /// Executable paths and how they were located.
         #[serde(flatten)]
         ffmpeg: Ffmpeg,
     },
-    /// The built-in ffmpeg.
+    /// Built-in ffmpeg libraries.
     Builtin,
 }
 
 impl Backend {
-    /// Picks the backend for `choice`, or the executables at `path`.
+    /// Selects a backend according to `choice`, or uses the executables at
+    /// `path`.
     pub fn select(choice: FfmpegChoice, path: Option<&Path>) -> Result<Backend> {
         if let Some(path) = path {
             return Ok(Backend::Process(Ffmpeg::at(path)?));
@@ -106,13 +103,13 @@ impl Backend {
         }
     }
 
-    /// Whether `ffmpeg_args` can be used: they are ffmpeg command line
-    /// arguments, and the built-in ffmpeg has no command line.
+    /// Returns true if extra `ffmpeg_args` are supported (external processes
+    /// only; the built-in ffmpeg has no command line).
     pub fn supports_ffmpeg_args(&self) -> bool {
         matches!(self, Backend::Process(_))
     }
 
-    /// Which backend this is, for status output.
+    /// Returns status metadata describing this backend.
     pub fn info(&self) -> BackendInfo {
         match self {
             Backend::Process(ffmpeg) => BackendInfo::Process { ffmpeg: ffmpeg.clone() },
@@ -121,8 +118,8 @@ impl Backend {
         }
     }
 
-    /// What `input` is, as ffprobe tells it: its video stream's size,
-    /// rate, length and the rest of [`Probe`].
+    /// Probes `input` for video stream dimensions, frame rate, duration and
+    /// metadata.
     pub fn probe(&self, input: &Path, cancel: &CancelToken) -> Result<Probe> {
         let read = absolute(input);
         let probe = match self {
@@ -133,9 +130,9 @@ impl Backend {
         naming(probe, input, &read)
     }
 
-    /// Where the frames of a video, `probe` probed, start, in order, in
-    /// seconds into it as cuts count them: empty when its packets carry no
-    /// times.
+    /// Returns sorted frame start times in seconds relative to `probe.start`,
+    /// matching how cuts measure time. Returns empty if packets lack
+    /// timestamps.
     pub fn frame_starts(
         &self,
         input: &Path,
@@ -152,7 +149,7 @@ impl Backend {
         Ok(in_video(in_file, probe.start))
     }
 
-    /// Its version, and whether it has the VP9 encoder stickers need.
+    /// Queries the backend's version and whether VP9 encoding is available.
     pub fn capabilities(&self, cancel: &CancelToken) -> Result<Capabilities> {
         match self {
             Backend::Process(ffmpeg) => ffmpeg::capabilities(ffmpeg, cancel),
@@ -161,7 +158,7 @@ impl Backend {
         }
     }
 
-    /// Encodes one attempt, or runs the first pass when `output` is `None`.
+    /// Runs one encode attempt, or the first pass when `output` is `None`.
     pub(crate) fn encode(
         &self,
         plan: &Plan,
@@ -191,7 +188,7 @@ impl Backend {
         naming(encoded, &plan.input, &read.input)
     }
 
-    /// Frames of a video or image for showing it, see [`FramesRequest`].
+    /// Decodes video or image frames for display; see [`FramesRequest`].
     pub fn frames(
         &self,
         path: &Path,
@@ -217,9 +214,9 @@ impl Backend {
         Ok(Frames { width, height, start, fps, frames })
     }
 
-    /// A finished sticker, decoded for a preview: straight RGBA at most
-    /// `max_side` pixels on the longer side, each frame with how many 60 fps
-    /// frames it shows for.
+    /// Decodes a finished sticker for preview as straight RGBA with the longer
+    /// side at most `max_side` pixels. Each frame carries its display duration
+    /// in 60 fps ticks.
     pub fn preview(
         &self,
         path: &Path,
@@ -228,8 +225,8 @@ impl Backend {
     ) -> Result<crate::preview::Preview> {
         let probe = self.probe(path, cancel)?;
         let fps = probe.fps_or_default().clamp(1.0, crate::preview::TICKS);
-        // spoofed stickers say in their header that they are shorter than
-        // they play; their frames tell the truth
+        // Spoofed stickers declare a shorter header duration than they actually
+        // play, so use the content duration from the container blocks.
         let played =
             crate::webm::container::inspect_file(path).ok().and_then(|info| info.content_duration);
         let longer = probe.width.max(probe.height).max(1);
@@ -242,7 +239,8 @@ impl Backend {
             length: Some(played.or(probe.duration).unwrap_or(UNKNOWN_SECONDS)),
             fps,
             max_side,
-            // long ones are shown at a lower frame rate
+            // Lower the preview frame rate on long videos to stay within
+            // PREVIEW_BYTES.
             max_frames: ((PREVIEW_BYTES as f64 / frame_bytes.max(1.0)) as usize).max(1),
             threads: Threads::Auto,
         };
@@ -252,8 +250,8 @@ impl Backend {
         Ok(crate::preview::Preview { width: frames.width, height: frames.height, frames: rgba })
     }
 
-    /// The planned frame at the plan's start, cropped, scaled and padded as
-    /// the plan says: straight RGBA of the plan's size, for static stickers.
+    /// Decodes the single frame at `plan.start`, cropped, scaled and padded
+    /// according to `plan`, as straight RGBA for static stickers.
     pub fn still(&self, plan: &Plan, cancel: &CancelToken) -> Result<Vec<u8>> {
         let read = reading_absolute(plan);
         let still = match self {
@@ -264,10 +262,9 @@ impl Backend {
         naming(still, &plan.input, &read.input)
     }
 
-    /// Compares an encoded attempt at `fps` with the source at the planned
-    /// frame rate. The source drives the comparison and the attempt's
-    /// frames are repeated in between, so lower frame rates lose points on
-    /// frames they skip. Returns SSIM from 0 to 1, ignoring alpha.
+    /// Computes SSIM (0 to 1, ignoring alpha) comparing `candidate` (at `fps`)
+    /// against the source (at the planned frame rate). Repeating candidate
+    /// frames between ticks penalises lower frame rates on skipped frames.
     pub fn ssim(
         &self,
         plan: &Plan,
@@ -288,22 +285,21 @@ impl Backend {
     }
 }
 
-/// Where frames of a video `probe` probed start, `in_file` seconds after the
-/// file's start as its packets come, in seconds into the video, in order.
+/// Converts packet timestamps from file time to sorted, deduplicated seconds
+/// relative to `video_start`.
 fn in_video(in_file: Vec<f64>, video_start: f64) -> Vec<f64> {
     let mut starts: Vec<f64> = in_file.into_iter().map(|start| start - video_start).collect();
-    // packets come in decoding order, and decoders drop those before
-    // the start
+    // Packets arrive in decoding order, and decoders drop frames before start.
     starts.retain(|start| start.is_finite() && *start > -1e-6);
     starts.sort_by(f64::total_cmp);
     starts.dedup_by(|later, earlier| *later - *earlier < 1e-6);
     starts
 }
 
-/// Where the frames `request` asks of a video `probe` probed start, how
-/// many a second, and how many: as asked, at most the video's own rate
-/// and as many as asked for, spread over the length; one of a picture,
-/// or where nothing is left to read.
+/// Computes `(start, fps, frame_count)` for `request` against `probe`: at
+/// most `request.fps` and the video's own rate, lowered so at most
+/// `request.max_frames` frames span the length. Still images and empty ranges
+/// give one frame.
 fn spacing(probe: &Probe, request: &FramesRequest) -> (f64, f64, usize) {
     let start = if probe.still_image { 0.0 } else { request.start.max(0.0) };
     let length = match (request.length, probe.duration) {
@@ -320,8 +316,8 @@ fn spacing(probe: &Probe, request: &FramesRequest) -> (f64, f64, usize) {
     (start, fps, ((length * fps).ceil() as usize).clamp(1, max_frames))
 }
 
-/// The size of a video `probe` probed with at most `max_side` pixels on its
-/// longer side, never larger, and at least a pixel each way.
+/// Scales `probe`'s dimensions down so the longer side is at most `max_side`
+/// (never scaling up, minimum 1x1).
 fn scaled(probe: &Probe, max_side: u32) -> (u32, u32) {
     let longer = probe.width.max(probe.height).max(1);
     let scale = (f64::from(max_side) / f64::from(longer)).min(1.0);
@@ -329,55 +325,54 @@ fn scaled(probe: &Probe, max_side: u32) -> (u32, u32) {
     (size(probe.width), size(probe.height))
 }
 
-/// How many 60 fps frames each of `count` frames `fps` a second shows for:
-/// whole ones, rounding where each starts, so they add up to the time they
-/// play, and at least one.
+/// Converts `count` frames at `fps` into integer 60 fps tick durations,
+/// rounding frame boundaries so the total matches playback duration (minimum 1
+/// tick per frame).
 fn ticks(count: usize, fps: f64) -> Vec<u32> {
     let start = |index: usize| (index as f64 * crate::preview::TICKS / fps).round() as u32;
     (0..count).map(|index| (start(index + 1) - start(index)).max(1)).collect()
 }
 
-/// Memory for a preview's frames.
+/// Memory budget for decoded preview frames.
 const PREVIEW_BYTES: usize = 256 << 20;
-/// How much of a sticker of unknown length previews show, in seconds.
+/// Fallback preview duration (in seconds) when a sticker's duration is unknown.
 const UNKNOWN_SECONDS: f64 = 3.0;
 
-/// Which frames of a video to decode, and how small, for showing it.
+/// Parameters for decoding display frames from a video or image.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FramesRequest {
-    /// Seconds into the input.
+    /// Start offset in seconds.
     pub start: f64,
-    /// Seconds to decode; the rest of the input if `None`.
+    /// Duration to decode in seconds, or the remainder of the input if `None`.
     pub length: Option<f64>,
-    /// At most this many frames per second, and at most the input's.
+    /// Maximum frame rate (clamped to the input's frame rate).
     pub fps: f64,
-    /// At most this many pixels on the longer side.
+    /// Maximum length of the longer side in pixels.
     pub max_side: u32,
-    /// At most this many frames, spread over the length by lowering the
-    /// frame rate.
+    /// Maximum number of frames; the frame rate is lowered to stay within
+    /// this cap.
     pub max_frames: usize,
-    /// How many threads ffmpeg reads them in.
+    /// Number of threads used for decoding.
     pub threads: Threads,
 }
 
-/// Evenly spaced frames of a video, as straight RGBA in its display
-/// orientation.
+/// Evenly spaced straight-RGBA video frames in display orientation.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
 pub struct Frames {
-    /// Their width in pixels.
+    /// Frame width in pixels.
     pub width: u32,
-    /// Their height in pixels.
+    /// Frame height in pixels.
     pub height: u32,
-    /// Seconds into the input of the first frame.
+    /// Timestamp of the first frame in seconds.
     pub start: f64,
-    /// Frames per second: the spacing of the frames.
+    /// Frame rate between consecutive frames.
     pub fps: f64,
-    /// Each frame, `width * height * 4` bytes.
+    /// Raw RGBA buffers (`width * height * 4` bytes each).
     pub frames: Vec<Vec<u8>>,
 }
 
-/// Statistics file that ffmpeg's `-passlogfile PREFIX` uses.
+/// Path to the statistics file used by ffmpeg's `-passlogfile PREFIX`.
 #[cfg(feature = "linked")]
 pub(crate) fn pass_log_file(prefix: &Path) -> std::path::PathBuf {
     let mut name = prefix.as_os_str().to_owned();

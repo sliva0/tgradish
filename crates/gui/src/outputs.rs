@@ -1,6 +1,6 @@
-//! Where results go, and which files they may replace. A result never
-//! goes over a file someone else put there, so the GUI remembers what
-//! it wrote itself, and looks for tgradish's marks on files in the way.
+//! Output path resolution and overwrite safety. Existing files not written by
+//! tgradish are never overwritten automatically; the GUI tracks files it wrote
+//! itself and checks existing files for tgradish metadata markers.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

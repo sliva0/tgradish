@@ -1,12 +1,12 @@
 name: nix
 
-# Builds the flake's package, which runs the tests in Nix's sandbox, and
-# its development shell.
+# Builds the Nix flake package (running tests in the sandbox) and checks the
+# dev shell.
 on:
   push:
     branches: [main]
     paths:
-      # what the package is built from, the fileset in packaging/nix/package.nix
+      # Matches the source fileset in packaging/nix/package.nix.
       - flake.nix
       - flake.lock
       - packaging/nix/**
@@ -19,7 +19,7 @@ on:
       - "!**.md"
   pull_request:
     paths:
-      # as above
+      # Matches the source fileset in packaging/nix/package.nix.
       - flake.nix
       - flake.lock
       - packaging/nix/**
@@ -32,12 +32,12 @@ on:
       - "!**.md"
   workflow_dispatch:
 
-# a newer push makes an older run of the same branch or pull request moot
+# Cancel superseded runs on the same branch or pull request.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# nothing here writes to the repository
+# Nothing here writes to the repository.
 permissions:
   contents: read
 
@@ -52,12 +52,12 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: cachix/install-nix-action@3dc140bfc76c49fbd4dd958429132e3746bcb086 # v31.11.5
-      # fails when flake.lock is missing an input
+      # Fails if flake.lock is missing any input.
       - run: nix flake check -L --no-update-lock-file
       - name: Run the package
         run: |
           nix build .#tgradish
           ./result/bin/tgradish --version
-          # ffmpeg comes with the package
+          # Verify wrapped ffmpeg works.
           ./result/bin/tgradish ffmpeg status
       - run: nix develop --command cargo --version

@@ -1,9 +1,7 @@
-//! The AUR packages: `packaging/aur` holds them as they are released, with
-//! `SKIP` for checksums, and each is a git repository on the AUR. The
-//! maintainer's clones are kept in `.aur/`, which git ignores; this brings
-//! each up to its package in `packaging/aur`, with the checksums of what
-//! it downloads, once the release is published, since until then its
-//! files aren't there to download.
+//! Brings the maintainer's AUR clones in `.aur/` (gitignored) up to
+//! `packaging/aur/` and commits, replacing `SKIP` with the checksums of what
+//! each downloads and regenerating `.SRCINFO`; runs only once the release is
+//! published, since its files cannot be downloaded before.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -37,8 +35,8 @@ pub fn aur(args: &[String]) -> Result<()> {
     let sums_url = format!("{release}SHA256SUMS");
     let sums = fetch(&sums_url)?.with_context(|| {
         format!(
-            "v{version} isn't published on GitHub yet ({sums_url} is missing), and the \
-             packages download it: publish its draft first"
+            "v{version} is not published on GitHub yet ({sums_url} returned 404); publish the \
+             draft release first"
         )
     })?;
     let sums = parse_sums(&sums);
@@ -64,7 +62,7 @@ pub fn aur(args: &[String]) -> Result<()> {
         let status = output(git().args(["status", "--porcelain", "--untracked-files=no"]))?;
         ensure!(
             status.is_empty(),
-            "{} has changes of its own, which this would mix in:\n{}",
+            "{} has uncommitted changes:\n{}",
             dir.display(),
             status.trim_end()
         );
@@ -94,7 +92,7 @@ pub fn aur(args: &[String]) -> Result<()> {
                 let sum = if let Some(file) = url.strip_prefix(&release) {
                     sums.get(file)
                         .with_context(|| {
-                            format!("{sums_url} doesn't list {file}, which {package} downloads")
+                            format!("{sums_url} does not list {file} (needed by {package})")
                         })?
                         .clone()
                 } else if url.contains("://") {
@@ -133,13 +131,13 @@ pub fn aur(args: &[String]) -> Result<()> {
     }
 
     if unpushed.is_empty() {
-        println!("\nThe AUR has every package as packaging/aur has it.");
+        println!("\nAll AUR packages match packaging/aur.");
     } else {
-        println!("\nCommitted, not pushed. Look over each, then push them with --push, or:\n");
+        println!("\nCommitted locally, not pushed. Review each repo, then run with --push or:\n");
         for dir in &unpushed {
             println!("  git -C {} push origin HEAD:{BRANCH}", dir.display());
         }
-        println!("\nor drop the commits with git -C <clone> reset --hard origin/{BRANCH}.");
+        println!("\nTo discard commits: git -C <clone> reset --hard origin/{BRANCH}.");
     }
     Ok(())
 }
@@ -147,12 +145,12 @@ pub fn aur(args: &[String]) -> Result<()> {
 /// What makepkg says a package's PKGBUILD is, as `.SRCINFO` holds it.
 fn printsrcinfo(dir: &Path) -> Result<String> {
     output(Command::new("makepkg").current_dir(dir).arg("--printsrcinfo"))
-        .context("makepkg, from pacman, writes .SRCINFO")
+        .context("makepkg (from pacman) writes .SRCINFO")
 }
 
 fn sha256(path: &Path) -> Result<String> {
     let out = output(Command::new("sha256sum").arg(path))?;
-    Ok(out.split_whitespace().next().context("sha256sum said nothing")?.to_owned())
+    Ok(out.split_whitespace().next().context("sha256sum returned no output")?.to_owned())
 }
 
 /// A list of sums, as `sha256sum` writes it, by file name.
@@ -193,8 +191,10 @@ fn set_sums(pkgbuild: &str, arch: &str, sums: &[String]) -> Result<String> {
     let start = format!("sha256sums{arch}=(");
     let lines: Vec<&str> = pkgbuild.split_inclusive('\n').collect();
     let found: Vec<usize> = (0..lines.len()).filter(|&i| lines[i].starts_with(&start)).collect();
-    let [index] = found[..] else { bail!("the PKGBUILD has {} lines of {start}", found.len()) };
-    ensure!(lines[index].trim_end().ends_with(')'), "the PKGBUILD's {start} isn't on one line");
+    let [index] = found[..] else {
+        bail!("PKGBUILD has {} lines starting with {start}", found.len())
+    };
+    ensure!(lines[index].trim_end().ends_with(')'), "PKGBUILD line {start} spans multiple lines");
     let quoted: Vec<String> = sums.iter().map(|sum| format!("'{sum}'")).collect();
     let line = format!("{start}{})\n", quoted.join(" "));
     Ok(lines.iter().enumerate().map(|(i, old)| if i == index { &line } else { *old }).collect())

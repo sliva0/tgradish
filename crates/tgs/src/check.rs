@@ -1,7 +1,7 @@
-//! Checks any Lottie JSON against Telegram's sticker rules, the limits
-//! its server has beyond them, Telegram Desktop's limit on JSON and the
-//! parse limits of tlottie, Telegram's renderer. Shapes, paints and their
-//! sources are counted the way tlottie's parser counts them
+//! Validates Lottie JSON against Telegram's sticker rules, server limits,
+//! Telegram Desktop's raw JSON limit, and the parser limits of `tlottie`
+//! (Telegram's renderer on Android, Desktop and web). Shapes, paints, and
+//! paint sources are counted the same way as tlottie's parser
 //! (`src/composition/parse.rs`).
 
 use std::collections::{BTreeSet, HashMap};
@@ -11,166 +11,164 @@ use serde_json::Value;
 
 use crate::limits::{MAX_RAW_JSON, TLOTTIE, telegram};
 
-/// What a Lottie document holds, as far as Telegram's limits go.
+/// Summary statistics of a Lottie document relevant to Telegram's limits.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Stats {
-    /// The animation's name (`nm`).
+    /// Animation name (`nm`).
     pub name: Option<String>,
-    /// The canvas's width (`w`).
+    /// Canvas width (`w`).
     pub width: f64,
-    /// The canvas's height (`h`).
+    /// Canvas height (`h`).
     pub height: f64,
-    /// Frames a second (`fr`).
+    /// Frame rate in frames per second (`fr`).
     pub fps: f64,
-    /// `op - ip`.
+    /// Frame count (`op - ip`).
     pub frames: f64,
-    /// Size of the Lottie JSON.
+    /// Uncompressed Lottie JSON size in bytes.
     pub json_bytes: usize,
-    /// Size of the `.tgs`, when checking one.
+    /// Compressed `.tgs` size in bytes, when checking a `.tgs` file.
     pub tgs_bytes: Option<usize>,
-    /// All layers, including those of precomps.
+    /// Total layer count, including layers inside precomps.
     pub layers: usize,
-    /// Shape layers that paint something.
+    /// Number of shape layers that paint at least one shape.
     pub painted_shape_layers: usize,
-    /// In all layers, counted like `max_shapes_per_layer`.
+    /// Total shape items across all layers, counted like `max_shapes_per_layer`.
     pub shapes: usize,
-    /// Most shapes in one layer, counted as tlottie counts them: groups,
-    /// their fills and transforms, and what they draw.
+    /// Maximum shape items in a single layer, counted as tlottie counts them:
+    /// groups, fills, transforms, and geometry items.
     pub max_shapes_per_layer: usize,
-    /// Most fills and strokes in one layer.
+    /// Maximum fills and strokes in a single layer.
     pub max_paints_per_layer: usize,
-    /// Most geometry items (rectangles, paths) that paints in one layer
-    /// draw.
+    /// Maximum geometry items (rectangles, paths) painted in a single layer.
     pub max_paint_sources_per_layer: usize,
-    /// Most vertices of one path, or of one of its tangents.
+    /// Maximum vertex count in a single path or tangent array.
     pub max_path_points: usize,
-    /// Path vertices one fill or stroke paints: those of the paths before
-    /// it in its group, nested groups included.
+    /// Maximum path vertices painted by a single fill or stroke (all paths
+    /// preceding it in its group, including nested groups).
     pub max_paint_points: usize,
-    /// The farthest from 0 a path's point is.
+    /// Largest absolute coordinate value in any path.
     pub max_path_coordinate: f64,
-    /// Paths with an empty tangent (`[]`), as pixelart2tgs 1.x wrote them.
+    /// Number of paths with empty tangents (`[]`), as written by pixelart2tgs 1.x.
     pub empty_tangent_paths: usize,
-    /// Most keyframes of one property.
+    /// Maximum keyframe count on any animated property.
     pub max_keyframes: usize,
-    /// Assets, such as precomps and images.
+    /// Total asset count (precomps, images, etc.).
     pub assets: usize,
-    /// Layers once precomps are expanded where they are used.
+    /// Total layer count after expanding precomps at each call site.
     pub expanded_layers: usize,
-    /// Arrays and objects inside each other in the JSON.
+    /// Maximum JSON array/object nesting depth.
     pub depth: usize,
-    /// Shape groups inside each other.
+    /// Maximum shape group nesting depth.
     pub group_depth: usize,
-    /// Lottie features used, by name.
+    /// Lottie features detected in the document, by name.
     pub features: BTreeSet<&'static str>,
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-/// How bad an [`Issue`] is.
+/// Severity of a validation [`Issue`].
 #[non_exhaustive]
 pub enum Severity {
-    /// Telegram refuses the sticker, or some client can't play it.
+    /// Telegram rejects the sticker or a client cannot play it.
     Error,
-    /// Against the rules, or ignored by Telegram's apps, though Telegram
-    /// accepts it.
+    /// Against Telegram's rules or ignored by Telegram's apps, though the
+    /// server accepts it.
     Warning,
 }
 
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
-/// Something about a sticker Telegram, or one of its apps, would have a
-/// problem with.
+/// A problem found in a sticker by [`check`].
 #[non_exhaustive]
 pub struct Issue {
-    /// Whether it is refused or only frowned on.
+    /// Whether this causes rejection or is only a warning.
     pub severity: Severity,
-    /// What was checked, for front-ends to tell issues apart by.
+    /// Category of the check that triggered this issue.
     pub kind: IssueKind,
-    /// What is wrong, in English, with the numbers involved.
+    /// Plain-English description including the measured numbers.
     pub message: String,
 }
 
-/// What an [`Issue`] is about: one of each thing [`check`] checks.
+/// Category of a validation [`Issue`].
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum IssueKind {
-    /// The canvas isn't 512x512.
+    /// Canvas is not 512×512.
     Canvas,
-    /// Not 60 fps, or 30, which is accepted against the rules.
+    /// Frame rate is not 60 fps (or 30 fps, which produces a warning).
     FrameRate,
-    /// Longer than 3 seconds.
+    /// Animation is longer than 3 seconds.
     Length,
-    /// No frames at all.
+    /// Animation has zero or negative frame count.
     NoFrames,
-    /// The `.tgs` is larger than 64 KiB.
+    /// Compressed `.tgs` file exceeds 64 KiB.
     FileSize,
-    /// Shapes and layers together cost more than Telegram's server takes.
+    /// Combined shape and layer complexity exceeds Telegram's server limit.
     Cost,
-    /// More layers than Telegram's server takes.
+    /// Layer count exceeds Telegram's server limit.
     Layers,
-    /// More shapes in a layer than Telegram's server takes.
+    /// Shapes in a single layer exceed Telegram's server limit.
     ShapesPerLayer,
-    /// More path points under one fill than Telegram's server takes.
+    /// Path points under one fill exceed Telegram's server limit.
     PaintPoints,
-    /// Paths with empty tangents, which Telegram refuses.
+    /// Paths use empty tangents (`[]`), which Telegram rejects.
     EmptyTangents,
-    /// More JSON than Telegram Desktop plays.
+    /// Uncompressed JSON exceeds Telegram Desktop's limit.
     JsonSize,
-    /// More fills and strokes in a layer than the renderer allows.
+    /// Fills and strokes in a layer exceed the renderer limit.
     PaintsPerLayer,
-    /// More shapes painted in a layer than the renderer allows.
+    /// Painted geometry items in a layer exceed the renderer limit.
     PaintSources,
-    /// More points in a path than the renderer allows.
+    /// Vertices in a single path exceed the renderer limit.
     PathPoints,
-    /// More keyframes in a property than the renderer allows.
+    /// Keyframes in a property exceed the renderer limit.
     Keyframes,
-    /// More assets than the renderer allows.
+    /// Asset count exceeds the renderer limit.
     Assets,
-    /// More layers, precomps expanded, than the renderer allows.
+    /// Expanded layer count exceeds the renderer limit.
     ExpandedLayers,
-    /// Arrays and objects nested deeper than the renderer allows.
+    /// JSON nesting depth exceeds the renderer limit.
     Nesting,
-    /// Groups inside each other deeper than the renderer allows.
+    /// Shape group nesting depth exceeds the renderer limit.
     GroupDepth,
-    /// A path point farther out than the renderer allows.
+    /// A path coordinate exceeds the renderer limit.
     PathCoordinate,
-    /// Precomps that use each other in a loop.
+    /// Precomps reference each other in a cycle.
     PrecompLoop,
-    /// A Lottie feature the rules forbid or Telegram's apps ignore, named
-    /// in the message.
+    /// A Lottie feature against Telegram's rules or ignored by Telegram's apps,
+    /// named in the message.
     Feature,
 }
 
-/// Why Lottie JSON couldn't be checked at all.
+/// Error returned when Lottie JSON cannot be parsed for validation.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum CheckError {
-    /// It nests deeper than Telegram's renderer reads, so deep that
-    /// reading it could exhaust the stack.
-    #[error("the JSON nests {depth} levels deep; Telegram's renderer reads up to {limit}")]
+    /// JSON nesting exceeds tlottie's limit and could overflow our parser's
+    /// stack.
+    #[error("JSON nesting depth is {depth}; Telegram's renderer allows up to {limit}")]
     TooDeep {
-        /// How deep it nests.
+        /// Measured nesting depth.
         depth: usize,
-        /// How deep the renderer reads.
+        /// Renderer nesting limit.
         limit: usize,
     },
-    /// It isn't JSON, as serde_json says.
+    /// Invalid JSON reported by `serde_json`.
     #[error("{0}")]
     Json(String),
 }
 
-/// Lottie features Telegram's rules forbid or its apps ignore, by the names
-/// [`Stats::features`] uses: whether the rules forbid each, and whether
-/// tlottie (the renderer of Android, Desktop and web) draws it. Telegram's
-/// server accepted a sticker with each of them.
+/// Lottie features against Telegram's rules or ignored by its apps:
+/// `(feature_name, against_rules, drawn_by_tlottie)`, where `tlottie` is
+/// Telegram's renderer on Android, Desktop and web.
+/// Telegram's server accepted probe stickers using each of these.
 const FEATURES: &[(&str, bool, bool)] = &[
     ("expressions", true, false),
     ("masks", true, true),
@@ -206,7 +204,7 @@ struct Walker<'a> {
     assets: HashMap<&'a str, &'a Value>,
 }
 
-/// How deeply arrays and objects nest, read without parsing.
+/// Measures JSON nesting depth without parsing.
 fn nesting(json: &[u8]) -> usize {
     let (mut depth, mut deepest, mut in_string, mut escaped) = (0usize, 0, false, false);
     for &byte in json {
@@ -232,15 +230,16 @@ fn nesting(json: &[u8]) -> usize {
     deepest
 }
 
-/// Checks Lottie JSON; `tgs_bytes` is the size of the `.tgs` it came from.
-/// Fails on JSON that doesn't parse, or nests deeper than Telegram's
-/// renderer reads.
+/// Validates Lottie JSON against Telegram and renderer limits. `tgs_bytes` is
+/// the compressed `.tgs` file size, if known. Fails on invalid JSON or nesting
+/// deeper than Telegram's renderer accepts.
 pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>), CheckError> {
     let depth = nesting(json);
     if depth > TLOTTIE.max_nesting_depth {
         return Err(CheckError::TooDeep { depth, limit: TLOTTIE.max_nesting_depth });
     }
-    // serde_json stops at 128 levels on its own; the depth is bounded above
+    // serde_json defaults to a 128-level recursion limit; depth is already
+    // bounded above.
     let mut parser = serde_json::Deserializer::from_slice(json);
     parser.disable_recursion_limit();
     let json_error = |err: serde_json::Error| CheckError::Json(err.to_string());
@@ -306,19 +305,19 @@ fn rules(stats: &Stats) -> Vec<Issue> {
     if (stats.width, stats.height) != (canvas, canvas) {
         fail(
             IssueKind::Canvas,
-            format!("the canvas is {}×{}, stickers are 512×512", stats.width, stats.height),
+            format!("canvas is {}×{}; Telegram requires 512×512", stats.width, stats.height),
         );
     }
     // 30 fps was accepted too, and the limit is in seconds
     if stats.fps != f64::from(telegram::FPS) && stats.fps != 30.0 {
-        fail(IssueKind::FrameRate, format!("{} fps, stickers are 60 fps", stats.fps));
+        fail(IssueKind::FrameRate, format!("{} fps; Telegram requires 60 fps", stats.fps));
     }
     let max_seconds = f64::from(telegram::MAX_FRAMES) / f64::from(telegram::FPS);
     if stats.fps > 0.0 && stats.frames / stats.fps > max_seconds + 1e-9 {
         fail(
             IssueKind::Length,
             format!(
-                "{} frames at {} fps last {:.2} s, at most {max_seconds} s are allowed",
+                "{} frames at {} fps ({:.2} s); maximum is {max_seconds} s",
                 stats.frames,
                 stats.fps,
                 stats.frames / stats.fps
@@ -326,12 +325,12 @@ fn rules(stats: &Stats) -> Vec<Issue> {
         );
     }
     if stats.frames <= 0.0 {
-        fail(IssueKind::NoFrames, "the animation has no frames".into());
+        fail(IssueKind::NoFrames, "animation has no frames".into());
     }
     if let Some(bytes) = stats.tgs_bytes.filter(|&bytes| bytes > telegram::MAX_BYTES) {
         fail(
             IssueKind::FileSize,
-            format!("the file is {bytes} bytes, at most {} are allowed", telegram::MAX_BYTES),
+            format!("file is {bytes} bytes; maximum is {} bytes", telegram::MAX_BYTES),
         );
     }
     let cost = telegram::cost(stats.shapes, stats.layers);
@@ -339,7 +338,8 @@ fn rules(stats: &Stats) -> Vec<Issue> {
         fail(
             IssueKind::Cost,
             format!(
-                "{} shapes in {} layers count {cost}, a layer as {}; Telegram takes at most {}",
+                "{} shapes in {} layers have complexity {cost} (each layer counts as {}); \
+                 Telegram allows at most {}",
                 stats.shapes,
                 stats.layers,
                 telegram::LAYER_COST,
@@ -365,15 +365,15 @@ fn rules(stats: &Stats) -> Vec<Issue> {
     ];
     for (kind, what, count, limit) in server {
         if count > limit {
-            fail(kind, format!("{count} {what}; Telegram takes at most {limit}"));
+            fail(kind, format!("{count} {what}; Telegram allows at most {limit}"));
         }
     }
     if stats.empty_tangent_paths > 0 {
         fail(
             IssueKind::EmptyTangents,
             format!(
-                "{} paths have empty tangents (`[]`, as pixelart2tgs 1.x wrote them); Telegram \
-             refuses those now, `[0,0]` works",
+                "{} paths use empty tangents (`[]`, as pixelart2tgs 1.x wrote them), which \
+                 Telegram now rejects; `[0,0]` works",
                 stats.empty_tangent_paths
             ),
         );
@@ -382,7 +382,7 @@ fn rules(stats: &Stats) -> Vec<Issue> {
         fail(
             IssueKind::JsonSize,
             format!(
-                "{} bytes of JSON; Telegram Desktop plays at most {MAX_RAW_JSON}",
+                "{} bytes of JSON; Telegram Desktop allows at most {MAX_RAW_JSON}",
                 stats.json_bytes
             ),
         );
@@ -417,21 +417,21 @@ fn rules(stats: &Stats) -> Vec<Issue> {
         (IssueKind::Nesting, "levels of nesting", stats.depth, TLOTTIE.max_nesting_depth),
         (
             IssueKind::GroupDepth,
-            "groups inside each other",
+            "levels of group nesting",
             stats.group_depth,
             TLOTTIE.max_group_depth,
         ),
     ];
     for (kind, what, count, limit) in limits {
         if count > limit {
-            fail(kind, format!("{count} {what}; Telegram's renderer allows {limit}"));
+            fail(kind, format!("{count} {what}; Telegram's renderer allows at most {limit}"));
         }
     }
     if stats.max_path_coordinate > f64::from(TLOTTIE.max_path_coordinate_abs) {
         fail(
             IssueKind::PathCoordinate,
             format!(
-                "a path point at {}; Telegram's renderer allows up to {}",
+                "a path coordinate of {}; Telegram's renderer allows at most {}",
                 stats.max_path_coordinate, TLOTTIE.max_path_coordinate_abs
             ),
         );
@@ -440,7 +440,7 @@ fn rules(stats: &Stats) -> Vec<Issue> {
         issues.push(Issue {
             severity: Severity::Warning,
             kind: IssueKind::FrameRate,
-            message: "30 fps: against the rules, but Telegram accepts this".into(),
+            message: "30 fps: against Telegram's rules, but Telegram accepts it".into(),
         });
     }
     for &(feature, forbidden, drawn) in FEATURES {
@@ -449,10 +449,10 @@ fn rules(stats: &Stats) -> Vec<Issue> {
         }
         let message = match (forbidden, drawn) {
             (true, true) => {
-                format!("{feature}: against the rules, but Telegram accepts this")
+                format!("{feature}: against Telegram's rules, but Telegram accepts it")
             }
             (true, false) => format!(
-                "{feature}: against the rules; Telegram accepts this, but its apps ignore it"
+                "{feature}: against Telegram's rules; Telegram accepts it, but its apps ignore it"
             ),
             (false, _) => format!("{feature}: Telegram's apps ignore this"),
         };
@@ -542,10 +542,10 @@ impl<'a> Walker<'a> {
         }
     }
 
-    /// One list of shape items. A paint covers the geometry before it in
-    /// its list, and a group counts as one piece of geometry in its parent.
-    /// Returns the path points in the list, groups inside it included,
-    /// which a paint after the list's group paints too.
+    /// Walks one shape list. Each paint covers all geometry items before it in
+    /// the list, and a group counts as one geometry item in its parent.
+    /// Returns the total path vertices in the list (including nested groups)
+    /// so a paint after the enclosing group counts them too.
     fn shapes(&mut self, items: &[Value], counts: &mut ShapeCounts, depth: usize) -> usize {
         self.stats.group_depth = self.stats.group_depth.max(depth);
         let (mut sources, mut points) = (0, 0);
@@ -602,8 +602,7 @@ impl<'a> Walker<'a> {
         points
     }
 
-    /// Reads a path; returns its vertices, of its largest keyframe when
-    /// it is animated.
+    /// Counts path vertices (maximum across keyframes if animated).
     fn path(&mut self, item: &Value) -> usize {
         let shape = item.get("ks").and_then(|ks| ks.get("k"));
         // a static shape, or the start and end shapes of keyframes
@@ -642,8 +641,8 @@ impl<'a> Walker<'a> {
         points
     }
 
-    /// Layers counted once for every place a precomp is used, up to just
-    /// past tlottie's limit; `None` for precomps that contain themselves.
+    /// Counts layers after expanding precomps at each call site, capped just
+    /// past tlottie's limit. Returns `None` on cyclic precomps.
     fn expand(
         &self,
         layers: &'a [Value],
@@ -741,7 +740,7 @@ mod tests {
             .map(|issue| issue.message.as_str())
             .collect();
         for expected in
-            ["512×256", "25 fps", "200 frames at 25 fps last 8.00 s", "70000 bytes", "165389"]
+            ["512×256", "25 fps", "200 frames at 25 fps (8.00 s)", "70000 bytes", "165389"]
         {
             assert!(errors.iter().any(|e| e.contains(expected)), "{expected} in {errors:?}");
         }
@@ -753,10 +752,10 @@ mod tests {
         assert_eq!(
             warnings,
             [
-                "expressions: against the rules; Telegram accepts this, but its apps ignore it",
-                "masks: against the rules, but Telegram accepts this",
-                "solids: against the rules, but Telegram accepts this",
-                "merge paths: against the rules; Telegram accepts this, but its apps ignore it",
+                "expressions: against Telegram's rules; Telegram accepts it, but its apps ignore it",
+                "masks: against Telegram's rules, but Telegram accepts it",
+                "solids: against Telegram's rules, but Telegram accepts it",
+                "merge paths: against Telegram's rules; Telegram accepts it, but its apps ignore it",
             ]
         );
         assert_eq!(stats.max_keyframes, 2);
@@ -777,7 +776,7 @@ mod tests {
             [Issue {
                 severity: Severity::Warning,
                 kind: IssueKind::FrameRate,
-                message: "30 fps: against the rules, but Telegram accepts this".into()
+                message: "30 fps: against Telegram's rules, but Telegram accepts it".into()
             }]
         );
         let (_, issues) = check(sticker(180).as_bytes(), None).unwrap();
@@ -811,17 +810,19 @@ mod tests {
         // 6 layers of 4003 shapes: 24 018, with the layers 24 072
         assert_eq!(
             errors(&animation(6, 4000)),
-            ["24018 shapes in 6 layers count 24072, a layer as 9; Telegram takes at most 24000"]
+            [
+                "24018 shapes in 6 layers have complexity 24072 (each layer counts as 9); Telegram allows at most 24000"
+            ]
         );
         assert_eq!(errors(&animation(6, 3980)), Vec::<String>::new());
         // a layer of as many shapes as were accepted, and of one more
         assert_eq!(errors(&animation(1, telegram::MAX_SHAPES_PER_LAYER - 3)), Vec::<String>::new());
         assert_eq!(
             errors(&animation(1, telegram::MAX_SHAPES_PER_LAYER - 2)),
-            ["4094 shapes in a layer; Telegram takes at most 4093"]
+            ["4094 shapes in a layer; Telegram allows at most 4093"]
         );
         let named = Animation { name: Some("x".repeat(MAX_RAW_JSON)), ..animation(1, 1) };
-        assert!(errors(&named)[0].contains("Telegram Desktop plays at most"));
+        assert!(errors(&named)[0].contains("Telegram Desktop allows at most"));
 
         let path = |tangent: &str| {
             format!(
@@ -851,7 +852,7 @@ mod tests {
         };
         assert_eq!(
             errors(&one_fill),
-            ["8010 path points under one fill; Telegram takes at most 8000"]
+            ["8010 path points under one fill; Telegram allows at most 8000"]
         );
         let three_fills = Animation {
             name: None,
@@ -915,7 +916,10 @@ mod tests {
         for json in [far_tangent, far_end] {
             let (stats, issues) = check(json.as_bytes(), None).unwrap();
             assert_eq!(stats.max_path_coordinate, 200_000.0);
-            assert!(issues.iter().any(|issue| issue.message.contains("path point")), "{issues:?}");
+            assert!(
+                issues.iter().any(|issue| issue.message.contains("path coordinate")),
+                "{issues:?}"
+            );
         }
     }
 

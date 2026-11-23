@@ -1,11 +1,9 @@
-//! WebM video stickers and emoji: converting into them, as VP9 fitted to
-//! the size limit, and what their container holds
-//! ([`container`]).
+//! WebM VP9 video sticker and emoji conversion, size-fitting, and container
+//! inspection/patching ([`container`]).
 //!
 //! [`convert`] runs synchronously and reports [`crate::Event`]s through a
-//! callback.
-//! To run it in the background, call it from a thread and cancel it with a
-//! [`CancelToken`]:
+//! callback. Run it on a worker thread with a [`CancelToken`] to cancel or
+//! settle early:
 //!
 //! ```no_run
 //! # use tgradish_core::{backend::Backend, input::Input, webm::{convert, Request}, CancelToken};
@@ -55,29 +53,28 @@ use crate::telegram;
 use container::Patch;
 use fit::{Attempt, Encoder};
 
-/// A conversion to run.
+/// Parameters for a WebM conversion.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Request {
-    /// What to convert.
+    /// Input file or image sequence.
     pub input: Input,
-    /// Where the result goes: by default [`Input::default_output`], as
-    /// [`Request::output`] gives it.
+    /// Destination path; defaults to [`Input::default_output`] (see
+    /// [`Request::output`]).
     pub output: Option<PathBuf>,
-    /// How to convert it.
+    /// WebM conversion options.
     pub options: Options,
-    /// Replace the output if it exists.
+    /// Replace an existing output file if present.
     pub overwrite: bool,
-    /// Keep intermediate files, whatever comes of the conversion, and
-    /// report where they are: in the outcome, or in a warning when it
-    /// fails.
+    /// Keep intermediate attempt files and pass logs, reporting their directory
+    /// in the outcome (or in a warning if conversion fails).
     pub keep_temp: bool,
-    /// How many threads it uses.
+    /// Maximum threads used for decoding, filtering and encoding.
     pub threads: Threads,
 }
 
 impl Request {
-    /// A conversion of `input` with the default options, beside it, not
-    /// replacing one there, intermediate files deleted.
+    /// Creates a request with default options writing beside `input`, without
+    /// overwriting or keeping temporary files.
     pub fn new(input: Input) -> Self {
         Self {
             input,
@@ -89,7 +86,7 @@ impl Request {
         }
     }
 
-    /// Where the result goes, as asked or by default.
+    /// Returns the explicit output path, or the default path beside the input.
     pub fn output(&self) -> PathBuf {
         let target = self.options.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Webm, target))
@@ -208,8 +205,8 @@ impl Encoder for BackendEncoder<'_> {
     }
 }
 
-/// Forgets, once a conversion ends however it does, that its fitting
-/// could settle or was asked to, so the token may serve the next.
+/// Resets fitting state on the [`CancelToken`] when a conversion exits so the
+/// token can be reused cleanly.
 struct EndFitting<'a>(&'a CancelToken);
 
 impl Drop for EndFitting<'_> {
@@ -271,11 +268,11 @@ pub fn convert(
     made
 }
 
-/// Applies `changes` to the encoded `bytes`, or as many of them as there is
-/// room for: what extra ffmpeg arguments make can leave too little beside
-/// the header for tgradish's name, and with no duration there, for a
-/// spoofed one. Those are left out, each with a warning, rather than the
-/// encode lost. Returns the changes made.
+/// Applies as many of `changes` as fit in the WebM padding: extra
+/// `ffmpeg_args` can leave too little room for tgradish's name (muxing app and
+/// signature) or, where there is no Duration, for a spoofed one. Those are
+/// dropped with a warning rather than losing the encode. Returns the changes
+/// made.
 fn patch_what_fits(
     bytes: &mut [u8],
     mut changes: Patch,
@@ -296,14 +293,14 @@ fn patch_what_fits(
         } else {
             return Err(err.into());
         };
-        let message = format!("written without {left_out} in its metadata: {err}");
+        let message = format!("written without {left_out} in metadata: {err}");
         on_event(Event::Warning { message });
     }
 }
 
 /// What a warning that a failed conversion's intermediate files are kept
 /// starts with; their directory follows.
-const KEPT_IN: &str = "intermediate files are kept in ";
+const KEPT_IN: &str = "intermediate files kept in ";
 
 /// Fits `plan` by encodes into `dir`, and writes the result.
 fn encode_in(

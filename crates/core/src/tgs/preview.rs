@@ -1,5 +1,5 @@
-//! What a `.tgs` shows, for previews: drawn from the art it was made of,
-//! or read back from a file tgradish wrote, which shows the same.
+//! Renders `.tgs` previews either directly from the normalised pixel art or by
+//! reading back a `.tgs` file written by tgradish.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -10,37 +10,38 @@ use tgradish_tgs::picture::{self, DrawError, Picture};
 use crate::error::{Error, Result};
 use crate::preview::Preview;
 
-/// The longest side of a `.tgs` preview: plenty for the GUI, and within
-/// what any GPU takes as a texture.
+/// Maximum side length of a `.tgs` preview (large enough for the GUI and safe
+/// for any GPU texture limit).
 pub(crate) const PREVIEW_MAX_SIDE: u32 = 1024;
 
 fn preview(picture: Picture) -> Preview {
     Preview { width: picture.width, height: picture.height, frames: picture.frames }
 }
 
-/// What `anim` shows, `stretch`ed square as the sticker is, or not.
+/// Renders `anim` into a preview, stretched square when `stretch` is true.
 fn draw(anim: &PixelAnim, stretch: bool) -> Preview {
     preview(picture::of_art(anim, stretch, PREVIEW_MAX_SIDE))
 }
 
-/// What a `.tgs` made here shows, kept as the art it was made of, which
-/// is cheap to keep and to clone: drawn into a preview only when asked,
-/// as [`Drawing::draw`] draws it, the same as [`preview_file`] draws
-/// from the file.
+/// Deferred `.tgs` preview storing the compact [`PixelAnim`] instead of full
+/// RGBA frames. Calling [`Drawing::draw`] produces the same frames as
+/// [`preview_file`].
 #[derive(Clone)]
 pub struct Drawing {
     anim: Arc<PixelAnim>,
-    /// Stretched square, as the sticker is.
+    /// True when the sticker stretches non-square art to fill the square
+    /// canvas.
     stretch: bool,
 }
 
 impl Drawing {
-    /// What `anim` shows, `stretch`ed square as the sticker is, or not.
+    /// Stores `anim` for deferred preview rendering.
     pub(crate) fn new(anim: PixelAnim, stretch: bool) -> Drawing {
         Drawing { anim: Arc::new(anim), stretch }
     }
 
-    /// Draws it: a pixel per art pixel, each frame with how long it shows.
+    /// Renders straight-RGBA frames (one pixel per art pixel) with tick
+    /// durations.
     pub fn draw(&self) -> Preview {
         draw(&self.anim, self.stretch)
     }
@@ -53,8 +54,8 @@ impl PartialEq for Drawing {
     }
 }
 
+/// Omits frame pixels so `Debug` output stays short.
 impl std::fmt::Debug for Drawing {
-    /// Its size, not every pixel of every frame.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Drawing")
             .field("width", &self.anim.width())
@@ -64,12 +65,12 @@ impl std::fmt::Debug for Drawing {
     }
 }
 
-/// What the `.tgs` (or plain Lottie JSON) at `path` shows, drawn as
-/// converting drew it when tgradish made it: a pixel per art pixel, each
-/// frame with how long it shows. A sticker with more than tgradish's own
-/// have, as paths or gradients, fails as [`Error::Undrawable`], and one
-/// that can't be read as [`Error::Unreadable`]; neither is a picture that
-/// isn't what it shows.
+/// Renders a `.tgs` (or plain Lottie JSON) file at `path` for preview at one
+/// pixel per art pixel (e.g. a 16×16 sticker scaled 32× into a 512×512 canvas
+/// is rendered at 16×16). Returns [`Error::Undrawable`] for Lottie files using
+/// features outside tgradish's rectangle subset (such as paths or gradients),
+/// and [`Error::Unreadable`] for malformed or unreadable files. It never
+/// returns a preview that differs from what the sticker shows.
 pub fn preview_file(path: &Path) -> Result<Preview> {
     let (json, _) = super::inspect::read_lottie(path)?;
     match picture::of_lottie(&json, PREVIEW_MAX_SIDE) {

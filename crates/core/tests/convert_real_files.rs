@@ -1,6 +1,6 @@
-//! End-to-end conversions with a real ffmpeg, through every backend: the
-//! system ffmpeg and, with the `linked` feature, the built-in one. Skipped
-//! when ffmpeg is not on PATH, since it also makes test input, unless
+//! End-to-end conversion tests running against real ffmpeg backends (external
+//! process and, with `linked`, built-in). Skipped when ffmpeg is not on `PATH`
+//! (since ffmpeg also generates the test inputs) unless
 //! `TGRADISH_REQUIRE_FFMPEG=1`.
 
 mod common;

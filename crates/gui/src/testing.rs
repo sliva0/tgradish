@@ -1,7 +1,7 @@
-//! What the GUI's tests share: an app to drive, ways to wait for its
-//! work and to convert, and inputs to give it. Videos are made with the
-//! ffmpeg on PATH; without one, the tests that need them are skipped, or
-//! fail where `TGRADISH_REQUIRE_FFMPEG` says it must be there.
+//! Shared test helpers for the GUI: test harness setup, settling and
+//! conversion helpers, and synthetic test media. Test videos are generated
+//! with `ffmpeg` from `PATH`; if `ffmpeg` is missing, video tests are skipped
+//! (or fail when `TGRADISH_REQUIRE_FFMPEG` is set).
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -17,7 +17,7 @@ use crate::item::Item;
 use crate::jobs::Job;
 use crate::l10n::fl;
 
-/// A 4x4 PNG with a 2x2 square of `colour` in the middle.
+/// Writes a 4x4 PNG with a 2x2 square of `colour` in the centre.
 pub(crate) fn square(path: &Path, colour: [u8; 4]) {
     let file = std::io::BufWriter::new(std::fs::File::create(path).unwrap());
     let mut encoder = png::Encoder::new(file, 4, 4);
@@ -28,8 +28,8 @@ pub(crate) fn square(path: &Path, colour: [u8; 4]) {
     encoder.write_header().unwrap().write_image_data(&pixels).unwrap();
 }
 
-/// A pasted image as the clipboard gives one, for `App::add_pasted`: the
-/// file and its folder.
+/// Creates a temporary pasted image and its directory, matching what the
+/// clipboard passes to `App::add_pasted`.
 pub(crate) fn pasted_image() -> (Vec<PathBuf>, tempfile::TempDir) {
     let dir = tempfile::tempdir().unwrap();
     let image = dir.path().join(tgradish_core::clipboard::PASTED_IMAGE_NAME);
@@ -43,24 +43,23 @@ pub(crate) fn harness(config: Config) -> Harness<'static, App> {
         .build_eframe(move |_| App::with(config.clone(), None, Presets::builtin()))
 }
 
-/// The GUI as eframe and egui-winit drive it on a screen, a frame a
-/// moment apart: the window's size kept in pixels as the scale changes, each
-/// frame's input given to the GUI's hook first, and the pointer said
-/// as egui-winit says it, where it moves in points at the scale of the
-/// moment, and then, for each press until it moves again, that same place
-/// in points, whatever the scale has become since.
+/// Simulates eframe and `egui-winit` driving the GUI on a fixed-pixel screen:
+/// keeps the window size constant in physical pixels as `zoom_factor` changes,
+/// runs `raw_input_hook` before each frame, and sends pointer button events at
+/// the point coordinates recorded on the last pointer move (matching
+/// `egui-winit`, which reuses the last point position even if `zoom_factor`
+/// changed in between).
 pub(crate) struct Screen {
     pub(crate) harness: Harness<'static, App>,
-    /// The window's size in pixels.
+    /// Window size in physical pixels.
     size: egui::Vec2,
-    /// Where the pointer last moved, in points as egui-winit keeps it.
+    /// Last pointer position in points as cached by `egui-winit`.
     said: Option<egui::Pos2>,
 }
 
 impl Screen {
-    /// The GUI in a window `size` pixels large, from `config`, with
-    /// Settings open where `settings` says, once its parts have found their
-    /// sizes.
+    /// Builds a GUI window of `size` pixels from `config`, optionally opens
+    /// Settings, and runs 16 frames so layouts settle.
     pub(crate) fn new(config: Config, size: [f32; 2], settings: bool) -> Self {
         let harness = Harness::builder()
             .with_size(size)
@@ -74,7 +73,7 @@ impl Screen {
         screen
     }
 
-    /// A frame with `events`, as eframe runs one.
+    /// Runs a single frame with `events`, calling `raw_input_hook` like eframe.
     pub(crate) fn frame(&mut self, events: Vec<egui::Event>) {
         let zoom = self.harness.ctx.zoom_factor();
         self.harness.set_size(self.size / zoom);
@@ -92,30 +91,30 @@ impl Screen {
         }
     }
 
-    /// The pointer moved to `pixels`, in a frame.
+    /// Moves the pointer to `pixels` and advances one frame.
     pub(crate) fn move_to(&mut self, pixels: egui::Pos2) {
         let at = pixels / self.harness.ctx.zoom_factor();
         self.said = Some(at);
         self.frame(vec![egui::Event::PointerMoved(at)]);
     }
 
-    /// The primary button pressed and let go where the pointer is, without
-    /// it moving, a frame each.
+    /// Presses and releases the primary button at the current pointer position
+    /// across two frames.
     pub(crate) fn click(&mut self) {
         for pressed in [true, false] {
             self.press(pressed);
         }
     }
 
-    /// The primary button pressed, or let go of, where the pointer is, in
-    /// a frame.
+    /// Sends a primary button press or release at the last pointer position
+    /// and advances one frame.
     pub(crate) fn press(&mut self, pressed: bool) {
         let pos = self.said.expect("the pointer is on the window");
         let (button, modifiers) = (egui::PointerButton::Primary, egui::Modifiers::NONE);
         self.frame(vec![egui::Event::PointerButton { pos, button, pressed, modifiers }]);
     }
 
-    /// `key` pressed with the command key, in a frame.
+    /// Presses `key` with the command modifier and advances one frame.
     pub(crate) fn command(&mut self, key: egui::Key) {
         let modifiers = egui::Modifiers::COMMAND;
         let (repeat, physical_key) = (false, None);
@@ -123,39 +122,37 @@ impl Screen {
         self.frame(vec![pressed]);
     }
 
-    /// Where `label`'s middle is on the screen, in pixels.
+    /// Returns the centre of widget `label` in physical pixels.
     pub(crate) fn pixels(&self, label: &str) -> egui::Pos2 {
         self.harness.get_by_label(label).rect().center() * self.harness.ctx.zoom_factor()
     }
 
-    /// Where egui takes the pointer to be, in points.
+    /// Returns egui's current hover position in points.
     pub(crate) fn pointer(&self) -> Option<egui::Pos2> {
         self.harness.ctx.input(|input| input.pointer.hover_pos())
     }
 
-    /// Whether egui takes the pointer to be on `label`.
+    /// Returns true if egui's pointer is inside widget `label`.
     pub(crate) fn on(&self, label: &str) -> bool {
         let rect = self.harness.get_by_label(label).rect();
         self.pointer().is_some_and(|at| rect.contains(at))
     }
 }
 
-/// Everything the GUI's messages say, each part on a line of its own,
-/// to look in.
+/// Joins all active banner messages with newlines for test assertions.
 pub(crate) fn said(app: &App) -> String {
     let rows = app.banner.rows.iter();
     rows.flat_map(|said| said.message.texts()).collect::<Vec<_>>().join("\n")
 }
 
-/// Clicks the selected item's Convert button, which shows its shortcut,
-/// in whichever language the GUI is in.
+/// Clicks the selected item's Convert button by matching its keyboard shortcut
+/// (which is independent of the active UI language).
 pub(crate) fn convert(harness: &Harness<App>) {
     let keys = crate::keys::keys_text(crate::keys::Command::Convert);
     harness.get(egui_kittest::kittest::by().label_contains(&keys)).click();
 }
 
-/// The Convert all button, whatever number of files it says it would
-/// convert.
+/// Finds the Convert all button regardless of the file count in its label.
 pub(crate) fn convert_all<'a>(harness: &'a Harness<App>) -> egui_kittest::Node<'a> {
     let counts = 0..=harness.state().items.len();
     let labels: Vec<String> = counts.map(|count| fl!("convert-all", count = count)).collect();
@@ -163,22 +160,20 @@ pub(crate) fn convert_all<'a>(harness: &'a Harness<App>) -> egui_kittest::Node<'
     harness.get(by.predicate(move |node| node.label().is_some_and(|label| labels.contains(&label))))
 }
 
-/// The part of `message`, asked for with each of its arguments as
-/// [`ANY`], that stays the same whatever they are: its longest, to look
-/// for where they aren't known, without the spaces and punctuation at
-/// its ends, where a line may break beside an argument.
+/// Returns the longest constant substring of `message` (formatted with [`ANY`]
+/// for each argument), trimmed of surrounding whitespace and ASCII punctuation
+/// where line wraps could occur.
 pub(crate) fn fixed(message: &str) -> &str {
     let part = message.split(ANY).max_by_key(|part| part.len()).unwrap_or_default();
     part.trim_matches(|c: char| c.is_whitespace() || c.is_ascii_punctuation())
 }
 
-/// An argument to `fl!` that [`fixed`] leaves out.
+/// Placeholder argument passed to `fl!` so [`fixed`] can split around it.
 pub(crate) const ANY: &str = "\u{1}";
 
-/// Steps the GUI until no item is busy and no file dialog is open, two
-/// frames in a row: the GUI starts what is due as a frame begins, so
-/// what a frame's click changed, as a setting that has an input read
-/// again, is only started by the next.
+/// Steps the harness until all background loads, conversions, and file dialogs
+/// have been idle for two consecutive frames (work triggered by a click on one
+/// frame is only spawned at the start of the next frame).
 pub(crate) fn finish(harness: &mut Harness<App>) {
     let mut settled = false;
     for _ in 0..6000 {
@@ -206,7 +201,8 @@ pub(crate) fn finish(harness: &mut Harness<App>) {
     panic!("the GUI didn't settle");
 }
 
-/// The conversion `item` made, or a panic saying why there is none.
+/// Returns the completed conversion job for `item`, or panics with the failure
+/// status.
 pub(crate) fn made_job(item: &Item) -> &Job {
     match (&item.made, &item.failed) {
         (Some(made), _) => &made.job,
@@ -219,7 +215,8 @@ pub(crate) fn video(dir: &Path, size: &str) -> Option<PathBuf> {
     video_of(dir, size, 1)
 }
 
-/// A test video of `size` lasting `seconds`, or `None` without ffmpeg.
+/// Generates a synthetic test video of `size` and `seconds`, or skips the test
+/// if `ffmpeg` is not on `PATH`.
 pub(crate) fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> {
     let video = dir.join("clip.mp4");
     let made = std::process::Command::new("ffmpeg")
@@ -235,7 +232,7 @@ pub(crate) fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> 
         ])
         .arg(&video)
         .status();
-    // without ffmpeg the test is skipped; ffmpeg failing is a broken test
+    // Skip if ffmpeg is not installed; fail if ffmpeg is present but errors.
     match made {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
             tgradish_corpus::skip("needs ffmpeg on PATH")
@@ -247,13 +244,13 @@ pub(crate) fn video_of(dir: &Path, size: &str, seconds: u32) -> Option<PathBuf> 
     }
 }
 
-/// Whether ffmpeg and ffprobe are on PATH; tests that need them are
-/// skipped without, or fail where they are required.
+/// Checks whether `ffmpeg` and `ffprobe` are on `PATH` (skipping or failing
+/// according to `TGRADISH_REQUIRE_FFMPEG`).
 pub(crate) fn has_ffmpeg() -> bool {
     tgradish_corpus::ffmpeg_on_path()
 }
 
-/// The corpus file `name`, written to `dir` as `as_name`.
+/// Writes the embedded corpus asset `name` to `dir/as_name`.
 pub(crate) fn corpus(dir: &Path, name: &str, as_name: &str) -> PathBuf {
     let files = tgradish_corpus::files();
     let file = files.iter().find(|file| file.name == name).expect("in the corpus");
@@ -262,7 +259,8 @@ pub(crate) fn corpus(dir: &Path, name: &str, as_name: &str) -> PathBuf {
     path
 }
 
-/// The walker's 0.8 s walk as a lossless video, or `None` without ffmpeg.
+/// Converts `walker_2x.gif` from the corpus into a lossless 0.8 s MKV video,
+/// or skips the test if `ffmpeg` is not on `PATH`.
 pub(crate) fn walking_video(dir: &Path) -> Option<PathBuf> {
     let gif = corpus(dir, "walker_2x.gif", "walker.gif");
     let video = dir.join("walker.mkv");
@@ -283,8 +281,8 @@ pub(crate) fn walking_video(dir: &Path) -> Option<PathBuf> {
     }
 }
 
-/// A folder that can't be listed, as presets that can't be read are
-/// in; `None` where it can, as for root.
+/// Creates a `0o000` directory inside `dir` that cannot be listed, or returns
+/// `None` if the current user can still read it (e.g. `root`).
 #[cfg(unix)]
 pub(crate) fn unlistable(dir: &Path) -> Option<PathBuf> {
     use std::os::unix::fs::PermissionsExt;
@@ -297,7 +295,8 @@ pub(crate) fn unlistable(dir: &Path) -> Option<PathBuf> {
     Some(unlistable)
 }
 
-/// The folder [`unlistable`] made listed again, so it can be removed.
+/// Restores `0o755` permissions on a directory created by [`unlistable`] so
+/// temporary directory cleanup can remove it.
 #[cfg(unix)]
 pub(crate) fn listable(dir: &Path) {
     use std::os::unix::fs::PermissionsExt;

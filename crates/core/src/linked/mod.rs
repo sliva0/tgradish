@@ -1,8 +1,9 @@
-//! ffmpeg libraries linked into the binary, for builds with the `linked`
-//! feature. Does the same as the ffmpeg command lines in [`crate::ffmpeg`]:
-//! decode, run the same filter chain, encode with libvpx-vp9 and write WebM.
+//! Built-in ffmpeg backend linked directly into the binary (enabled by the
+//! `linked` feature). Mirrors the external process backend in
+//! [`crate::ffmpeg`]: decoding, filtering, `libvpx-vp9` encoding, WebM muxing
+//! and SSIM scoring.
 // libvpx two-pass statistics and display matrices are not wrapped by
-// ffmpeg-next, so a few raw pointers are needed
+// ffmpeg-next, so a few raw pointer calls are required.
 #![allow(unsafe_code)]
 
 mod reader;
@@ -30,24 +31,24 @@ fn libav(doing: &'static str) -> impl Fn(ff::Error) -> Error {
     move |err| Error::Libav(format!("{doing}: {err}"))
 }
 
-/// `path` as libavformat takes a file's name: on Unix its bytes as they
-/// are, which is what the ffmpeg command line is given, so names that
-/// aren't Unicode read too; elsewhere as UTF-8, which ffmpeg turns into
-/// the system's own. ffmpeg-next's functions that take a path panic on
-/// what isn't Unicode.
+/// Converts `path` into a NUL-terminated path for `libavformat`: on Unix, raw
+/// bytes as passed on the ffmpeg command line (so non-Unicode paths work too,
+/// whereas `ffmpeg-next`'s path functions panic on non-Unicode); elsewhere,
+/// UTF-8, which ffmpeg converts to the system encoding.
 fn c_path(path: &Path) -> std::result::Result<CString, &'static str> {
     #[cfg(unix)]
     let bytes = std::os::unix::ffi::OsStrExt::as_bytes(path.as_os_str());
     #[cfg(not(unix))]
     let bytes = path
         .to_str()
-        .ok_or("its name isn't valid Unicode, which the built-in ffmpeg needs")?
+        .ok_or("path is not valid UTF-8 (required by the built-in ffmpeg)")?
         .as_bytes();
-    CString::new(bytes).map_err(|_| "its name has a NUL character in it")
+    CString::new(bytes).map_err(|_| "path contains a NUL byte")
 }
 
-/// A WebM file to write at `path`, as ffmpeg-next's `output_as` makes one,
-/// but for any name [`c_path`] takes.
+/// Opens a WebM output context at `path` (like
+/// `ffmpeg_next::format::output_as`,
+/// but accepting any path handled by [`c_path`]).
 fn create_webm(path: &Path) -> Result<format::context::Output> {
     let failed = libav("creating the output");
     let name =
@@ -184,9 +185,9 @@ pub(crate) fn frame_starts(input: &Path, cancel: &CancelToken) -> Result<Vec<f64
     Reader::open_file(input, None, Threads::Auto, cancel)?.frame_starts()
 }
 
-/// A filter graph from `buffer` sources named after `inputs` to a
-/// `buffersink` named `out`, which filters in as many `threads`. `spec`
-/// refers to them as `[name]` and `[out]`.
+/// Builds a libavfilter graph connecting `buffer` sources named by `inputs` to
+/// a `buffersink` named `"out"`, using up to `threads`. `spec` connects them
+/// via `[name]` and `[out]`.
 fn filter_graph(inputs: &[(&str, String)], spec: &str, threads: Threads) -> Result<filter::Graph> {
     let mut graph = filter::Graph::new();
     if let Some(threads) = threads.limit() {
@@ -209,19 +210,18 @@ fn filter_graph(inputs: &[(&str, String)], spec: &str, threads: Threads) -> Resu
     Ok(graph)
 }
 
-/// A source read through a filter graph from `[in]` to `[out]`, one
-/// filtered frame at a time.
+/// Pulls frames from a [`Reader`] through a filter graph (`[in]` -> `[out]`).
 struct Filtered {
     source: Reader,
     graph: filter::Graph,
-    /// The next decoded frame, not yet given to the filters.
+    /// Next decoded frame buffered for the filter source.
     next: frame::Video,
     input_open: bool,
 }
 
 impl Filtered {
-    /// `source` through `spec`, in as many `threads`, or `None` when it
-    /// has no frames: the filters' input takes its format from the first.
+    /// Creates a [`Filtered`] stream using the first decoded frame to configure
+    /// the filter input. Returns `Ok(None)` if `source` yields no frames.
     fn new(mut source: Reader, spec: &str, threads: Threads) -> Result<Option<Filtered>> {
         let mut next = frame::Video::empty();
         if !source.next(&mut next)? {
@@ -235,8 +235,7 @@ impl Filtered {
         self.graph.get("out").expect("added").sink().time_base()
     }
 
-    /// The next filtered frame, into `frame`, decoding as much as that
-    /// takes: false once the input is used up and the filters drained.
+    /// Reads the next filtered frame into `frame`, returning false on EOF.
     fn next(&mut self, frame: &mut frame::Video, cancel: &CancelToken) -> Result<bool> {
         loop {
             match self.graph.get("out").expect("added").sink().frame(frame) {
@@ -308,7 +307,7 @@ fn open_encoder(
     }
     let unused: Vec<_> = unused.iter().map(|(name, _)| name.to_string()).collect();
     if !unused.is_empty() {
-        let reason = format!("has names libvpx-vp9 doesn't know: {}", unused.join(", "));
+        let reason = format!("has options libvpx-vp9 does not know: {}", unused.join(", "));
         return Err(Error::invalid("encoder-options", reason));
     }
     Ok(ff::encoder::video::Encoder(encoder))
@@ -358,7 +357,7 @@ impl Encoder {
         time_base: Rational,
     ) -> Result<Encoder> {
         let codec = ff::encoder::find_by_name("libvpx-vp9")
-            .ok_or_else(|| Error::Libav("this ffmpeg has no libvpx-vp9 encoder".into()))?;
+            .ok_or_else(|| Error::Libav("this ffmpeg build lacks the libvpx-vp9 encoder".into()))?;
         let mut output = output.map(create_webm).transpose()?;
 
         let mut encoder = codec::context::Context::new_with_codec(codec)
@@ -623,7 +622,7 @@ pub(crate) fn ssim(plan: &Plan, candidate: &Path, fps: f64, cancel: &CancelToken
         }
     }
     if count == 0 {
-        return Err(Error::Libav("the ssim filter reported nothing".into()));
+        return Err(Error::Libav("SSIM filter produced no output".into()));
     }
     Ok(total / count as f64)
 }

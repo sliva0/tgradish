@@ -1,20 +1,20 @@
-//! Inputs from the clipboard: copied files, copied paths, or an image.
+//! Reads conversion inputs from the system clipboard (copied files, file paths,
+//! or an image).
 
 use std::io::BufWriter;
 use std::path::PathBuf;
 
 use crate::{ClipboardError, Error, FileAction, Result};
 
-/// Name a pasted image is saved under, so its result is
+/// Filename used when saving a pasted image, producing
 /// `clipboard.sticker.webm`.
 pub const PASTED_IMAGE_NAME: &str = "clipboard.png";
 
-/// What was on the clipboard.
+/// Input files read from the clipboard.
 pub struct Pasted {
-    /// The files to convert: those copied, or the pasted image saved.
+    /// Files to convert (copied files or the saved temporary PNG).
     pub files: Vec<PathBuf>,
-    /// The temporary directory of a pasted image, which is the one file;
-    /// it is deleted when this is dropped.
+    /// Temporary directory holding a pasted image; deleted when dropped.
     pub image_dir: Option<tempfile::TempDir>,
 }
 
@@ -39,9 +39,9 @@ fn percent_decode(text: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-/// Path of a `file://` URI, without the `file://`. Handles
-/// `file:///home/x`, `file:///C:/x`, `file://localhost/x` and, on Windows,
-/// network shares like `file://server/share/x`.
+/// Extracts the filesystem path from a `file://` URI (with `file://` stripped).
+/// Handles `file:///home/x`, `file:///C:/x`, `file://localhost/x` and Windows
+/// network shares such as `file://server/share/x`.
 fn uri_path(rest: &str, windows: bool) -> PathBuf {
     let path = percent_decode(rest);
     let (host, path) = match path.strip_prefix('/') {
@@ -50,18 +50,18 @@ fn uri_path(rest: &str, windows: bool) -> PathBuf {
     };
     let host = if host.eq_ignore_ascii_case("localhost") { "" } else { host };
     match (windows, host) {
-        // /C:/x is C:/x
+        // Turn `/C:/x` into `C:/x`.
         (true, "") => PathBuf::from(path.trim_start_matches('/')),
         (true, host) => PathBuf::from(format!(r"\\{host}\{}", path.replace('/', "\\"))),
         (false, "") => PathBuf::from(format!("/{}", path.trim_start_matches('/'))),
-        // shares on other hosts are not reachable as paths here
+        // Remote shares are not directly reachable as Unix paths.
         (false, host) => PathBuf::from(format!("//{host}/{path}")),
     }
 }
 
-/// Paths in copied text: plain paths, possibly in quotes as Windows'
-/// "Copy as path" writes them, or `file://` URIs, one per line. `windows`
-/// says how to read URIs.
+/// Parses copied text into paths (one per line), supporting plain paths,
+/// quoted paths (such as Windows "Copy as path") and `file://` URIs.
+/// `windows` controls URI path parsing.
 pub fn paths_in_text(text: &str, windows: bool) -> Vec<PathBuf> {
     text.lines()
         .map(str::trim)
@@ -80,9 +80,9 @@ pub fn paths_in_text(text: &str, windows: bool) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Files to convert from the clipboard: copied files, else copied paths of
-/// files that exist, else an image, saved as [`PASTED_IMAGE_NAME`] in a
-/// temporary directory.
+/// Reads conversion inputs from the clipboard: first copied files, then copied
+/// paths to existing files, then a clipboard image saved as
+/// [`PASTED_IMAGE_NAME`] in a temporary directory.
 pub fn paste() -> Result<Pasted> {
     let failed =
         |err: arboard::Error| Error::Clipboard(ClipboardError::Unreadable(err.to_string()));

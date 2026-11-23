@@ -1,5 +1,5 @@
-//! Normalises and encodes the synthetic pixel art of `tgradish-corpus`,
-//! which stands for the cases real art has.
+//! Integration tests normalising and encoding the synthetic pixel-art corpus
+//! from `tgradish-corpus`.
 
 use tgradish_corpus::File;
 use tgradish_tgs::frames::{Animation, DecodeOptions, Limits, decode};

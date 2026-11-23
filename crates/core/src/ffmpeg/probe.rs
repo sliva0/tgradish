@@ -1,5 +1,5 @@
-//! What ffprobe says about an input, as a [`Probe`] both backends fill
-//! the same way, and where its frames start.
+//! Media stream probing ([`Probe`]) and packet timestamp extraction shared by
+//! both backends.
 
 use std::path::Path;
 use std::process::Command;
@@ -19,52 +19,49 @@ use crate::error::{Error, Result};
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Probe {
-    /// The container, as ffprobe names its format: `matroska,webm`,
-    /// `gif`, `png_pipe`.
+    /// Container format name reported by `ffprobe` (e.g. `matroska,webm`,
+    /// `gif`, `png_pipe`).
     pub format: String,
-    /// The video stream's codec, as ffprobe names it: `vp9`, `h264`.
+    /// Video codec name reported by `ffprobe` (e.g. `vp9`, `h264`).
     pub codec: String,
-    /// Display width, after applying rotation and sample aspect ratio.
+    /// Display width in pixels, after rotation and sample aspect ratio.
     pub width: u32,
-    /// Display height, as the width.
+    /// Display height in pixels, after rotation and sample aspect ratio.
     pub height: u32,
-    /// The average frame rate.
+    /// Average frame rate.
     pub fps: Option<f64>,
-    /// The stream's base frame rate, which a video of variable frame rate
-    /// reaches where it changes fastest.
+    /// Stream base frame rate (upper bound for variable-frame-rate video).
     pub base_fps: Option<f64>,
-    /// Duration in seconds, missing for still images.
+    /// Duration in seconds (`None` for still images).
     pub duration: Option<f64>,
-    /// Where the video starts, in seconds after the file's start, which
-    /// other streams can start before. Times into the video, as cuts and
-    /// [`Backend::frame_starts`](crate::backend::Backend::frame_starts)
-    /// give them, count from here.
+    /// Video stream start offset relative to the file start, in seconds. Cuts
+    /// and [`Backend::frame_starts`](crate::backend::Backend::frame_starts)
+    /// measure time from here.
     pub start: f64,
-    /// Whether its pixel format can hold transparency: with an alpha
-    /// plane, a palette, or a WebM's `ALPHA_MODE` tag.
+    /// True if the pixel format supports transparency (alpha channel, palette,
+    /// or WebM `ALPHA_MODE`).
     pub alpha: bool,
-    /// Whether it is a single picture, read by an image demuxer, which
-    /// has no length or frame rate.
+    /// True for single still images read by an image demuxer.
     pub still_image: bool,
-    /// How frames are turned for display. Width and height above already
-    /// take it into account.
+    /// Display orientation (already reflected in `width` and `height`).
     pub orientation: Orientation,
-    /// Decoder that has to be forced to keep transparency: ffmpeg's native
-    /// VP8/VP9 decoders ignore WebM alpha.
+    /// Forced decoder name when needed to preserve transparency (ffmpeg's
+    /// native VP8/VP9 decoders ignore WebM alpha).
     pub decoder: Option<String>,
 }
 
 impl Probe {
-    /// [`Probe::fps`], or where the file doesn't say, 25, which ffmpeg
-    /// assumes for images and raw streams too.
+    /// Returns [`Probe::fps`], defaulting to 25 fps (matching ffmpeg's
+    /// default).
     pub fn fps_or_default(&self) -> f64 {
         self.fps.unwrap_or(25.0)
     }
 
-    /// Where reading the file starts for `start` seconds into the video,
-    /// at the start a hair before its first frame, so it stays. Every read
-    /// seeks through this, since ffmpeg's `-ss` counts from the file's
-    /// start, not the video's.
+    /// Converts a video-relative `start` time into the file-relative `-ss`
+    /// offset for ffmpeg. Every read seeks through this because `-ss` counts
+    /// from the file start rather than the video stream start. When
+    /// `start <= 0`, seeks 1 ms before `self.start` so the first frame is never
+    /// skipped.
     pub fn seek(&self, start: f64) -> f64 {
         if start > 0.0 { start + self.start } else { (self.start - 1e-3).max(0.0) }
     }
@@ -90,43 +87,42 @@ fn pix_fmt_has_alpha(pix_fmt: &str) -> bool {
         || pix_fmt == "pal8"
 }
 
-/// What a backend reads about the first video stream of a file, before
-/// the rules both apply to make a [`Probe`] of it.
+/// Raw video stream facts collected by either backend before normalising into
+/// a [`Probe`].
 pub(crate) struct Facts {
     pub format: String,
     pub codec: String,
     pub pix_fmt: String,
-    /// The coded size, before the sample aspect ratio and orientation.
+    /// Coded dimensions before sample aspect ratio and orientation.
     pub width: f64,
     pub height: f64,
     pub sample_aspect: Option<f64>,
     pub orientation: Orientation,
     pub avg_fps: Option<f64>,
     pub base_fps: Option<f64>,
-    /// The stream's duration, and the whole file's.
+    /// `(stream_duration, container_duration)` in seconds.
     pub durations: (Option<f64>, Option<f64>),
     /// See [`Probe::start`].
     pub start: f64,
-    /// Matroska's `ALPHA_MODE` tag: VP8 and VP9 keep transparency beside
-    /// the picture, where only libvpx's decoders find it.
+    /// Matroska `ALPHA_MODE=1` tag (VP8/VP9 alpha requires `libvpx` decoders).
     pub webm_alpha: bool,
-    /// How many frames the stream says it has, if it says.
+    /// Reported stream frame count, if available.
     pub frames: Option<u64>,
-    /// How its frames play, from its packets, where nothing else says:
-    /// see [`Facts::untimed`].
+    /// Packet-derived timing when container headers omit duration (see
+    /// [`Facts::untimed`]).
     pub timing: Option<Timing>,
 }
 
-/// How the frames of a stream play, from its packets.
+/// Frame count and total span measured directly from video packets.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) struct Timing {
     pub frames: usize,
-    /// From the start of the first frame to the end of the last.
+    /// Span from the first frame's start to the last frame's end, in seconds.
     pub length: f64,
 }
 
 impl Timing {
-    /// From packets' starts and lengths in seconds: `None` without them.
+    /// Computes [`Timing`] from packet `(pts_seconds, duration_seconds)` pairs.
     pub(crate) fn of(packets: impl IntoIterator<Item = (f64, f64)>) -> Option<Timing> {
         let (mut frames, mut first, mut end) = (0, f64::INFINITY, f64::NEG_INFINITY);
         for (start, length) in packets {
@@ -137,11 +133,10 @@ impl Timing {
         (frames > 0 && end > first).then_some(Timing { frames, length: end - first })
     }
 
-    /// How long the frames play, at `fps` if that is what the packets'
-    /// times round: ffmpeg times APNG in units of 1/100000 s, so a twelfth
-    /// of a second is 0.08333 and 4 frames at 12 fps come to less than 4
-    /// frames' time, which would leave the last one out. The most that can
-    /// lose is half a unit a frame, 0.03% at 60 fps.
+    /// Snaps `self.length` to `frames / fps` when within 0.05%.
+    /// ffmpeg quantises APNG delays to 1/100000 s (e.g. 1/12 s becomes
+    /// 0.08333 s), which can fall slightly short and drop the last frame. That
+    /// rounding loses at most half a unit per frame (0.03% at 60 fps).
     fn length_at(&self, fps: Option<f64>) -> f64 {
         fps.map(|fps| self.frames as f64 / fps)
             .filter(|even| (even - self.length).abs() <= self.length * 5e-4)
@@ -170,7 +165,7 @@ impl Facts {
         if width == 0.0 || height == 0.0 {
             return Err(Error::Unreadable {
                 path: input.to_path_buf(),
-                message: "video stream has no size".into(),
+                message: "video stream has a zero width or height".into(),
             });
         }
         let (mut width, mut height) = (width * self.sample_aspect.unwrap_or(1.0), height);

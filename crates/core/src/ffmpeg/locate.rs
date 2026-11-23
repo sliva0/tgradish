@@ -1,4 +1,5 @@
-//! Finding ffmpeg and ffprobe: at a path the user gave, or on PATH.
+//! Locates external `ffmpeg` and `ffprobe` executables from a configured path
+//! or `PATH`.
 
 use std::env::consts::EXE_SUFFIX;
 use std::path::{Path, PathBuf};
@@ -11,11 +12,10 @@ fn exe(dir: &Path, name: &str) -> PathBuf {
 }
 
 impl Ffmpeg {
-    /// The ffmpeg and ffprobe on PATH, ffprobe from beside ffmpeg where
-    /// it is there.
+    /// Locates `ffmpeg` on `PATH` and prefers the sibling `ffprobe` from the
+    /// same directory before falling back to `PATH`.
     pub fn on_path() -> Result<Ffmpeg> {
         let ffmpeg = which::which("ffmpeg").ok();
-        // prefer the ffprobe from the same installation
         let ffprobe = ffmpeg.as_deref().and_then(|ffmpeg| {
             let beside = ffmpeg.parent().map(|dir| exe(dir, "ffprobe"));
             beside.filter(|path| path.is_file()).or_else(|| which::which("ffprobe").ok())
@@ -28,8 +28,8 @@ impl Ffmpeg {
         }
     }
 
-    /// The ffmpeg at `path`, the executable or the folder holding it, with
-    /// the ffprobe beside it.
+    /// Resolves `ffmpeg` and its sibling `ffprobe` from an explicit executable
+    /// or directory `path`.
     pub(crate) fn at(path: &Path) -> Result<Ffmpeg> {
         let dir = if path.is_dir() { path } else { path.parent().unwrap_or(Path::new(".")) };
         let ffmpeg = if path.is_dir() { exe(dir, "ffmpeg") } else { path.to_path_buf() };

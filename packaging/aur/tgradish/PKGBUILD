@@ -6,13 +6,12 @@ pkgrel=1
 pkgdesc='Telegram stickers and emoji from videos, images or pixel art'
 arch=(x86_64 aarch64)
 url='https://github.com/sliva0/tgradish'
-# tgradish is MIT, with libwebp; the GUI's fonts are Ubuntu's, JetBrains
-# Mono's and emoji-icon-font's, which is MIT
+# tgradish is MIT, with libwebp (BSD-3-Clause); the GUI's fonts: Ubuntu (Ubuntu
+# Font Licence 1.0), JetBrains Mono (OFL-1.1), emoji-icon-font (MIT).
 license=(MIT BSD-3-Clause Ubuntu-font-1.0 OFL-1.1)
-# ffmpeg runs as a program; the GUI loads the graphics libraries when it
-# opens, and D-Bus for file dialogues
-# the GUI's libraries are those of GUI_LIBRARIES in xtask/src/package.rs,
-# which says where each comes from: keep them alike
+# Runs external ffmpeg; the GUI dlopens graphics libraries and D-Bus for file
+# dialogues at runtime. Keep in sync with GUI_LIBRARIES in xtask/src/package.rs,
+# which documents where each comes from.
 depends=(
   dbus
   ffmpeg
@@ -29,10 +28,9 @@ depends=(
   wayland
 )
 makedepends=(cargo)
-# makepkg's lto adds -flto=auto to CFLAGS, so libwebp-sys's C is built as
-# GCC's LTO objects, which rust-lld, the linker Rust uses, can't read: the
-# link fails on undefined WebP symbols. Cargo's release profile has its own
-# LTO, of the Rust code
+# makepkg's `lto` adds -flto=auto to CFLAGS, producing GCC LTO objects for
+# libwebp-sys that rust-lld cannot link (failing with undefined WebP symbols).
+# Cargo's release profile handles LTO for Rust code instead.
 options=(!lto)
 optdepends=('xdg-desktop-portal: file dialogues in the GUI')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
@@ -41,7 +39,7 @@ sha256sums=('SKIP')
 _cargo_env() {
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR=target
-  # no build paths in the binary's panic messages
+  # Strip local build paths from panic messages.
   export RUSTFLAGS="$RUSTFLAGS --remap-path-prefix=$srcdir=/"
 }
 
@@ -57,8 +55,8 @@ build() {
   cargo build --frozen --release -p tgradish
 }
 
-# the pure Rust crate's tests only, which run no ffmpeg, processes or
-# signals: the rest, which do, are the release workflow's to run on Arch
+# Run only tgradish-tgs's tests (pure Rust: no ffmpeg, subprocesses or
+# signals); the full suite runs on Arch in the release workflow.
 check() {
   cd "$pkgname-$pkgver"
   _cargo_env
@@ -68,7 +66,7 @@ check() {
 package() {
   cd "$pkgname-$pkgver"
   install -Dm755 target/release/tgradish -t "$pkgdir/usr/bin/"
-  # man pages, which makepkg compresses, and completions
+  # Generate man pages (compressed by makepkg) and shell completions.
   target/release/tgradish __man "$srcdir/man"
   install -Dm644 "$srcdir"/man/*.1 -t "$pkgdir/usr/share/man/man1/"
   target/release/tgradish completions bash \
@@ -85,12 +83,12 @@ package() {
   done
   install -Dm644 README.md -t "$pkgdir/usr/share/doc/$pkgname/"
   install -Dm644 LICENSE.txt "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
-  # libwebp's licence and patent grant
+  # libwebp licence and patent grant.
   for file in COPYING PATENTS; do
     install -Dm644 "crates/core/licenses/libwebp/$file" \
       "$pkgdir/usr/share/licenses/$pkgname/libwebp-$file"
   done
-  # the GUI's fonts', FONT_LICENCES in xtask/src/package.rs
+  # Bundled GUI font licences (matches FONT_LICENCES in xtask/src/package.rs).
   install -Dm644 crates/gui/assets/fonts/Ubuntu-LICENCE.txt \
     crates/gui/assets/fonts/JetBrainsMono-OFL.txt \
     crates/gui/assets/fonts/emoji-icon-font-LICENSE.txt \

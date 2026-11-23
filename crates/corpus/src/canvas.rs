@@ -1,13 +1,13 @@
-//! A canvas to draw pixel art on.
+//! Simple RGBA canvas for drawing synthetic pixel art.
 
 use std::collections::BTreeSet;
 
 pub type Colour = [u8; 4];
 
-/// No paint.
+/// Fully transparent pixel.
 pub const CLEAR: Colour = [0; 4];
 
-/// RGBA pixels, row by row.
+/// Row-major RGBA pixel buffer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Canvas {
     pub width: u32,
@@ -25,12 +25,12 @@ impl Canvas {
         inside.then(|| ((y as u32 * self.width + x as u32) * 4) as usize)
     }
 
-    /// The pixel at `x`, `y`, clear outside the canvas.
+    /// Returns the pixel at `(x, y)`, or `CLEAR` if out of bounds.
     pub fn get(&self, x: i32, y: i32) -> Colour {
         self.index(x, y).map_or(CLEAR, |i| self.rgba[i..i + 4].try_into().unwrap())
     }
 
-    /// Paints a pixel; outside the canvas, nothing.
+    /// Sets the pixel at `(x, y)`. Out-of-bounds coordinates are ignored.
     pub fn set(&mut self, x: i32, y: i32, colour: Colour) {
         if let Some(i) = self.index(x, y) {
             self.rgba[i..i + 4].copy_from_slice(&colour);
@@ -45,7 +45,7 @@ impl Canvas {
         }
     }
 
-    /// The pixels whose middles are inside the ellipse around `cx`, `cy`.
+    /// Fills all pixels whose centres lie inside the ellipse around `(cx, cy)`.
     pub fn ellipse(&mut self, cx: f32, cy: f32, rx: f32, ry: f32, colour: Colour) {
         let (top, bottom) = ((cy - ry).floor() as i32, (cy + ry).ceil() as i32);
         let (left, right) = ((cx - rx).floor() as i32, (cx + rx).ceil() as i32);
@@ -59,7 +59,7 @@ impl Canvas {
         }
     }
 
-    /// A line from one pixel to another, `width` pixels thick.
+    /// Draws a line from `from` to `to` with the given stroke `width`.
     pub fn line(&mut self, from: (i32, i32), to: (i32, i32), width: i32, colour: Colour) {
         let (dx, dy) = ((to.0 - from.0).abs(), -(to.1 - from.1).abs());
         let (sx, sy) = ((to.0 - from.0).signum(), (to.1 - from.1).signum());
@@ -81,8 +81,7 @@ impl Canvas {
         }
     }
 
-    /// Outlines what is painted: clear pixels beside painted ones become
-    /// `colour`.
+    /// Adds a 1-pixel outline around non-transparent pixels.
     pub fn outline(&mut self, colour: Colour) {
         let painted = |canvas: &Canvas, x, y| canvas.get(x, y)[3] != 0;
         let mut edge = Vec::new();
@@ -101,7 +100,8 @@ impl Canvas {
         }
     }
 
-    /// Each pixel as a block of `scale` by `scale`.
+    /// Scales the canvas up by an integer factor using nearest-neighbour
+    /// blocks.
     pub fn scaled(&self, scale: u32) -> Canvas {
         let mut out = Canvas::new(self.width * scale, self.height * scale);
         for y in 0..out.height as i32 {
@@ -112,7 +112,7 @@ impl Canvas {
         out
     }
 
-    /// The part at `x`, `y` that is `width` by `height`.
+    /// Returns the `width` by `height` region starting at `(x, y)`.
     pub fn cropped(&self, x: i32, y: i32, width: u32, height: u32) -> Canvas {
         let mut out = Canvas::new(width, height);
         for dy in 0..height as i32 {
@@ -123,8 +123,7 @@ impl Canvas {
         out
     }
 
-    /// `other` drawn over this one at `x`, `y`; its clear pixels leave this
-    /// one's.
+    /// Copies non-transparent pixels from `other` onto this canvas at `(x, y)`.
     pub fn paste(&mut self, other: &Canvas, x: i32, y: i32) {
         for dy in 0..other.height as i32 {
             for dx in 0..other.width as i32 {
@@ -136,7 +135,8 @@ impl Canvas {
         }
     }
 
-    /// The colours it has, clear ones as one.
+    /// Returns the distinct colours in the canvas, normalising all transparent
+    /// pixels to `CLEAR`.
     pub fn colours(&self) -> BTreeSet<Colour> {
         self.rgba
             .as_chunks::<4>()
@@ -147,7 +147,7 @@ impl Canvas {
     }
 }
 
-/// A fixed sequence of pseudo-random numbers.
+/// Deterministic xorshift pseudo-random number generator.
 pub struct Random(u64);
 
 impl Random {
@@ -162,7 +162,7 @@ impl Random {
         self.0
     }
 
-    /// A number from 0 to `below`, without it.
+    /// Returns a number in `0..below`.
     pub fn below(&mut self, below: u32) -> u32 {
         (self.number() % u64::from(below.max(1))) as u32
     }

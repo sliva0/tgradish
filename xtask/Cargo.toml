@@ -1,12 +1,11 @@
 [package]
 name = "xtask"
-# release archives are named after it
+# Shared with the workspace so release archives use the application version.
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
-# the packages' maintainer and home page, and where releases are, which
-# the notice of ffmpeg's sources says
+# Used for package maintainer metadata, homepage, and the ffmpeg source notice.
 authors.workspace = true
 repository.workspace = true
 publish = false

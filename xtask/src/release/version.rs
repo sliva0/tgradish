@@ -1,17 +1,15 @@
-//! Where the version is written, and changing it in each place at once.
+//! Reads, updates, and verifies version numbers across the repository.
 //!
-//! The application's version, which tgradish, core, the GUI and xtask
-//! share, is `[workspace.package]`'s in `Cargo.toml`, also in the exact
-//! requirements of `[workspace.dependencies]`, both lock files, each AUR
-//! package's `pkgver` and `.SRCINFO`, the changelog's newest section, and
-//! the list of the crates' licences that binaries carry, which names the
-//! workspace's own crates with their versions. tgradish-tgs has a version
-//! of its own, in its manifest, the workspace's requirement, the lock files
-//! and that list. The Nix package reads `Cargo.toml`'s, and the binaries
-//! and packages take theirs from cargo as they are built.
+//! The main workspace version (`tgradish`, `tgradish-core`, `tgradish-gui`,
+//! `xtask`) appears in `[workspace.package]`, `[workspace.dependencies]`, both
+//! lock files, each AUR `PKGBUILD` and `.SRCINFO`, `CHANGELOG.md`, and
+//! `crates/core/licenses/THIRD-PARTY-CRATES.txt` (which lists workspace crates
+//! with their versions). `tgradish-tgs` has an independent version in its
+//! manifest, `[workspace.dependencies]`, both lock files, and
+//! `THIRD-PARTY-CRATES.txt`. Nix reads `Cargo.toml` directly, and built
+//! binaries and packages take their version from Cargo at build time.
 //!
-//! Each file is edited a line at a time, which keeps everything around the
-//! value as it was.
+//! Files are edited line-by-line to preserve surrounding formatting.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -40,7 +38,7 @@ impl Version {
         let parts: Vec<Option<u64>> = text.split('.').map(number).collect();
         match parts[..] {
             [Some(major), Some(minor), Some(patch)] => Ok(Version { major, minor, patch }),
-            _ => bail!("{text:?} isn't a version as X.Y.Z"),
+            _ => bail!("{text:?} is not a valid X.Y.Z version"),
         }
     }
 
@@ -271,10 +269,10 @@ fn licensed_crates(text: &str) -> Vec<(usize, &str, &str)> {
 /// cargo. Fails unless both rise, or where the changelog says nothing new.
 pub fn prepare(tree: &mut Tree, version: Version, tgs: Option<Version>, date: &str) -> Result<()> {
     let previous = app_version(tree)?;
-    ensure!(version > previous, "{version} isn't above the version now, {previous}");
+    ensure!(version > previous, "{version} is not greater than current version {previous}");
     if let Some(tgs) = tgs {
         let previous = tgs_version(tree)?;
-        ensure!(tgs > previous, "{tgs} isn't above {TGS}'s version now, {previous}");
+        ensure!(tgs > previous, "{tgs} is not greater than current {TGS} version {previous}");
         set(tree, TGS_MANIFEST, &PACKAGE_VERSION, &tgs.to_string())?;
         set(tree, MANIFEST, &dependency(TGS), &tgs.to_string())?;
     }
@@ -333,7 +331,7 @@ pub fn problems(tree: &Tree, tag: Option<&str>) -> Result<Vec<String>> {
     if let Some(tag) = tag
         && tag != format!("v{version}")
     {
-        problems.push(format!("the tag is {tag}, but {MANIFEST} says {version}"));
+        problems.push(format!("tag is {tag}, but {MANIFEST} has {version}"));
     }
     fn expect(problems: &mut Vec<String>, place: String, found: &str, expected: Version) {
         if found != expected.to_string() {
@@ -344,23 +342,23 @@ pub fn problems(tree: &Tree, tag: Option<&str>) -> Result<Vec<String>> {
         APP_DEPENDENCIES.map(|name| (name, version)).into_iter().chain([(TGS, tgs)])
     {
         let found = get(tree, MANIFEST, &dependency(name))?;
-        expect(&mut problems, format!("{MANIFEST}'s requirement on {name}"), found, expected);
+        expect(&mut problems, format!("{MANIFEST} dependency on {name}"), found, expected);
     }
     for package in AUR_PACKAGES {
         let path = pkgbuild(package);
         let pkgbuild = file(tree, &path)?;
-        expect(&mut problems, format!("{path}'s pkgver"), PKGVER.get(pkgbuild)?, version);
+        expect(&mut problems, format!("{path} pkgver"), PKGVER.get(pkgbuild)?, version);
         let pkgrel = PKGREL.get(pkgbuild)?;
         let path = srcinfo(package);
         let srcinfo = file(tree, &path)?;
         let (pkgver, srcinfo_pkgrel) = (SRCINFO_PKGVER.get(srcinfo)?, SRCINFO_PKGREL.get(srcinfo)?);
-        expect(&mut problems, format!("{path}'s pkgver"), pkgver, version);
+        expect(&mut problems, format!("{path} pkgver"), pkgver, version);
         if srcinfo_pkgrel != pkgrel {
-            problems.push(format!("{path}'s pkgrel is {srcinfo_pkgrel}, the PKGBUILD's {pkgrel}"));
+            problems.push(format!("{path} pkgrel is {srcinfo_pkgrel}, PKGBUILD has {pkgrel}"));
         }
         for line in srcinfo.lines().filter(|line| line.trim_start().starts_with("source")) {
             if !line.contains(&format!("-{version}")) || !line.contains(&format!("/v{version}")) {
-                problems.push(format!("{path} downloads another version: {}", line.trim()));
+                problems.push(format!("{path} downloads a different version: {}", line.trim()));
             }
         }
     }
@@ -368,14 +366,14 @@ pub fn problems(tree: &Tree, tag: Option<&str>) -> Result<Vec<String>> {
         let lock = file(tree, path)?;
         let packages = local_packages(lock);
         if packages.is_empty() {
-            problems.push(format!("{path} has none of the workspace's crates"));
+            problems.push(format!("{path} contains no workspace crates"));
         }
         // tgs-lab is a workspace of its own, versioned apart
         for (name, found) in packages.into_iter().filter(|(name, _)| *name != "tgs-lab") {
             let expected = if name == TGS { tgs } else { version };
             if found != expected.to_string() {
                 problems.push(format!(
-                    "{path} has {name} {found}, not {expected}: refresh it with cargo update --workspace"
+                    "{path} has {name} {found}, not {expected}; run `cargo update --workspace`"
                 ));
             }
         }
@@ -384,15 +382,14 @@ pub fn problems(tree: &Tree, tag: Option<&str>) -> Result<Vec<String>> {
     for name in LICENSED_CRATES {
         if !listed.iter().any(|(_, found, _)| *found == name) {
             problems
-                .push(format!("{CRATE_LICENCES} doesn't list {name}: run cargo xtask licenses"));
+                .push(format!("{CRATE_LICENCES} does not list {name}; run `cargo xtask licenses`"));
         }
     }
     for (_, name, found) in listed {
         let expected = if name == TGS { tgs } else { version };
         if found != expected.to_string() {
             problems.push(format!(
-                "{CRATE_LICENCES} lists {name} {found}, not {expected}, as cargo xtask \
-                 licenses would"
+                "{CRATE_LICENCES} lists {name} {found}, not {expected}; run `cargo xtask licenses`"
             ));
         }
     }
@@ -400,9 +397,8 @@ pub fn problems(tree: &Tree, tag: Option<&str>) -> Result<Vec<String>> {
     let rust = Version::parse_rust(get(tree, MANIFEST, &RUST_VERSION)?)?;
     let built = toolchain(tree)?;
     if built < rust {
-        problems.push(format!(
-            "{WORKFLOW} builds releases with Rust {built}, older than rust-version, {rust}"
-        ));
+        problems
+            .push(format!("{WORKFLOW} uses Rust {built}, which is older than rust-version {rust}"));
     }
     Ok(problems)
 }

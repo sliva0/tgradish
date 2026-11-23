@@ -1,5 +1,5 @@
-//! Planning a WebM conversion: every setting worked out from the options
-//! and the input, and the frame counts and times they come to.
+//! Resolves WebM conversion options and probed media metadata into a concrete
+//! [`Plan`], plus frame-counting and frame-boundary trimming helpers.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -16,102 +16,98 @@ use crate::picture::{default_resize, picture_sizes};
 use crate::presets::Format;
 use crate::telegram::{self, Target};
 
-/// Every setting of a conversion, after defaults and input properties are
-/// taken into account.
+/// Fully resolved settings for a WebM (or WebP) conversion.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct Plan {
-    /// The file ffmpeg reads.
+    /// Input path passed to ffmpeg.
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub input: PathBuf,
-    /// Where the result goes.
+    /// Destination output path.
     #[serde(serialize_with = "crate::protocol::serialize_path")]
     pub output: PathBuf,
-    /// What the input is.
+    /// Probed source media properties.
     pub source: Probe,
-    /// What it makes.
+    /// Telegram target (sticker or emoji).
     pub target: Target,
-    /// The part of the source used, in its display pixels.
+    /// Crop region in rotated display pixels.
     pub crop: Option<Crop>,
-    /// How the part used fills the result's size.
+    /// Resize mode.
     pub resize: Resize,
-    /// How pixels are scaled; never [`Scaling::Auto`].
+    /// Resolved scaling mode (never [`Scaling::Auto`]).
     pub scaling: Scaling,
-    /// Width of the encoded video.
+    /// Encoded output width in pixels.
     pub width: u32,
-    /// Height of the encoded video.
+    /// Encoded output height in pixels.
     pub height: u32,
-    /// Width the source is scaled to before padding or cropping to the
-    /// encoded size.
+    /// Intermediate scaled width before cropping or padding.
     pub scaled_width: u32,
-    /// Height the source is scaled to, as the width.
+    /// Intermediate scaled height before cropping or padding.
     pub scaled_height: u32,
-    /// What fitting tunes to come close to the size limit.
+    /// Size-fitting strategy.
     pub fit: Fit,
-    /// The most encodes fitting makes.
+    /// Maximum size-fitting attempts.
     pub attempts: u32,
-    /// The range fitting searches, in the unit of what it tunes.
+    /// Search range in the unit of `fit`.
     pub fit_range: Range,
-    /// Whether `fit = auto` may lower the frame rate. False when the frame
-    /// rate was set explicitly.
+    /// True if `fit = auto` may try lower frame rates (false when `fps` was
+    /// set explicitly).
     pub auto_fps: bool,
-    /// Where the part used starts in the input, in seconds.
+    /// Start offset in seconds.
     pub start: f64,
-    /// How long the result plays, in seconds.
+    /// Output duration in seconds.
     pub length: f64,
-    /// How many times as fast as the input the result plays: it uses
-    /// `length * tempo` seconds of the input.
+    /// Playback speed multiplier (consumes `length * tempo` seconds of input).
     pub tempo: f64,
-    /// Frames a second of the result, or to start fitting from.
+    /// Output frame rate (or starting rate for fitting).
     pub fps: f64,
-    /// Bitrate in kbit/s to use or to start fitting from.
+    /// Target or initial bitrate in kbit/s.
     pub bitrate: f64,
-    /// Constant quality, from 0 (best) to 63, to use or to start fitting
-    /// from.
+    /// Constant quality level (0..=63).
     pub crf: u8,
-    /// With `fit = off`, encode at constant quality instead of bitrate.
-    /// True when only `crf` was set.
+    /// Under `fit = off`, use CRF instead of bitrate (true when only `crf` was
+    /// set).
     pub constant_quality: bool,
-    /// Encode losslessly.
+    /// Lossless VP9 flag.
     pub lossless: bool,
-    /// How hard the encoder works.
+    /// Encoder effort level.
     pub effort: Effort,
-    /// Encode with an alpha channel.
+    /// True if the output needs an alpha channel.
     pub alpha: bool,
-    /// When the duration in the header is spoofed.
+    /// Container duration spoofing policy.
     pub spoof: Spoof,
-    /// The duration a spoofed header says, in seconds.
+    /// Duration written when spoofing, in seconds.
     pub fake_duration: f64,
-    /// The title written into the file's metadata.
+    /// Optional title metadata.
     pub title: Option<String>,
-    /// Whether the file is marked as made by tgradish, in its writing and
-    /// muxing app metadata and a signature in padding.
+    /// Whether to write tgradish metadata tags and padding signature.
     pub watermark: bool,
-    /// libvpx-vp9 options by name, over tgradish's own.
+    /// Extra `libvpx-vp9` encoder options applied on top of tgradish's
+    /// defaults.
     pub encoder_options: BTreeMap<String, String>,
-    /// Raw ffmpeg arguments, only for ffmpeg as a separate program.
+    /// Extra raw `ffmpeg` arguments (external process backend only).
     pub ffmpeg_args: Vec<String>,
-    /// How many threads ffmpeg decodes, filters and encodes in, at most;
-    /// a `threads` of `encoder_options` or `ffmpeg_args` goes over it for
-    /// what it covers.
+    /// Maximum threads for decoding, filtering and encoding (overridden by
+    /// explicit `threads` in `encoder_options` or `ffmpeg_args`).
     pub threads: Threads,
 }
 
 impl Plan {
-    /// The size of the part of the source used.
+    /// Width and height of the used source region (crop or full frame).
     pub fn used(&self) -> (u32, u32) {
         self.crop.map_or((self.source.width, self.source.height), |crop| (crop.width, crop.height))
     }
 
-    /// How many times larger the picture gets, at least.
+    /// Minimum upscale factor along either axis.
     pub fn enlarges(&self) -> f64 {
         let used = self.used();
         let along = |scaled: u32, used: u32| f64::from(scaled) / f64::from(used.max(1));
         along(self.scaled_width, used.0).min(along(self.scaled_height, used.1))
     }
 
-    /// Whether a result of `length` seconds gets its duration spoofed.
+    /// Returns true if an encode of `length` seconds should have its header
+    /// duration spoofed.
     pub fn spoofs(&self, length: f64) -> bool {
         match self.spoof {
             Spoof::Auto => telegram::too_long(length),
@@ -121,42 +117,41 @@ impl Plan {
     }
 }
 
-/// Number of frames encoded for `length` seconds at `fps`. Rounds down so
-/// the result never lasts longer than asked, which matters at the 3 second
-/// limit, but always at least one frame; the `1e-6` takes float error for
-/// what it is, so 3 s at 30 fps is 90 frames rather than 89.
+/// Number of frames encoded for `length` seconds at `fps` (minimum 1).
+/// Floors with a `1e-6` tolerance so 3 s at 30 fps yields 90 frames (even if
+/// floating-point arithmetic gives `89.99999999999999`), without ever rounding
+/// up and exceeding the 3 s limit (e.g. 3 s at 29.97 fps yields 89 frames,
+/// 2.97 s, rather than 90 frames, 3.003 s).
 pub fn frame_count(length: f64, fps: f64) -> u64 {
     ((length * fps + 1e-6).floor() as u64).max(1)
 }
 
-/// Where to start reading for the frame that starts at `start`, after one
-/// that starts at `previous`. Reading keeps frames from the first that
-/// starts at or after its start, and containers, ffprobe and decoders round
-/// times differently (WebM to whole milliseconds): so a millisecond before
-/// the frame's start, or a quarter of the gap to `previous` where that is
-/// less, which never brings the previous frame back.
+/// Computes a safe seek timestamp just before `start` (at most 1 ms earlier,
+/// capped at a quarter of the gap from `previous`) so container/decoder
+/// timestamp rounding (such as Matroska's millisecond timebase) never skips
+/// the target frame or lands early enough to pull in `previous`.
 pub fn read_from(start: f64, previous: f64) -> f64 {
     start - ((start - previous) / 4.0).min(1e-3)
 }
 
-/// How near where a frame starts or ends a cut is taken as there, in
-/// seconds, as normalising takes it for `.tgs` stickers (see
-/// [`tgradish_tgs::normalise::CUT_LEEWAY`]), at most a quarter of the
-/// frames on either side (see [`edge_leeway`]).
+/// Maximum snapping tolerance around frame edges, in seconds (matching
+/// [`tgradish_tgs::normalise::CUT_LEEWAY`]).
 pub const CUT_LEEWAY: f64 = tgradish_tgs::normalise::CUT_LEEWAY.as_secs_f64();
 
-/// How near `times[index]` a cut is taken as there, where `times` are
-/// where frames start, in order, and maybe then where the last ends:
-/// [`CUT_LEEWAY`], or a quarter of the frames on either side where less.
+/// Snapping tolerance around `times[index]` (`times`: frame starts in order,
+/// optionally followed by the end of the last frame): [`CUT_LEEWAY`], capped
+/// at a quarter of the adjacent frame durations so short frames keep at least
+/// half their duration unsnapped in the middle.
 pub fn edge_leeway(times: &[f64], index: usize) -> f64 {
     let before = index.checked_sub(1).map(|before| times[index] - times[before]);
     let after = times.get(index + 1).map(|after| after - times[index]);
     before.into_iter().chain(after).fold(CUT_LEEWAY, |leeway, frame| leeway.min(frame / 4.0))
 }
 
-/// Which of `times`, where frames start, in order, and maybe then where
-/// the last ends, `time` is within [`edge_leeway`] of: the one a cut at
-/// `time` is meant for, written with fewer digits or rounded on its way.
+/// Returns the index in `times` (frame starts in order, optionally followed by
+/// the end of the last frame) closest to `time` within [`edge_leeway`], if any:
+/// the edge a cut at `time` is meant for (written with fewer digits or
+/// rounded).
 pub fn frame_edge(time: f64, times: &[f64]) -> Option<usize> {
     let after = times.partition_point(|&edge| edge < time);
     [after.checked_sub(1), Some(after)]
@@ -167,12 +162,11 @@ pub fn frame_edge(time: f64, times: &[f64]) -> Option<usize> {
         .min_by(|&a, &b| (time - times[a]).abs().total_cmp(&(time - times[b]).abs()))
 }
 
-/// `options` for frames drawn for ffmpeg, which start at `times`, in
-/// order, then end where the last ends, as converting keeps the frames a
-/// cut near where they start or end is meant for: a start within
-/// [`edge_leeway`] of where a frame starts is read from a hair before it,
-/// as [`read_from`] says, and a length that ends within it of where a frame
-/// ends counts the frames up to there. Cuts elsewhere are kept as they are.
+/// Adjusts `options.start` and `options.length` for drawn animations whose
+/// frame boundaries are `times` (including the end of the last frame). Snaps a
+/// `start` within [`edge_leeway`] of a frame edge via [`read_from`]; a `length`
+/// whose end (from the start as given) is within it of a frame edge becomes the
+/// time from the snapped frame to that edge. Cuts elsewhere are kept.
 pub fn drawn_cut(options: &super::Options, times: &[f64]) -> super::Options {
     let mut cut = options.clone();
     let Some(last) = times.len().checked_sub(1).filter(|&last| last > 0) else { return cut };
@@ -191,12 +185,11 @@ pub fn drawn_cut(options: &super::Options, times: &[f64]) -> super::Options {
     cut
 }
 
-/// What fitting searches where no range is asked for, for a result of
-/// `fps` frames a second, `length` seconds long: bitrates from what still
-/// makes a picture to far past any sticker, libvpx's CRF short of its
-/// near-lossless end, which no sticker fits, frame rates up to the
-/// result's, and lengths from a tenth of a second, about the shortest
-/// that still moves.
+/// Default size-fitting search range for `fit` given `fps` and `length`
+/// (shared by the planner and GUI placeholders): bitrate from 8 kbit/s
+/// (about the least that still gives a picture) to far past any sticker; CRF
+/// 4 to 63 (stopping short of near-lossless, which no sticker fits); fps up
+/// to the result's; length from 0.1 s, about the shortest that still moves.
 pub fn default_fit_range(fit: Fit, fps: f64, length: f64) -> Range {
     match fit {
         Fit::Auto | Fit::Bitrate | Fit::Off => Range { min: 8.0, max: super::HIGHEST_BITRATE },
@@ -206,10 +199,9 @@ pub fn default_fit_range(fit: Fit, fps: f64, length: f64) -> Range {
     }
 }
 
-/// The frame rate a result has unless `fps` says otherwise, from an input
-/// of `input_fps` played at `tempo`: the input's at the tempo, from 1,
-/// so a slow tempo doesn't make a single frame outlast the result, to
-/// Telegram's most.
+/// Default output frame rate for `input_fps` played at `tempo`, clamped to
+/// `1.0..=60.0` fps (at least 1, so a slow tempo cannot make one frame outlast
+/// the result; shared with the GUI placeholder).
 pub fn played_fps(input_fps: f64, tempo: f64) -> f64 {
     (input_fps * tempo).clamp(1.0, telegram::MAX_FPS)
 }
@@ -227,10 +219,10 @@ fn is_option_name(name: &str) -> bool {
         && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
-/// Checks a fit range given against what `fit` tunes, the one place that
-/// does: finite and in order, within [`Fit::range_limits`], and holding a
-/// whole number where only those are tried. A range of lengths past the
-/// result's `length` is cut to it, which `warnings` says.
+/// Validates and normalises an explicit `fit-range` against `fit` and `length`
+/// (finite, `min <= max`, within [`Fit::range_limits`], and containing at least
+/// one integer for integer-only strategies). Length ranges exceeding `length`
+/// are clamped to `length` with a warning.
 fn check_fit_range(
     range: Range,
     fit: Fit,
@@ -238,13 +230,13 @@ fn check_fit_range(
     warnings: &mut Vec<String>,
 ) -> Result<Range> {
     if !(range.min.is_finite() && range.max.is_finite()) {
-        return Err(Error::invalid("fit-range", format!("{range} must be finite")));
+        return Err(Error::invalid("fit-range", format!("{range} must have finite ends")));
     }
     if range.min > range.max {
         return Err(Error::invalid("fit-range", format!("{range} must have MIN <= MAX")));
     }
-    // length fitting may only shorten: `length` already respects the input
-    // and the spoofing policy
+    // Length fitting can only shorten: `length` already reflects the input
+    // duration and spoofing policy.
     let range = match fit {
         Fit::Length if range.max > length => {
             warnings.push(format!("length range capped at {length:.2} s"));
@@ -265,7 +257,9 @@ fn check_fit_range(
     };
     if range.min < low || range.max > high {
         let reason = match (low, high.is_finite()) {
-            (f64::MIN_POSITIVE, _) => format!("for {what} must be above 0 and at most {high}"),
+            (f64::MIN_POSITIVE, _) => {
+                format!("for {what} must be greater than 0 and at most {high}")
+            }
             (_, false) => format!("for {what} must be at least {low}"),
             _ => format!("for {what} must be within {low}..{high}"),
         };
@@ -278,9 +272,9 @@ fn check_fit_range(
     Ok(range)
 }
 
-/// Bitrate in kbit/s that should land a bit under `limit` bytes.
+/// Bitrate in kbit/s that should land slightly under `limit` bytes.
 pub(crate) fn estimate_bitrate(length: f64, limit: u64) -> f64 {
-    // leaves room for container overhead and encoder overshoot
+    // Leave 7% headroom for container overhead and encoder overshoot.
     limit as f64 * 8.0 / length / 1000.0 * 0.93
 }
 
@@ -290,8 +284,8 @@ pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
     plan_for(Format::Webm, request, source)
 }
 
-/// [`plan`] of a `format` result: a static one is planned as a WebM is, of
-/// one frame, in sizes of its own.
+/// Plans a conversion for `format` (WebP reuses WebM planning for a single
+/// frame with format-specific output dimensions).
 pub(crate) fn plan_for(
     format: Format,
     request: &Request,
@@ -306,7 +300,7 @@ pub(crate) fn plan_for(
         let (width, height) = target.box_size();
         let name = target.name();
         let reason = format!(
-            "contain can't make {name}, exactly {width}×{height}: use pad, crop or stretch"
+            "contain cannot produce {name} at exactly {width}×{height}; use pad, crop or stretch"
         );
         return Err(Error::invalid("resize", reason));
     }
@@ -316,13 +310,14 @@ pub(crate) fn plan_for(
     let spoof = o.spoof_or_default();
     let fake_duration = o.fake_duration.unwrap_or(super::DEFAULT_FAKE_DURATION);
     if !(fake_duration > 0.0 && fake_duration <= telegram::MAX_SECONDS) {
-        let reason = format!("must be more than 0 and at most {} seconds", telegram::MAX_SECONDS);
+        let reason =
+            format!("must be greater than 0 and at most {} seconds", telegram::MAX_SECONDS);
         return Err(Error::invalid("fake-duration", reason));
     }
 
     let start = o.start.unwrap_or(0.0);
     if !(start >= 0.0 && start.is_finite()) {
-        return Err(Error::invalid("start", "must be 0 or more seconds"));
+        return Err(Error::invalid("start", "must be 0 seconds or greater"));
     }
     let available = match source.duration {
         Some(duration) if start >= duration => {
@@ -339,32 +334,32 @@ pub(crate) fn plan_for(
     }
     let used = match o.length {
         Some(length) if !(length > 0.0 && length.is_finite()) => {
-            return Err(Error::invalid("length", "must be more than 0 seconds"));
+            return Err(Error::invalid("length", "must be greater than 0 seconds"));
         }
-        // a hundredth of a second over is rounding, not worth a warning
+        // Ignore <= 10 ms overshoot caused by timestamp rounding.
         Some(length) if length > available + 0.01 => {
-            warnings.push(format!("the input is only {available:.2} s long after start"));
+            warnings.push(format!("input is only {available:.2} s long after start"));
             available
         }
         Some(length) => length,
         None if available.is_finite() => available,
         None => telegram::MAX_SECONDS * tempo,
     };
-    // how long the result plays
+    // Playback duration after applying tempo.
     let mut length = used / tempo;
     if spoof == Spoof::Never && length > telegram::MAX_SECONDS {
         warnings.push(format!(
-            "cutting to {} s because spoofing is off; Telegram refuses longer videos",
+            "trimming to {} s because spoofing is off (Telegram rejects longer videos)",
             telegram::MAX_SECONDS
         ));
         length = telegram::MAX_SECONDS;
     }
-    // by default the input's frames a second at the tempo, the average of
-    // a video whose rate varies; at least one a second, so a slow tempo
-    // doesn't make a single frame outlast the result
+    // Default to input fps scaled by tempo (using average fps for VFR inputs),
+    // clamped to at least 1 fps so a slow tempo never makes one frame outlast
+    // the output duration.
     let fps = match o.fps {
         Some(fps) if !(fps > 0.0 && fps <= telegram::MAX_FPS) => {
-            let reason = format!("must be more than 0 and at most {}", telegram::MAX_FPS);
+            let reason = format!("must be greater than 0 and at most {}", telegram::MAX_FPS);
             return Err(Error::invalid("fps", reason));
         }
         Some(fps) => fps,
@@ -375,7 +370,7 @@ pub(crate) fn plan_for(
     let crf = o.crf.unwrap_or(super::DEFAULT_CRF);
     if !super::CRFS.contains(&crf) {
         let (low, high) = (super::CRFS.start(), super::CRFS.end());
-        return Err(Error::invalid("crf", format!("must be between {low} and {high}")));
+        return Err(Error::invalid("crf", format!("must be from {low} to {high}")));
     }
     let bitrate = match o.bitrate {
         Some(bitrate) if !(bitrate >= 1.0 && bitrate.is_finite()) => {
@@ -388,7 +383,7 @@ pub(crate) fn plan_for(
     let fit = o.fit_or_default();
     let attempts = o.attempts.unwrap_or(super::DEFAULT_ATTEMPTS);
     if !(1..=super::MAX_ATTEMPTS).contains(&attempts) {
-        let reason = format!("must be between 1 and {}", super::MAX_ATTEMPTS);
+        let reason = format!("must be from 1 to {}", super::MAX_ATTEMPTS);
         return Err(Error::invalid("attempts", reason));
     }
     let lossless = o.lossless_or_default();
@@ -398,7 +393,7 @@ pub(crate) fn plan_for(
     // lossless encoding where it has no say was refused above
     for (key, why) in super::set_aside(o, o) {
         if key != "lossless" {
-            warnings.push(format!("{key} is ignored as {why}"));
+            warnings.push(format!("{key} is ignored because {why}"));
         }
     }
 
@@ -409,8 +404,7 @@ pub(crate) fn plan_for(
 
     let encoder_options = o.encoder_options.clone().unwrap_or_default();
     if let Some(name) = encoder_options.keys().find(|name| !is_option_name(name)) {
-        let reason =
-            format!("has {name:?}, which isn't an option's name: use letters, digits, - and _");
+        let reason = format!("contains invalid option name {name:?}; use letters, digits, - and _");
         return Err(Error::invalid("encoder-options", reason));
     }
 
@@ -533,11 +527,11 @@ mod tests {
         let crf = Options { crf: Some(20), ..Default::default() };
         let warned = |options: Options| plan_with(crf.clone().merged(&options)).unwrap().1;
         let lossless = Options { fit: Some(Fit::Fps), lossless: Some(true), ..Default::default() };
-        assert_eq!(warned(lossless), ["crf is ignored as lossless is on"]);
+        assert_eq!(warned(lossless), ["crf is ignored because lossless is on"]);
         let bitrate = Options { fit: Some(Fit::Off), bitrate: Some(300.0), ..Default::default() };
-        assert_eq!(warned(bitrate), ["crf is ignored as bitrate is set"]);
+        assert_eq!(warned(bitrate), ["crf is ignored because bitrate is set"]);
         let fitted = Options { fit: Some(Fit::Crf), ..Default::default() };
-        assert_eq!(warned(fitted), ["crf is ignored as fit is crf"]);
+        assert_eq!(warned(fitted), ["crf is ignored because fit is crf"]);
         // and of fitting's own settings where it is off, and a duration
         // never written
         let off = Options {
@@ -550,7 +544,10 @@ mod tests {
         let warned = plan_with(off).unwrap().1;
         assert_eq!(
             warned[warned.len() - 2..],
-            ["attempts is ignored as fit is off", "fake-duration is ignored as spoof is never"]
+            [
+                "attempts is ignored because fit is off",
+                "fake-duration is ignored because spoof is never",
+            ]
         );
     }
 

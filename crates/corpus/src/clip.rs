@@ -1,14 +1,15 @@
-//! Video clips like phone footage, made with ffmpeg: H.264 at 25 fps with
-//! B-frames, from its moving test pattern with grain added.
+//! Synthetic video clips generated with ffmpeg to resemble phone footage:
+//! 25 fps H.264 with B-frames, built from `testsrc2` with added grain.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Clip {
-    /// 512 by 512, 4.84 s: 121 frames, a keyframe only at the start.
+    /// 512x512, 4.84 s (121 frames) with a single keyframe at the start.
     Square,
-    /// 258 by 320, 12.64 s: 316 frames, longer than a sticker plays.
+    /// 258x320, 12.64 s (316 frames), longer than Telegram's 3-second sticker
+    /// limit.
     Tall,
 }
 
@@ -28,24 +29,23 @@ impl Clip {
     }
 }
 
-/// Whether tests that need ffmpeg fail without it rather than skip:
-/// `TGRADISH_REQUIRE_FFMPEG` is set, to anything but empty or 0. CI sets
-/// it, where a skipped test would pass unseen.
+/// Returns true when `TGRADISH_REQUIRE_FFMPEG` is set to anything other than
+/// empty or `"0"`. CI sets this so tests fail instead of silently skipping when
+/// ffmpeg is missing.
 pub fn ffmpeg_required() -> bool {
     std::env::var_os("TGRADISH_REQUIRE_FFMPEG")
         .is_some_and(|value| !value.is_empty() && value != "0")
 }
 
-/// Skips the test, which `why` says what it needs, or fails it where
-/// [`ffmpeg_required`].
+/// Skips a test with `why`, or panics if [`ffmpeg_required`] is true.
 pub fn skip<T>(why: &str) -> Option<T> {
     assert!(!ffmpeg_required(), "{why}, which TGRADISH_REQUIRE_FFMPEG says must be there");
     eprintln!("skipped: {why}");
     None
 }
 
-/// Whether `ffmpeg` and `ffprobe` run from PATH, or else [`skip`]s, so a
-/// test that needs them can return.
+/// Returns true if `ffmpeg` and `ffprobe` are available on `PATH`, otherwise
+/// calls [`skip`] and returns false.
 pub fn ffmpeg_on_path() -> bool {
     let runs = |program| Command::new(program).arg("-version").output().is_ok();
     if runs("ffmpeg") && runs("ffprobe") {
@@ -55,14 +55,13 @@ pub fn ffmpeg_on_path() -> bool {
     false
 }
 
-/// `clip`, made in `dir` unless it is there from an earlier run; `None`
-/// without an ffmpeg on PATH that has the x264 encoder, or a failure where
-/// [`ffmpeg_required`]. With one, failing to make the clip panics: that is
-/// a broken test, not a missing tool. A clip from an earlier run is found
-/// without ffmpeg, so a test that also converts with it checks for that
-/// first.
+/// Returns the path to `clip` inside `dir`, generating it if it does not
+/// already exist. Returns `None` (or panics when [`ffmpeg_required`] is true)
+/// if `ffmpeg` with `libx264` is not on `PATH`. Panics if generation itself
+/// fails. Cached clips are returned without checking for ffmpeg, so tests that
+/// also convert with ffmpeg should check [`ffmpeg_on_path`] first.
 pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
-    // the name changes with how the clip is made
+    // Bump the filename suffix if the clip generation parameters change.
     let path = dir.join(format!("tgradish-{}-1.mp4", clip.name()));
     if path.exists() {
         return Some(path);
@@ -71,7 +70,8 @@ pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
         return skip("needs ffmpeg on PATH with the x264 encoder");
     }
     std::fs::create_dir_all(dir).expect("the clips' directory can be made");
-    // made aside, so tests running at once never see half a clip
+    // Write to a temporary file first so parallel tests never read a partial
+    // clip.
     let thread = format!("{:?}", std::thread::current().id());
     let digits: String = thread.chars().filter(char::is_ascii_digit).collect();
     let partial = dir.join(format!("tgradish-{}-{}-{digits}.mp4", clip.name(), std::process::id()));
@@ -95,8 +95,8 @@ pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
             String::from_utf8_lossy(&made.stderr)
         );
     }
-    // Windows can't replace a file in use, as when another test made the
-    // clip first and is reading it: then that one is used
+    // On Windows, renaming over a file held open by another test fails; keep
+    // the existing clip in that case.
     if let Err(err) = std::fs::rename(&partial, &path) {
         let _ = std::fs::remove_file(&partial);
         assert!(path.exists(), "the clip couldn't be moved into place: {err}");
@@ -104,8 +104,8 @@ pub fn clip(clip: Clip, dir: &Path) -> Option<PathBuf> {
     Some(path)
 }
 
-/// Whether the ffmpeg on PATH can make clips: false without one, or one
-/// without x264. An ffmpeg that fails to list its encoders panics.
+/// Returns true if `ffmpeg` is on `PATH` and includes `libx264`. Panics if
+/// `ffmpeg -encoders` fails.
 fn has_x264() -> bool {
     let listed = match Command::new("ffmpeg").args(["-hide_banner", "-encoders"]).output() {
         Err(err) if err.kind() == std::io::ErrorKind::NotFound => return false,

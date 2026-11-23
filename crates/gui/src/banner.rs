@@ -1,12 +1,9 @@
-//! What tgradish says that wasn't asked for. What passes, information
-//! that goes by itself, as files removed with a way back, shows in the
-//! corner over the list of files, mostly empty there, each notice on a
-//! card of its own; what asks for something to be done, as a file that
-//! couldn't be read or saved, stays in the banner along the bottom,
-//! right of the list, until it is. Each message has its row, with
-//! what happened first, the file it is about, why and what to do in
-//! tgradish's words, buttons that do it, and what a program or the system
-//! said, as it said it, folded away when it is long.
+//! Unsolicited notices and warnings. Transient info notices (such as removed
+//! files with an Undo action) appear as cards in the bottom-left corner over
+//! the file list (mostly empty there). Actionable warnings (such as unreadable
+//! or unsaved files) stay in the bottom banner to the right of the file list
+//! until dismissed. Each row shows a headline, optional file path, reason,
+//! note, action buttons, and raw program or OS output (collapsed when long).
 
 use std::path::{Path, PathBuf};
 

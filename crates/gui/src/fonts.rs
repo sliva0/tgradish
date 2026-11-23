@@ -1,6 +1,6 @@
-//! The GUI's own fonts, and text laid out with them so that it always
-//! reads as something: a character no font has, the system's included, is
-//! shown as its code. `fallback` finds the system's fonts.
+//! Built-in fonts and fallback-aware text layout. Characters missing from both
+//! the bundled fonts and system fallback fonts are rendered as `U+XXXX` code
+//! tags. System font discovery lives in [`crate::fallback`].
 
 use std::hash::{Hash, Hasher};
 

@@ -1,26 +1,25 @@
-//! The 8 bytes tgradish writes into every sticker it makes with its
-//! watermark on: its version, the front-end that ran it, and 24 bits of a
-//! hash of the user's name, with a check byte, XORed with a fixed key.
-//! Stickers made with it off carry none of them.
+//! Internal 8-byte mark embedded in watermarked stickers: tgradish version,
+//! client front-end, 24-bit username hash and a CRC-8 check byte, XORed with a
+//! fixed key. Disabled when watermarking is off.
 //!
-//! In WebM files they are the video track's UID, in `.tgs` files the
-//! order of rectangles that may come in any order, or the first layer's
-//! name when there are too few (see `tgradish_tgs::mark`).
+//! Stored in the video track UID for WebM files, and in rectangle ordering (or
+//! the first layer's name when there are too few rectangles) for `.tgs` files
+//! (see `tgradish_tgs::mark`).
 
 use std::sync::OnceLock;
 
-/// Which front-end made a sticker.
+/// Front-end that produced a sticker.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Client {
-    /// tgradish as a library, or a front-end that didn't say.
+    /// Library call or unspecified front-end.
     Library,
     Cli,
     Gui,
 }
 
 impl Client {
-    /// As stickers store it, so a code is never given another meaning: 3
-    /// was a bot's, which there isn't.
+    /// Code stored in marks. Never reuse a code: 3 was a bot's, which no
+    /// longer exists.
     fn code(self) -> u8 {
         match self {
             Client::Library => 0,
@@ -41,30 +40,30 @@ impl Client {
 
 static CLIENT: OnceLock<Client> = OnceLock::new();
 
-/// Says which front-end this process is; marks made before or without it
-/// say [`Client::Library`]. Only the first call counts.
+/// Sets the front-end recorded in marks for this process (defaults to
+/// [`Client::Library`]). Only the first call takes effect.
 pub fn set_client(client: Client) {
     let _ = CLIENT.set(client);
 }
 
-/// What a mark says.
+/// Decoded contents of an 8-byte mark.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Mark {
-    /// tgradish's version: major, minor, patch.
+    /// tgradish version `[major, minor, patch]`.
     pub version: [u8; 3],
     pub client: Client,
-    /// 24 bits of a hash of the user's name, 0 when there was none.
+    /// 24-bit FNV-1a hash of the username, or 0 if unavailable.
     pub user: u32,
 }
 
-/// Layout of the bytes, in the high half of the first byte.
+/// Format version stored in the high nibble of byte 0.
 const FORMAT: u8 = 1;
-/// XORed into the bytes; the same values give the same bytes in every
-/// sticker.
+/// Fixed XOR key applied to mark bytes (so the same values give the same bytes
+/// in every sticker).
 const KEY: [u8; 8] = [0x9e, 0x37, 0x79, 0xb9, 0x7f, 0x4a, 0x7c, 0x15];
 
 impl Mark {
-    /// The mark this process puts into stickers.
+    /// Builds the mark for the current process.
     pub fn current() -> Mark {
         Mark {
             version: version_numbers(env!("CARGO_PKG_VERSION")),
@@ -73,8 +72,9 @@ impl Mark {
         }
     }
 
-    /// The mark a sticker gets: none when its watermark is off, so that it
-    /// carries nothing of the user's or of tgradish's.
+    /// Returns [`Mark::current`] when `watermark` is true, or `None`, so that
+    /// a sticker made with the watermark off carries nothing of the user's or
+    /// tgradish's.
     pub fn written(watermark: bool) -> Option<Mark> {
         watermark.then(Mark::current)
     }
@@ -216,13 +216,15 @@ pub(crate) fn read_file(path: &std::path::Path) -> Option<Mark> {
     }
 }
 
-/// Whether tgradish made the sticker at `path`, so making it again may
-/// replace it: by the marks it shows, exactly as tgradish writes them. The
-/// name of `.tgs` stickers; in WebM files both apps and the signature in
-/// padding; in WebP images the tool their XMP names.
-/// Only the start of a WebM is read, and a picture or `.tgs` larger than
-/// 16 MiB is no sticker tgradish made, so pointing this at a long video
-/// reads little of it.
+/// Returns true if `path` carries tgradish's visible watermark, indicating it
+/// was created by tgradish and is safe to replace on re-conversion:
+/// - `.tgs`: Lottie `nm` field matches tgradish's naming.
+/// - WebM: `WritingApp`, `MuxingApp`, and padding signature match tgradish.
+/// - WebP: XMP `CreatorTool` matches tgradish.
+///
+/// Only the header is read for WebM files, and images/`.tgs` files over 16 MiB
+/// return false without being read in full, so checking a long video reads
+/// little of it.
 pub fn made_by_tgradish(path: &std::path::Path) -> bool {
     let small = || crate::fsutil::read_at_most(path, MADE_BYTES).ok().flatten();
     use crate::input::FileKind;

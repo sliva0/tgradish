@@ -1,6 +1,5 @@
-//! Rotation and mirroring from a video's display matrix, as ffmpeg's
-//! command line applies it when it autorotates, so both backends show
-//! phone videos upright.
+//! Rotation and mirroring decoded from a video's display matrix, matching
+//! `ffmpeg`'s autorotation so both backends orient phone videos identically.
 
 use schemars::JsonSchema;
 use serde::Serialize;

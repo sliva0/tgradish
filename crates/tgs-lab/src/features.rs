@@ -1,7 +1,7 @@
-//! Probes for Lottie features. Telegram's rules forbid some
-//! that its own stickers use, and others are on no list but could help the
-//! encoder. Each probe is a plain square with one feature added, so a
-//! refusal names the feature, and a render shows whether tlottie draws it.
+//! Generates Telegram Lottie feature probe stickers. Telegram's rules forbid
+//! some features its own stickers use; others are unlisted and could help the
+//! encoder. Each probe adds one Lottie feature to a plain blue square so a
+//! refusal names the feature and a render shows whether `tlottie` draws it.
 
 use std::path::Path;
 

@@ -1,31 +1,29 @@
-//! The licence notices of what tgradish is built from: its own licence,
-//! the Rust crates', and in builds with ffmpeg linked in statically,
-//! ffmpeg's and its libraries'. Packed into the binary (see `build.rs`), so
-//! it carries them wherever it is copied.
+//! Licence notices embedded in the binary at build time (see `build.rs`):
+//! tgradish's own licence, Rust crates, libwebp, and (in `linked-static`
+//! builds) ffmpeg and its dependencies.
 
 use std::fmt;
 use std::io::Read;
 
 include!("notices.rs");
 
-/// One licence notice.
+/// Single licence or third-party notice.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Notice {
-    /// What it is the licence of.
+    /// Component and notice category.
     pub kind: Kind,
-    /// The licence, as its authors wrote it.
+    /// Full verbatim licence text.
     pub text: String,
 }
 
 impl Notice {
-    /// A notice of `text`, which is `kind`'s, for front-ends that show
-    /// more than the build's, as the licences of fonts.
+    /// Creates a notice for front-ends that add extra notices (such as fonts).
     pub fn new(kind: Kind, text: impl Into<String>) -> Notice {
         Notice { kind, text: text.into() }
     }
 
-    /// Its title, in English, as the command line shows it.
+    /// English title displayed by the CLI.
     pub fn title(&self) -> String {
         self.kind.to_string()
     }
@@ -47,7 +45,7 @@ impl fmt::Display for Kind {
     }
 }
 
-/// Every notice of this build, tgradish's own first.
+/// Returns every notice bundled into this build, with tgradish's licence first.
 pub fn notices() -> Vec<Notice> {
     const PACKED: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/notices.deflate"));
     let mut text = String::new();

@@ -1,5 +1,5 @@
-//! Options for `.tgs` stickers, and the settings they come to for the
-//! tgs crate.
+//! `.tgs` conversion options and conversion into
+//! `tgradish_tgs::sticker::Options`.
 
 use std::time::Duration;
 
@@ -15,98 +15,92 @@ use crate::error::{Error, Result};
 use crate::options::{Crop, Effort, Resize, TEMPOS};
 use crate::telegram::{self, Target};
 
-/// Options for `.tgs` output. Like the WebM [`Options`](crate::webm::Options),
-/// every field is optional so presets and flags can be layered.
+/// Options for `.tgs` output. Like [`crate::webm::Options`], every field is
+/// optional so presets and flags can be layered.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 // `describe` titles the schema as it always has
 #[schemars(rename = "TgsOptions")]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {
-    /// What to make. Both are square animations. Default: sticker.
+    /// Target type: sticker or emoji (both are 512×512). Default: sticker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<Target>,
-    /// Seconds to skip at the start of the input.
+    /// Start offset in seconds.
     #[schemars(range(min = 0.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<f64>,
-    /// Seconds of the input to use, from `start`. Default: the rest of the
-    /// input.
+    /// Maximum duration in seconds to read from `start`. Default: full
+    /// remaining duration.
     #[schemars(extend("exclusiveMinimum" = 0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
-    /// How many times as fast as the input it plays, 0.1 to 10; what still
-    /// lasts longer than 3 seconds is cut. Default: as fast as fits a long
-    /// input into 3 seconds.
+    /// Playback speed multiplier (0.1 to 10); anything still over 3 seconds is
+    /// trimmed. Default: sped up to fit within 3 seconds.
     #[schemars(range(min = 0.1, max = 10.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tempo: Option<f64>,
-    /// How hard to look for a small encoding; best takes a few seconds.
-    /// Default: best.
+    /// Encoder effort (`best` takes a few seconds). Default: best.
     // read as `speed` too, as it was once named
     #[serde(alias = "speed", skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
-    /// Never change the pixel art to make it fit; a sticker that is too
-    /// large is reported instead. Set it to false to let fitting change it.
-    /// Default: true.
+    /// Keep pixel art unchanged and report if the file exceeds 64 KiB. Set to
+    /// `false` to allow lossy reductions. Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub exact: Option<bool>,
-    /// Reductions fitting may use, least visible first. Default: all.
+    /// Reductions allowed when fitting, applied from least visible first.
+    /// Default: all.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reductions: Option<Vec<Kind>>,
-    /// What fitting gives up first: motion (frames merged and dropped,
-    /// full detail), detail (smooth motion, a coarser picture), or auto,
-    /// whatever changes the pixel art least. Default: auto.
+    /// What fitting sacrifices first: `motion` (merge/drop frames, keep
+    /// detail), `detail` (coarser image, smooth motion), or `auto` (least
+    /// visible change). Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compromise: Option<Compromise>,
-    /// The part of the input to use, in input pixels. Default: all of it.
+    /// Region of the input to keep, in source pixels. Default: full frame.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
-    /// How art that isn't square fills the square sticker: pad (whole,
-    /// with transparent margins), crop (its middle) or
-    /// stretch (its art pixels no longer square). Default: pad. Contain
-    /// keeps the shape of the part used, which must then be square: the
-    /// crop, or the input where there is none; the art is never cut or
-    /// stretched, as with pad.
+    /// How non-square art fills the square TGS canvas: `pad` (transparent
+    /// margins), `crop` (centre crop), `stretch` (non-square pixels), or
+    /// `contain` (requires the input or crop to already be square). Default:
+    /// pad.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resize: Option<Resize>,
-    /// Keep the input's canvas, or the crop, instead of cropping to the
-    /// visible pixels. Default: false.
+    /// Keep the full input canvas (or crop) instead of trimming transparent
+    /// margins. Default: false.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub keep_canvas: Option<bool>,
-    /// Size of one art pixel in input pixels. Pixels off its grid are moved
-    /// onto it. Default: detected.
+    /// Size of one art pixel in source pixels; misaligned edges are snapped to
+    /// this grid. Default: auto-detected.
     #[schemars(range(min = 1))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pixel_scale: Option<u32>,
     /// Aseprite tag to export. Default: all frames.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
-    /// Aseprite layers to show, by name, hidden ones included. Default:
-    /// those the file shows.
+    /// Aseprite layers to show by name (including hidden layers). Default:
+    /// layers visible in the file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_layers: Option<Vec<String>>,
-    /// Aseprite layers to hide, by name; a hidden group hides the layers in
-    /// it.
+    /// Aseprite layers to hide by name; hiding a group hides its children.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hide_layers: Option<Vec<String>>,
-    /// Read the input as a sprite sheet of COLUMNSxROWS equal cells, frames
-    /// row by row, for example 4x2.
+    /// Treat the input as a sprite sheet of `COLUMNSxROWS` equal cells, read
+    /// row by row (for example, `4x2`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet: Option<crate::options::Sheet>,
-    /// How many cells of the sprite sheet hold frames. Default: all but
-    /// transparent ones at the end.
+    /// Number of frames to read from a sprite sheet. Default: all cells except
+    /// trailing empty ones.
     #[schemars(range(min = 1))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sheet_frames: Option<u32>,
-    /// The rate the pictures of a sprite sheet or an image sequence are
-    /// read at: how fast they play. Default: 12.
+    /// Playback frame rate for sprite sheets and image sequences. Default: 12.
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 60))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
-    /// Name stored in the sticker.
+    /// Lottie name stored in the sticker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// Name the sticker as made by tgradish. Default: true.
+    /// Include tgradish in the sticker's Lottie name. Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
 }
@@ -134,44 +128,42 @@ crate::options::layered!(Options {
     watermark,
 });
 
-/// The values of options left unset, which converting takes: each says
-/// its default once, for core and front-ends alike.
+/// Single source of truth for default option values, shared by core and
+/// front-ends.
 impl Options {
-    /// How art that isn't square fills the sticker: padded.
+    /// Configured resize mode, or the default (`Resize::Pad`).
     pub fn resize_or_default(&self) -> Resize {
         self.resize.unwrap_or(Resize::Pad)
     }
 
-    /// How hard to look for a small encoding: the best, which takes
-    /// seconds.
+    /// Configured encoder effort, or the default (`Effort::Best`, which takes a
+    /// few seconds).
     pub fn effort_or_default(&self) -> Effort {
         self.effort.unwrap_or(Effort::Best)
     }
 
-    /// Whether the input's canvas is kept: no, the art is cropped to what
-    /// shows.
+    /// Configured canvas behaviour, or `false` by default (trim transparent
+    /// margins).
     pub fn keep_canvas_or_default(&self) -> bool {
         self.keep_canvas.unwrap_or(false)
     }
 
-    /// How many times as fast as the input the sticker plays, for a part
-    /// of it `used` seconds long where that is known: as fast as fits a
-    /// longer part into Telegram's 3 seconds, as normalising plays it.
+    /// Effective tempo for an input clip of `used` seconds: speeds up clips
+    /// longer than 3 seconds to fit within Telegram's limit when unset.
     pub fn tempo_or_default(&self, used: Option<f64>) -> f64 {
         let fitting = |used: f64| (used / telegram::MAX_SECONDS).max(1.0);
         self.tempo.unwrap_or_else(|| used.map_or(1.0, fitting))
     }
 
-    /// Whether the art is kept exactly as it is: yes, as changing it to
-    /// fit is the user's to choose.
+    /// Configured exact mode, or `true` by default (keep pixel art unchanged
+    /// unless the user opts into lossy fitting).
     pub fn exact_or_default(&self) -> bool {
         self.exact.unwrap_or(true)
     }
 }
 
 impl Options {
-    /// These options with every value `overlay` sets in place of their
-    /// own.
+    /// Overlays all set fields from `overlay` onto `self`.
     pub fn merged(self, overlay: &Options) -> Options {
         self.overlaid(overlay)
     }
@@ -196,7 +188,7 @@ impl Options {
         value
             .map(|seconds| {
                 Duration::try_from_secs_f64(seconds)
-                    .map_err(|_| Error::invalid(name, format!("{seconds} is not valid")))
+                    .map_err(|_| Error::invalid(name, format!("{seconds} is not a valid duration")))
             })
             .transpose()
     }
@@ -224,7 +216,7 @@ impl Options {
                 tempo: match self.tempo {
                     Some(tempo) if !TEMPOS.contains(&tempo) => {
                         let (low, high) = (TEMPOS.start(), TEMPOS.end());
-                        let reason = format!("{tempo} is not from {low} to {high}");
+                        let reason = format!("{tempo} must be from {low} to {high}");
                         return Err(Error::invalid("tempo", reason));
                     }
                     tempo => tempo,

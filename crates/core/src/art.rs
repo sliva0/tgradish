@@ -1,8 +1,6 @@
-//! Inputs tgradish's own pixel art reader reads, for every kind of
-//! result: the frames of one animation in several image files, and
-//! Aseprite files, with the tags, layers and frame times they tell of.
-//! `.tgs` stickers are made of what it reads, and WebM and static stickers
-//! of it drawn for ffmpeg, which reads neither.
+//! Reads pixel-art inputs (image sequences and Aseprite files) using
+//! `tgradish-tgs`. Used directly for `.tgs` conversion and rendered via
+//! [`crate::drawn`] for WebM and WebP, which ffmpeg cannot read directly.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -14,20 +12,18 @@ use crate::CancelToken;
 use crate::error::{Error, Result};
 use crate::tgs::DEFAULT_FPS;
 
-/// What an Aseprite file tells of itself besides its frames, which the
-/// options choose from.
+/// Metadata read from an Aseprite file alongside its frames.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Aseprite {
     pub(crate) tags: Vec<Tag>,
-    /// As its Layers panel lists them.
+    /// Layers in the order shown in Aseprite's Layers panel.
     pub(crate) layers: Vec<LayerInfo>,
-    /// How long each frame shows, in seconds, its tags' or not.
+    /// Duration of every frame in the file, in seconds.
     pub(crate) durations: Vec<f64>,
 }
 
-/// The frames of an Aseprite file, from its bytes, with the tag and layers
-/// `options` choose, and what it tells of itself; parsed once for all of
-/// these.
+/// Parses an Aseprite file once to produce both its rendered [`Animation`]
+/// (filtered by `options`) and its [`Aseprite`] metadata.
 pub(crate) fn aseprite(
     bytes: &[u8],
     options: &DecodeOptions,
@@ -39,32 +35,32 @@ pub(crate) fn aseprite(
     Ok((animation, Aseprite { tags: sprite.tags().to_vec(), layers: sprite.layers(), durations }))
 }
 
-/// The largest sticker file, `.tgs` or WebP, read to inspect or preview
-/// it: far more than any sticker, and than a `.tgs` that unpacks within
-/// [`tgradish_tgs::file::unpack`]'s limit.
+/// Maximum size of a `.tgs` or WebP file read for inspection or preview.
+/// Far above any valid sticker or [`tgradish_tgs::file::unpack`]'s limit.
 pub(crate) const MAX_STICKER_BYTES: u64 = 16 << 20;
 
-/// The most bytes of a pixel art file decoded within `limits`: as many as
-/// its frames may take, which a larger file can't fit.
+/// Maximum input file size for pixel-art decoding under `limits`: its
+/// frame-memory limit, which a larger file cannot fit in.
 pub(crate) fn most_bytes(limits: &Limits) -> u64 {
     limits.max_bytes as u64
 }
 
-/// The bytes of the file at `path`, failing as an unreadable input, also
-/// when it has more than `most`, which aren't read.
+/// Reads `path` up to `most` bytes (never reading past `most`), returning
+/// [`Error::NoSuchFile`] if missing or [`Error::Unreadable`] if the file
+/// exceeds `most` or fails to read.
 pub(crate) fn read(path: &Path, most: u64) -> Result<Vec<u8>> {
     match crate::fsutil::read_at_most(path, most) {
         Ok(Some(bytes)) => Ok(bytes),
         Ok(None) => {
             let size = std::fs::metadata(path).map_or(most + 1, |found| found.len());
-            Err(unreadable(path, format!("it has {size} bytes, more than the {most} read of it")))
+            Err(unreadable(path, format!("file is {size} bytes, exceeding the {most}-byte limit")))
         }
         Err(err) => Err(read_failed(path, err)),
     }
 }
 
-/// An input at `path` that couldn't be read for `err`: one that isn't
-/// there is [`Error::NoSuchFile`], said the same wherever it is found.
+/// Maps an I/O error on `path` to [`Error::NoSuchFile`] or
+/// [`Error::Unreadable`].
 pub(crate) fn read_failed(path: &Path, err: std::io::Error) -> Error {
     match err.kind() {
         std::io::ErrorKind::NotFound => Error::NoSuchFile(path.to_path_buf()),
@@ -72,12 +68,13 @@ pub(crate) fn read_failed(path: &Path, err: std::io::Error) -> Error {
     }
 }
 
-/// `path` couldn't be read for `err`.
+/// Builds an [`Error::Unreadable`] for `path`.
 pub(crate) fn unreadable(path: &Path, err: impl std::fmt::Display) -> Error {
     Error::Unreadable { path: path.to_path_buf(), message: err.to_string() }
 }
 
-/// `path` didn't decode for `err`, or its decoding was cancelled.
+/// Converts a `frames::Error` into [`Error::Cancelled`] or
+/// [`Error::Unreadable`].
 pub(crate) fn undecodable(path: &Path, err: frames::Error) -> Error {
     match err {
         frames::Error::Cancelled => Error::Cancelled,
@@ -85,21 +82,22 @@ pub(crate) fn undecodable(path: &Path, err: frames::Error) -> Error {
     }
 }
 
-/// How long each frame of a sequence or sprite sheet shows, at `fps`
-/// frames a second, [`DEFAULT_FPS`] unless it says.
+/// Computes the frame duration for a sequence or sprite sheet from `fps`
+/// (defaulting to [`DEFAULT_FPS`]).
 pub(crate) fn frame_duration(fps: Option<f64>) -> Result<Duration> {
     let fps = fps.unwrap_or(DEFAULT_FPS);
     let most = f64::from(tgradish_tgs::limits::telegram::FPS);
-    let invalid = || Error::invalid("fps", format!("{fps} is not between 0 and {most}"));
+    let invalid =
+        || Error::invalid("fps", format!("{fps} must be greater than 0 and at most {most}"));
     if !(fps > 0.0 && fps <= most) {
         return Err(invalid());
     }
-    // tiny rates give durations past what Duration holds
+    // Very small frame rates overflow Duration.
     Duration::try_from_secs_f64(1.0 / fps).map_err(|_| invalid())
 }
 
-/// Image files of a sequence, numbers sorted as numbers: `2.png` before
-/// `10.png`.
+/// Expands directories and returns sequence image files in natural numeric
+/// order (so `2.png` comes before `10.png`).
 pub(crate) fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     for input in inputs {
@@ -113,7 +111,8 @@ pub(crate) fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
             files.push(input.clone());
         }
     }
-    // the order the user gave is usually a shell's, which puts 10 before 2
+    // Shell globs sort lexicographically (putting 10 before 2), so re-sort
+    // naturally.
     files.sort_by(|a, b| natural_order(a, b));
     if files.is_empty() {
         return Err(Error::NothingToConvert);
@@ -121,7 +120,7 @@ pub(crate) fn sequence_files(inputs: &[PathBuf]) -> Result<Vec<PathBuf>> {
     Ok(files)
 }
 
-/// Compares paths with runs of digits as numbers.
+/// Compares two paths naturally, comparing runs of digits by numeric value.
 fn natural_order(a: &Path, b: &Path) -> std::cmp::Ordering {
     let pieces = |path: &Path| -> Vec<(String, u128)> {
         let text = path.to_string_lossy();
@@ -143,11 +142,9 @@ fn natural_order(a: &Path, b: &Path) -> std::cmp::Ordering {
     pieces(a).cmp(&pieces(b)).then_with(|| a.cmp(b))
 }
 
-/// The frames of one animation in several files, `inputs`: image files,
-/// or folders of them, in name order, `fps` a second, within `limits`.
-/// Each file is read and decoded before the next, so only one is held at
-/// once, and `cancel` is asked between them. A file that doesn't read is
-/// named in the error.
+/// Reads an image sequence from files or directories in natural order at `fps`,
+/// decoding one file at a time so memory stays bounded. Checks `cancel` between
+/// files and reports the failing path on error.
 pub(crate) fn read_sequence(
     inputs: &[PathBuf],
     fps: Option<f64>,
@@ -210,7 +207,8 @@ mod tests {
             Error::Unreadable { message, .. } => message,
             err => panic!("{err:?}"),
         };
-        let too_large = format!("it has {} bytes, more than the {MAX_STICKER_BYTES}", 16 << 20 | 1);
+        let too_large =
+            format!("file is {} bytes, exceeding the {MAX_STICKER_BYTES}-byte limit", 16 << 20 | 1);
         let refused = message(crate::tgs::inspect_file(&path).unwrap_err());
         assert!(refused.contains(&too_large), "{refused}");
         let refused = message(crate::webp::inspect_file(&path).unwrap_err());

@@ -1,5 +1,5 @@
-//! Decodes the synthetic pixel art of `tgradish-corpus` in each format it
-//! is written in, and finds the frames and timing it was drawn with.
+//! Integration tests decoding every format in `tgradish-corpus` and verifying
+//! frame pixels and durations.
 
 use std::collections::BTreeSet;
 use std::time::Duration;

@@ -1,4 +1,4 @@
-//! WebM's options, which static stickers take the picture options of.
+//! Conversion options for WebM (and the picture subset used by static WebP).
 
 use std::collections::BTreeMap;
 
@@ -8,125 +8,121 @@ use serde::{Deserialize, Serialize};
 use crate::options::{Crop, Effort, Fit, IntegerScale, Range, Resize, Scaling, Spoof, layered};
 use crate::telegram::Target;
 
-/// Settings for one conversion. `None` means "use the default".
+/// Settings for one WebM (or WebP) conversion. `None` uses the default.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {
-    /// What to make. Default: sticker.
+    /// Target type: sticker or emoji. Default: sticker.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub target: Option<Target>,
-    /// Aseprite tag to use. Default: all frames.
+    /// Aseprite tag to export. Default: all frames.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tag: Option<String>,
-    /// Aseprite layers to show, by name, hidden ones included. Default:
-    /// those the file shows.
+    /// Aseprite layers to show by name (including hidden layers). Default:
+    /// layers visible in the file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub show_layers: Option<Vec<String>>,
-    /// Aseprite layers to hide, by name; a hidden group hides the layers in
-    /// it.
+    /// Aseprite layers to hide by name; hiding a group hides its children.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hide_layers: Option<Vec<String>>,
-    /// The part of the picture to use, in input pixels. Default: all of it.
+    /// Region of the input to keep, in source pixels. Default: full frame.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crop: Option<Crop>,
-    /// How to scale the video into the target size. Default: contain for
+    /// How to fit the video into the target dimensions. Default: contain for
     /// stickers, pad for emoji.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub resize: Option<Resize>,
-    /// How pixels are scaled: smooth, or kept sharp for pixel art. Default:
-    /// auto, sharp for pixel art made at least twice as large.
+    /// Scaling algorithm: smooth, sharp or integer. Default: auto (sharp for
+    /// pixel art upscaled 2x or more).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scaling: Option<Scaling>,
-    /// Scale by a whole number, or one over it, so input and result pixels
-    /// line up. The crop must fit the result at this scale; transparent
-    /// margins fill the rest. Overrides `scaling`, and `resize` must be
-    /// contain or pad.
+    /// Scale by an exact integer N or 1/N so source and output pixels align.
+    /// The crop, scaled, must fit inside the target size; transparent margins
+    /// fill the remaining space. Overrides `scaling`, and requires `resize` to
+    /// be `contain` or `pad`.
     // read as `exact-scale` too, as it was once named
     #[serde(alias = "exact-scale", skip_serializing_if = "Option::is_none")]
     pub integer_scale: Option<IntegerScale>,
-    /// What to tune to get close to the file size limit: 256 KiB for
-    /// stickers, 64 KiB for emoji. Default: auto.
+    /// Parameter to adjust to get close to the file size limit (256 KiB for
+    /// stickers, 64 KiB for emoji). Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fit: Option<Fit>,
-    /// Maximum number of encodes while fitting. Default: 8.
+    /// Maximum encoding attempts during size fitting. Default: 8.
     #[schemars(range(min = 1, max = 50))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attempts: Option<u32>,
-    /// Range searched while fitting, in the unit of the fitted value
-    /// (kbit/s, CRF, fps or seconds), so it belongs to the `fit` it is
-    /// written for: layered over options that fit in another unit without
-    /// a range of its own, the range below is dropped. Default depends on
-    /// `fit`.
+    /// Search range for size fitting, in the units of `fit` (kbit/s, CRF, fps
+    /// or seconds). When merging options that change `fit` to a different unit
+    /// without specifying a new `fit-range`, the inherited range is cleared.
+    /// Default depends on `fit`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fit_range: Option<Range>,
-    /// Seconds to skip at the start of the input. Default: 0.
+    /// Start offset in seconds. Default: 0.
     #[schemars(range(min = 0.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub start: Option<f64>,
-    /// Seconds of the input to use, from `start`. Default: the rest of the
-    /// input, or as much as plays for 3 seconds when not spoofing.
+    /// Maximum duration in seconds to read from `start`. Default: full
+    /// remaining duration (or 3 seconds of output when spoofing is off).
     #[schemars(extend("exclusiveMinimum" = 0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub length: Option<f64>,
-    /// How many times as fast as the input the result plays, 0.1 to 10: 2
-    /// plays it in half the time. Default: 1.
+    /// Playback speed multiplier (0.1 to 10; 2 plays twice as fast). Default:
+    /// 1.
     #[schemars(range(min = 0.1, max = 10.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tempo: Option<f64>,
-    /// Frame rate of the result, at most 60: more than the input's at the
-    /// tempo only repeats its frames. For a sequence of images it is also
-    /// the rate its pictures are read at, how fast they play, so the
-    /// result's is the same. Default: the input's at the tempo, from 1 to
-    /// 60; 12 for a sequence.
+    /// Output frame rate (max 60; higher than the input rate at the chosen
+    /// tempo only duplicates frames). For image sequences, also sets the input
+    /// frame rate. Default: input rate adjusted for tempo (clamped to 1..60),
+    /// or 12 for sequences.
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 60))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
-    /// Target bitrate in kbit/s. Used when not fitting bitrate. Default:
+    /// Target video bitrate in kbit/s when not fitting bitrate. Default:
     /// estimated from the file size limit.
     #[schemars(range(min = 1.0))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub bitrate: Option<f64>,
-    /// Constant quality from 0 (best) to 63 (worst). Used when fitting
-    /// frame rate or length, or with `fit = "off"`. Default: 32.
+    /// Constant quality level, 0 (best) to 63 (worst), used when fitting fps
+    /// or length or with `fit = "off"`. Default: 32.
     #[schemars(range(min = 0, max = 63))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub crf: Option<u8>,
-    /// How hard the encoder works: fast, balanced or best, the slowest.
-    /// Default: balanced.
+    /// Encoder effort: fast, balanced or best (slowest). Default: balanced.
     // read as `speed` too, as it was once named
     #[serde(alias = "speed", skip_serializing_if = "Option::is_none")]
     pub effort: Option<Effort>,
-    /// Lossless encoding. Only small for tiny or still pictures. Default:
-    /// false.
+    /// Enable lossless VP9 encoding (only practical for tiny or static
+    /// inputs). Default: false.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub lossless: Option<bool>,
-    /// When to spoof the duration in the metadata so Telegram accepts videos
-    /// longer than 3 seconds. Default: auto.
+    /// When to spoof container duration so Telegram accepts videos longer than
+    /// 3 seconds. Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub spoof: Option<Spoof>,
-    /// Duration encoded into the metadata when spoofing, in seconds. Default:
-    /// a short one Telegram accepts.
+    /// Container duration in seconds written when spoofing. Default: a short
+    /// duration accepted by Telegram.
     #[schemars(extend("exclusiveMinimum" = 0, "maximum" = 3))]
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_duration: Option<f64>,
-    /// Title stored in the file metadata.
+    /// Title metadata stored in the output file.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
-    /// Mark the file as made by tgradish: writing and muxing app metadata
-    /// and a signature in padding. Default: true.
+    /// Write tgradish metadata into the output (writing/muxing app tags and
+    /// padding signature). Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
-    /// libvpx-vp9 encoder options by name, for tuning beyond what the other
-    /// options cover, for example `tune-content = "screen"` for flat
-    /// graphics, `aq-mode = "2"`, `sharpness = "4"`, `arnr-strength = "3"`,
-    /// `g = "60"` (keyframe interval) or `qmax = "50"`. `ffmpeg -h
-    /// encoder=libvpx-vp9` lists them all. Unknown names are an error.
+    /// Additional libvpx-vp9 encoder options by name (for example,
+    /// `tune-content = "screen"` for flat graphics, `aq-mode = "2"`,
+    /// `sharpness = "4"`, `arnr-strength = "3"`, `g = "60"` (keyframe interval)
+    /// or `qmax = "50"`). Run `ffmpeg -h encoder=libvpx-vp9` for the full list.
+    /// Unknown names fail encoding.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub encoder_options: Option<BTreeMap<String, String>>,
-    /// Raw ffmpeg arguments, added before the output file. Only with
-    /// ffmpeg as a separate program (the system one or `--ffmpeg PATH`),
-    /// since the built-in ffmpeg has no command line; prefer
-    /// `encoder-options` for encoder settings, which work with both.
+    /// Extra raw ffmpeg arguments, added before the output file. Requires an
+    /// external ffmpeg executable (`--ffmpeg-from system` or `--ffmpeg PATH`),
+    /// since the built-in ffmpeg has no command line; prefer `encoder-options`
+    /// for encoder settings, which work with both backends.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub ffmpeg_args: Option<Vec<String>>,
 }
@@ -159,64 +155,62 @@ layered!(Options {
     ffmpeg_args,
 });
 
-/// The values of options left unset, which converting takes: each says
-/// its default once, for core and front-ends alike.
+/// Single source of truth for default option values, shared by core and
+/// front-ends.
 impl Options {
-    /// The way of fitting: auto.
+    /// Configured fit strategy, or the default (`Fit::Auto`).
     pub fn fit_or_default(&self) -> Fit {
         self.fit.unwrap_or(Fit::Auto)
     }
 
-    /// How hard the encoder works: balanced.
+    /// Configured encoder effort, or the default (`Effort::Balanced`).
     pub fn effort_or_default(&self) -> Effort {
         self.effort.unwrap_or(Effort::Balanced)
     }
 
-    /// How pixels are scaled: auto, by the input.
+    /// Configured scaling mode, or the default (`Scaling::Auto`).
     pub fn scaling_or_default(&self) -> Scaling {
         self.scaling.unwrap_or(Scaling::Auto)
     }
 
-    /// When the duration is spoofed: auto, when the result is longer than
-    /// Telegram plays.
+    /// Configured duration spoofing policy, or the default (`Spoof::Auto`:
+    /// spoof only results longer than 3 s).
     pub fn spoof_or_default(&self) -> Spoof {
         self.spoof.unwrap_or(Spoof::Auto)
     }
 
-    /// How many times as fast as the input it plays: as fast.
+    /// Configured playback tempo, or the default (`1.0`).
     pub fn tempo_or_default(&self) -> f64 {
         self.tempo.unwrap_or(1.0)
     }
 
-    /// Whether to encode losslessly: no.
+    /// Configured lossless setting, or `false` by default.
     pub fn lossless_or_default(&self) -> bool {
         self.lossless.unwrap_or(false)
     }
 
-    /// Whether how pixels are scaled is left to the input: auto, with no
-    /// integer scale, which places pixels itself.
+    /// Returns true if scaling is automatic and no explicit `integer_scale` is
+    /// set.
     pub fn auto_scaling(&self) -> bool {
         self.scaling_or_default() == Scaling::Auto && self.integer_scale().is_none()
     }
 
-    /// The integer scale to scale by, if any: not [`IntegerScale::NONE`].
+    /// Returns the configured [`IntegerScale`], treating
+    /// [`IntegerScale::NONE`] as `None`.
     pub fn integer_scale(&self) -> Option<IntegerScale> {
         self.integer_scale.filter(|&scale| scale != IntegerScale::NONE)
     }
 
-    /// Returns `self` with every value set in `overlay` replacing its own,
-    /// [`IntegerScale::NONE`] clearing an integer scale.
-    /// A range to fit within belongs to the way of fitting it was written
-    /// for: when `overlay` fits in another unit, as a bitrate where `self`
-    /// fits a quality, and sets no range of its own, `self`'s is dropped
-    /// rather than read in the wrong unit.
+    /// Overlays set fields from `overlay` onto `self`. Clears `integer_scale`
+    /// when `overlay` sets [`IntegerScale::NONE`], and drops an inherited
+    /// `fit_range` if `overlay` changes `fit` to a strategy with a different
+    /// unit without providing a new range.
     pub fn merged(self, overlay: &Options) -> Options {
         let unit = self.fit_or_default().unit();
         let mut merged = self.overlaid(overlay);
         if overlay.fit.is_some_and(|fit| fit.unit() != unit) && overlay.fit_range.is_none() {
             merged.fit_range = None;
         }
-        // no scale, over one below, leaves none
         if merged.integer_scale == Some(IntegerScale::NONE) {
             merged.integer_scale = None;
         }
@@ -224,10 +218,9 @@ impl Options {
     }
 }
 
-/// `options` without the values that have no say in a conversion that
-/// gets `effective`, all it is given, as [`set_aside`] gives them.
-/// Planning warns of a quality or bitrate given where it has no say, and
-/// refuses lossless encoding there; front-ends set such values aside.
+/// Returns `options` with any fields that have no effect under `effective`
+/// cleared, as [`set_aside`] lists them, so planning neither warns about them
+/// nor refuses lossless where it has no effect.
 pub fn in_effect(mut options: Options, effective: &Options) -> Options {
     for (key, _) in set_aside(&options, effective) {
         match key {
@@ -243,14 +236,12 @@ pub fn in_effect(mut options: Options, effective: &Options) -> Options {
     options
 }
 
-/// The keys of the values set in `options` that have no say in a
-/// conversion that gets `effective`, each with why, as a clause naming
-/// options by their keys, as "fit is off": the tries and range of fitting
-/// that is off; a quality, or lossless encoding, where a bitrate or the
-/// quality itself is fitted; a bitrate where a quality is kept, or where
-/// fitting finds its own from the start; a quality beside lossless
-/// encoding, or beside a bitrate that encoding once goes by; and the
-/// duration spoofing writes where it never spoofs.
+/// Returns `(key, reason)` for each value set in `options` that has no effect
+/// under `effective`; `reason` is a clause naming options by key, e.g.
+/// `"fit is off"`. Covers `attempts` and `fit-range` when `fit` is `off`;
+/// `crf` or `lossless` where bitrate or CRF is fitted; `bitrate` where a
+/// quality is kept or fitting chooses its own; `crf` beside `lossless` or a
+/// set `bitrate`; and `fake-duration` when `spoof` is `never`.
 pub fn set_aside(options: &Options, effective: &Options) -> Vec<(&'static str, String)> {
     let fit = effective.fit_or_default();
     let fit_is = || {
@@ -297,22 +288,22 @@ pub fn set_aside(options: &Options, effective: &Options) -> Vec<(&'static str, S
     aside
 }
 
-/// The highest bitrate worth asking for, in kbit/s, far past what any
-/// sticker fits: the top of the range fitting searches by default.
+/// Default upper bitrate bound (in kbit/s) for size-fitting searches, far above
+/// what any sticker can fit.
 pub const HIGHEST_BITRATE: f64 = 50_000.0;
 
-/// Encodes fitting may make: enough to land within a few percent of the
-/// limit for most inputs, at seconds an encode.
+/// Default maximum size-fitting attempts: enough to land within a few percent
+/// of the limit for most inputs at a few seconds per encode.
 pub const DEFAULT_ATTEMPTS: u32 = 8;
-/// The most it may make, against a mistyped number.
+/// Upper limit on `attempts`, to catch mistyped numbers.
 pub const MAX_ATTEMPTS: u32 = 50;
-/// The constant quality where nothing is fitted to it: good for libvpx-vp9
-/// at sticker sizes.
+/// Default libvpx-vp9 CRF when not fitting CRF (good quality at sticker
+/// dimensions).
 pub const DEFAULT_CRF: u8 = 32;
-/// libvpx's constant qualities, the best first.
+/// Valid libvpx-vp9 CRF range (0 = best, 63 = worst).
 pub const CRFS: std::ops::RangeInclusive<u8> = 0..=63;
-/// The duration spoofing writes by default: well under Telegram's 3
-/// seconds, and odd enough that a spoofed header is easy to spot.
+/// Default spoofed container duration in seconds (well under 3 s and easy to
+/// recognise in metadata).
 pub const DEFAULT_FAKE_DURATION: f64 = 0.42069;
 
 #[cfg(test)]

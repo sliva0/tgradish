@@ -1,6 +1,6 @@
-//! Inputs named from the working directory, by names ffmpeg would take
-//! for something else. A test binary of its own, with one test: it changes
-//! the working directory, which all of a process's threads share.
+//! Tests relative input filenames that ffmpeg would otherwise misinterpret as
+//! flags or URL protocols. Kept in its own test binary because it changes the
+//! process-wide working directory.
 
 mod common;
 
@@ -19,8 +19,9 @@ fn reads_names_that_look_like_urls_and_options() {
     std::env::set_current_dir(dir.path()).unwrap();
     let files = tgradish_corpus::files();
     let walker = files.iter().find(|file| file.name == "walker_2x.gif").unwrap();
-    // a dash starts an option; and before a colon ffmpeg expects a
-    // protocol, as in a time, which Windows keeps out of names
+    // Leading dashes look like CLI flags, and colons before a path separator
+    // look like URL schemes to ffmpeg (tested on Unix since Windows forbids
+    // colons in filenames).
     let mut names = vec!["-dash.gif"];
     if cfg!(unix) {
         names.push("2026-11-12T10:30:00.gif");
@@ -36,7 +37,8 @@ fn reads_names_that_look_like_urls_and_options() {
             let starts = backend.frame_starts(&input, &probe, &cancel);
             let starts = starts.unwrap_or_else(|err| panic!("{label}: {err}"));
             assert!(starts.len() > 1, "{label}: {starts:?}");
-            // a video sticker, beside it, and the frame at a time as a picture
+            // Convert each to a WebM sticker beside it, and its frame at a
+            // time to a static WebP.
             let options =
                 Options { fit: Some(Fit::Off), effort: Some(Effort::Fast), ..Options::default() };
             let request =
@@ -55,12 +57,12 @@ fn reads_names_that_look_like_urls_and_options() {
             assert!(made.unwrap_or_else(|err| panic!("{label}: {err}")).output.exists(), "{label}");
         }
     }
-    // what can't be read is named as it was given
+    // Errors name the path as given, not the absolute one passed to ffmpeg.
     let missing = Path::new("-missing.gif");
     for backend in &backends {
         let err = backend.probe(missing, &cancel).unwrap_err();
         assert!(matches!(&err, Error::Unreadable { path, .. } if path == missing), "{err}");
     }
-    // out of the directory before it is removed
+    // Leave the temporary directory before it is deleted on drop.
     std::env::set_current_dir(env!("CARGO_MANIFEST_DIR")).unwrap();
 }

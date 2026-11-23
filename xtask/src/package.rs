@@ -1,16 +1,16 @@
-//! Release archives of a built tgradish, and for glibc builds with ffmpeg
-//! built in also a .deb and an .rpm; Windows's executable is published on
-//! its own too, as it carries every notice in itself. Each archive holds
-//! the binary with every notice it needs, and for Linux its menu entry and
-//! icons. Files are named without the version, the same in every release,
-//! so that links to the latest release's, as the README's, keep finding
-//! them; the tag says the version, as does the folder in an archive,
-//! which keeps two versions unpacked apart. Binaries are
-//! checked before they are packed, since a release must run where it says
-//! it does: Windows ones without MinGW's DLLs, glibc ones on a glibc as old
-//! as asked, musl ones linked to nothing that musl distributions may lack.
-//! nfpm, which writes the packages, is downloaded pinned by its hash, like
-//! ffmpeg's sources.
+//! Builds release archives, plus `.deb` and `.rpm` packages (via `nfpm`,
+//! downloaded and pinned by SHA-256) for glibc builds with built-in ffmpeg,
+//! and a standalone `tgradish.exe` for Windows (published on its own too
+//! because it embeds all required licence notices).
+//!
+//! Each archive contains the binary and all required licence notices, plus the
+//! desktop entry, icons, man pages, and shell completions on Linux. Archive
+//! and package filenames omit the version so `/releases/latest/download/`
+//! links stay stable; the git tag and the inner archive directory carry the
+//! version so two unpacked versions do not collide. Binaries are verified
+//! before packaging so releases run everywhere promised: no DLLs beyond
+//! Windows' own (such as MinGW's), glibc builds no newer than `--max-glibc`
+//! asks, and musl builds linked only to `libc.so` via musl's loader.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -106,7 +106,7 @@ fn check_dll_imports(exe: &Path) -> Result<()> {
         .iter()
         .filter(|dll| !SYSTEM_DLLS.contains(&dll.as_str()) && !dll.starts_with("api-ms-win-"))
         .collect();
-    ensure!(foreign.is_empty(), "{} needs DLLs Windows does not have: {foreign:?}", exe.display());
+    ensure!(foreign.is_empty(), "{} imports non-system DLLs: {foreign:?}", exe.display());
     println!("DLL imports: {}", imports.join(", "));
     Ok(())
 }
@@ -148,17 +148,17 @@ const FONT_LICENCES: [&str; 3] =
 /// built without ffmpeg instead. With `max_glibc`, fails if a Linux binary
 /// needs a newer glibc.
 pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)>) -> Result<()> {
-    ensure!(!(system_ffmpeg && target.is_windows()), "Windows builds always link ffmpeg in");
+    ensure!(!(system_ffmpeg && target.is_windows()), "Windows builds always include ffmpeg");
     let root = workspace_root();
     // xtask shares the workspace's version, so this is tgradish's
     let version = env!("CARGO_PKG_VERSION");
     let triple = target.triple();
     let binary = root.join("target").join(triple).join("release").join(target.exe("tgradish"));
-    ensure!(binary.is_file(), "{} is missing, build it first", binary.display());
+    ensure!(binary.is_file(), "{} is missing; build it first", binary.display());
     let licenses = root.join(format!("target/ffmpeg/licenses-{triple}"));
     ensure!(
         system_ffmpeg || licenses.is_dir(),
-        "{} is missing, run cargo xtask ffmpeg",
+        "{} is missing; run cargo xtask ffmpeg first",
         licenses.display()
     );
 
@@ -197,9 +197,9 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
         std::fs::copy(root.join(FONTS).join(file), stage.join("licenses").join(file))?;
     }
     let third_party = if system_ffmpeg {
-        "tgradish is MIT licensed, see LICENSE.txt.\n\n\
-         This build has no ffmpeg in it: it runs the system's ffmpeg and ffprobe\n\
-         (6.0 or newer, with libvpx for VP9) from PATH.\n"
+        "tgradish is under the MIT licence (see LICENSE.txt).\n\n\
+         This build does not include ffmpeg. It runs ffmpeg and ffprobe (6.0 or newer,\n\
+         with libvpx for VP9) from PATH.\n"
             .to_owned()
     } else {
         for entry in std::fs::read_dir(&licenses)? {
@@ -207,28 +207,29 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
             std::fs::copy(entry.path(), stage.join("licenses").join(entry.file_name()))?;
         }
         format!(
-            "tgradish is MIT licensed, see LICENSE.txt.\n\n\
-             It includes ffmpeg {ffmpeg} (LGPL 2.1 or later) built with zlib, libvpx and\n\
-             dav1d, linked statically. Their licences are in licenses/. The exact\n\
-             sources are in {sources}.tar, published with this release,\n\
-             with how to rebuild tgradish against a modified ffmpeg.\n",
+            "tgradish is under the MIT licence (see LICENSE.txt).\n\n\
+             This build statically links ffmpeg {ffmpeg} (LGPL 2.1 or later) with zlib,\n\
+             libvpx and dav1d. Their licences are in licenses/. The exact source code\n\
+             and relinking instructions are in {sources}.tar,\n\
+             published alongside this release.\n",
             ffmpeg = FFMPEG.version,
             sources = sources_archive(),
         )
     };
-    let libwebp = "\nIt includes libwebp (BSD 3-Clause), for static stickers: its licence and\n\
-                   patent grant are licenses/libwebp-COPYING and licenses/libwebp-PATENTS.\n";
-    let fonts = "\nIts GUI includes subsets of fonts: Ubuntu Light and Medium, as Ubuntu Light\n\
-                 and Medium derivative tgradish (Ubuntu Font Licence 1.0), JetBrains Mono\n\
-                 NL (SIL Open Font License 1.1) and emoji-icon-font (MIT). Their licences\n\
-                 are licenses/Ubuntu-LICENCE.txt, licenses/JetBrainsMono-OFL.txt and\n\
+    let libwebp = "\nIt also includes libwebp (BSD 3-Clause) for static stickers. Its licence and\n\
+                   patent grant are in licenses/libwebp-COPYING and licenses/libwebp-PATENTS.\n";
+    let fonts = "\nThe GUI includes subsets of Ubuntu Light and Medium, as Ubuntu Light and\n\
+                 Medium derivative tgradish (Ubuntu Font Licence 1.0), JetBrains Mono NL\n\
+                 (SIL Open Font License 1.1) and emoji-icon-font (MIT). Their licences are in\n\
+                 licenses/Ubuntu-LICENCE.txt, licenses/JetBrainsMono-OFL.txt and\n\
                  licenses/emoji-icon-font-LICENSE.txt.\n";
     std::fs::write(
         stage.join("THIRD-PARTY.txt"),
         third_party
             + libwebp
             + fonts
-            + "\nThe Rust crates in it and their licences are in THIRD-PARTY-CRATES.txt.\n",
+            + "\nThe included Rust crates and their licences are listed in\n\
+               THIRD-PARTY-CRATES.txt.\n",
     )?;
     // the crates of every build, as the binary carries them
     std::fs::copy(
@@ -487,9 +488,9 @@ fn linux_packages(
          maintainer: {maintainer:?}\n\
          description: |-\n  \
            {SUMMARY}\n  \
-           Makes video (WebM) and static (WebP) stickers and custom emoji from any\n  \
-           video or picture, and animated (TGS) stickers from pixel art, fitted to\n  \
-           Telegram's limits. It has ffmpeg built in.\n\
+           Converts videos and images into Telegram video (WebM) and static (WebP)\n  \
+           stickers and custom emoji, and pixel art into animated (TGS) stickers,\n  \
+           within Telegram's limits. Includes a built-in ffmpeg.\n\
          homepage: {homepage:?}\n\
          license: \"MIT AND LGPL-2.1-or-later AND BSD-3-Clause AND BSD-2-Clause AND Zlib \
            AND Ubuntu-font-1.0 AND OFL-1.1\"\n\
@@ -548,7 +549,7 @@ fn check_musl_links(exe: &Path, target: Target) -> Result<()> {
     let loader = target.musl_loader();
     ensure!(
         headers.contains(&format!("[Requesting program interpreter: {loader}]")),
-        "{} doesn't start with {loader}",
+        "{} does not use interpreter {loader}",
         exe.display()
     );
     let links: Vec<&str> = headers
@@ -556,7 +557,7 @@ fn check_musl_links(exe: &Path, target: Target) -> Result<()> {
         .filter_map(|line| line.split_once("Shared library: [")?.1.strip_suffix(']'))
         .collect();
     let foreign: Vec<_> = links.iter().filter(|link| !MUSL_LINKS.contains(link)).collect();
-    ensure!(foreign.is_empty(), "{} is linked to {foreign:?} besides musl", exe.display());
+    ensure!(foreign.is_empty(), "{} links against non-musl libraries: {foreign:?}", exe.display());
     println!("linked to: {}", links.join(", "));
     Ok(())
 }
@@ -594,7 +595,7 @@ fn needed_glibc(exe: &Path) -> Result<(u32, u32)> {
         .filter_map(|word| word.trim_matches(['(', ')']).strip_prefix("GLIBC_"))
         .filter_map(|version| glibc_version(version).ok())
         .max()
-        .context("the executable uses no versioned glibc symbols")
+        .context("no versioned glibc symbols found in executable")
 }
 
 #[cfg(test)]
@@ -706,12 +707,12 @@ mod tests {
         std::fs::write(stage.join("LICENSE.txt"), "MIT License\n").unwrap();
         std::fs::write(
             stage.join("THIRD-PARTY.txt"),
-            "tgradish is MIT licensed, see LICENSE.txt.\n\nTheir licences are in licenses/. \
+            "tgradish is under the MIT licence (see LICENSE.txt).\n\nTheir licences are in licenses/. \
              See licenses/libwebp-COPYING.\n\nThe crates are in THIRD-PARTY-CRATES.txt.\n",
         )
         .unwrap();
         let copyright = debian_copyright(&stage).unwrap();
-        assert!(copyright.contains("MIT licensed, below."), "{copyright}");
+        assert!(copyright.contains("under the MIT licence (below)."), "{copyright}");
         assert!(copyright.contains("are in /usr/share/licenses/tgradish/."), "{copyright}");
         assert!(copyright.contains(" /usr/share/licenses/tgradish/libwebp-COPYING"), "{copyright}");
         assert!(

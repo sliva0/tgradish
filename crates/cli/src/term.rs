@@ -1,15 +1,15 @@
-//! What the terminal can do beyond plain text: colours, links on file
-//! names, progress in the tab or taskbar, and pictures. Found once from the
-//! environment, since terminals can't be asked without waiting for answers.
+//! Terminal capabilities beyond plain text: colours, clickable file links,
+//! taskbar/tab progress, and inline images.
 //!
+//! Detected once from environment variables, because querying the terminal
+//! directly would require waiting for responses.
 //! - Colours follow `--colour`, then `NO_COLOR` and `CLICOLOR_FORCE`.
-//! - Links (OSC 8) are on in terminals known to show them; `FORCE_HYPERLINK`
-//!   set to 1 or 0 decides instead.
-//! - Progress (OSC 9;4) shows in Windows Terminal's tab and taskbar,
-//!   ConEmu's and Ghostty's. Elsewhere OSC 9 can be a notification, so it
-//!   is only sent where it is known to mean progress.
-//! - Pictures use kitty's graphics protocol (kitty, Ghostty) or iTerm2's
-//!   inline images (iTerm2, WezTerm).
+//! - Hyperlinks (OSC 8) are enabled on known terminals; `FORCE_HYPERLINK` (`1`
+//!   or `0`) overrides detection.
+//! - Progress (OSC 9;4) is sent only to Windows Terminal, ConEmu, and Ghostty
+//!   (other terminals may treat OSC 9 as a notification).
+//! - Inline images use the kitty graphics protocol (kitty, Ghostty) or the
+//!   iTerm2 image protocol (iTerm2, WezTerm).
 
 use std::io::{IsTerminal, Write};
 use std::sync::OnceLock;
@@ -42,7 +42,8 @@ fn env(name: &str) -> Option<String> {
     std::env::var(name).ok().filter(|value| !value.is_empty())
 }
 
-/// Finds out what the terminal does. Plain text when `plain`, as for JSON.
+/// Detects terminal capabilities. Disables all formatting when `plain` is true
+/// (for example in `--json` mode).
 pub fn init(colour: ColourChoice, plain: bool) {
     let colours = match colour {
         _ if plain => false,
@@ -104,7 +105,7 @@ fn features() -> Features {
     FEATURES.get().copied().unwrap_or_default()
 }
 
-/// `text` linking to the file at `path`, for stderr, where links show.
+/// Wraps `text` in an OSC 8 hyperlink to `path` for stderr when supported.
 pub fn link(text: impl std::fmt::Display, path: &std::path::Path) -> String {
     if !features().links {
         return text.to_string();
@@ -112,7 +113,7 @@ pub fn link(text: impl std::fmt::Display, path: &std::path::Path) -> String {
     linked(text, path)
 }
 
-/// [`link`] for stdout, which may go to a file even when stderr shows.
+/// Like [`link`], but for stdout (disabled when stdout is redirected).
 pub fn link_out(text: impl std::fmt::Display, path: &std::path::Path) -> String {
     if !features().links || !std::io::stdout().is_terminal() {
         return text.to_string();
@@ -126,7 +127,7 @@ fn linked(text: impl std::fmt::Display, path: &std::path::Path) -> String {
     format!("\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\")
 }
 
-/// A `file://` URL, with what URLs can't hold escaped.
+/// Formats `path` as a percent-encoded `file://` URL.
 fn url_of(path: &std::path::Path) -> String {
     let text = path.to_string_lossy().replace('\\', "/");
     let mut url = String::from("file://");
@@ -144,7 +145,8 @@ fn url_of(path: &std::path::Path) -> String {
     url
 }
 
-/// Shows how far work is in the tab or taskbar, or clears it with `None`.
+/// Reports progress (`0.0..=1.0`) to the terminal tab/taskbar, or clears it
+/// when `None`.
 pub fn progress(fraction: Option<f64>) {
     if !features().progress {
         return;
@@ -158,12 +160,12 @@ pub fn progress(fraction: Option<f64>) {
     let _ = stderr.flush();
 }
 
-/// Whether [`picture`] can show anything on stdout.
+/// Returns whether [`picture`] can display images on stdout.
 pub fn shows_pictures() -> bool {
     features().images.is_some() && std::io::stdout().is_terminal()
 }
 
-/// Shows an RGBA picture in the terminal, `rows` lines high, where it can.
+/// Displays an RGBA image in the terminal, `rows` lines tall, if supported.
 pub fn picture(rgba: &[u8], width: u32, height: u32, rows: u32) {
     let Some(images) = features().images.filter(|_| std::io::stdout().is_terminal()) else {
         return;
@@ -182,7 +184,7 @@ pub fn picture(rgba: &[u8], width: u32, height: u32, rows: u32) {
     let mut out = String::new();
     match images {
         Images::Kitty => {
-            // in chunks of at most 4096 bytes, as the protocol asks
+            // Kitty requires payloads split into chunks of at most 4096 bytes.
             let chunks: Vec<&str> = data
                 .as_bytes()
                 .chunks(4096)

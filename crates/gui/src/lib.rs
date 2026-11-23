@@ -1,9 +1,9 @@
-//! The tgradish GUI: a list of files, each with its own settings, a
-//! preview to crop and trim it, and its result. It converts with
-//! `tgradish-core` directly, like the CLI.
+//! The tgradish GUI: file list, per-file conversion settings, interactive
+//! crop/trim preview, and result summary. Converts directly through
+//! `tgradish-core`, like the CLI.
 
-// What the crate offers is what this file exports; everything else is
-// the crate's own, which the lint keeps from being marked public.
+// Only exports declared in this file are public; `unreachable_pub` catches
+// accidental `pub` items in internal modules.
 #![warn(unreachable_pub)]
 
 mod about;
@@ -143,12 +143,11 @@ static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 /// The window's, once [`run`] has opened it.
 static OPEN: std::sync::OnceLock<egui::Context> = std::sync::OnceLock::new();
 
-/// Closes the window, from any thread, as closing it does: conversions
-/// stop, taking their temporary files and ffmpeg with them, the session
-/// is kept, and [`run`] returns. For a signal to end, as SIGTERM when the
-/// session ends, SIGHUP when the terminal it was started from closes, or
-/// Ctrl-C there.
-/// Asked before the window opens, it closes as it opens.
+/// Requests a clean window close from any thread: stops running conversions
+/// (cleaning up temporary files and child `ffmpeg` processes), saves the
+/// session, and returns from [`run`]. Used by signal handlers (`SIGTERM`,
+/// `SIGHUP`, `Ctrl-C`). If called before the window opens, it closes as soon as
+/// it opens.
 pub fn close() {
     CLOSING.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(ctx) = OPEN.get() {

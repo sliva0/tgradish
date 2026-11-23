@@ -1,4 +1,5 @@
-//! What a sticker file holds and what Telegram would say about it.
+//! Sticker inspection dialog showing file properties and Telegram validation
+//! issues.
 
 use std::path::{Path, PathBuf};
 

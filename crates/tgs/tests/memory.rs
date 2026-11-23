@@ -1,8 +1,8 @@
-//! How much memory reading art as pixel art and reducing it take beside
-//! the art, counted by an allocator of its own: a binary of its own, with
-//! one test, so nothing else allocates while it counts.
+//! Peak memory usage tests for normalisation and reductions using a custom
+//! counting global allocator (isolated in its own test binary so no other
+//! tests allocate concurrently).
 
-// a global allocator can only be written with unsafe code
+// GlobalAlloc requires unsafe code.
 #![allow(unsafe_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};

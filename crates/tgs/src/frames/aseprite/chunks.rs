@@ -35,13 +35,13 @@ impl Sprite {
                 // one run of bits, which an id is shifted down from
                 let ids = id_mask.checked_shr(id_mask.trailing_zeros()).unwrap_or(0);
                 if ids == 0 || ids & ids.wrapping_add(1) != 0 {
-                    return Err(error(format!("tile ids in the bits {id_mask:#010x}")));
+                    return Err(error(format!("invalid tile ID bitmask {id_mask:#010x}")));
                 }
                 let flip_mask = chunk.u32()? | chunk.u32()? | chunk.u32()?;
                 chunk.skip(10)?;
                 let tile_bytes = match bits {
                     8 | 16 | 32 => usize::from(bits / 8),
-                    _ => return Err(error(format!("tiles of {bits} bits"))),
+                    _ => return Err(error(format!("unsupported tilemap entry size: {bits} bits"))),
                 };
                 // kept as 32-bit tiles whatever the file's are, beside
                 // the file's own while they are read
@@ -79,7 +79,7 @@ impl Sprite {
             let size = budget([size, self.depth.bytes(), 1], &self.limits)?;
             inflate(chunk.take(length)?, spend(spent, size, &self.limits)?)?
         } else {
-            return Err(error("a tileset is stored in another file"));
+            return Err(error("external tilesets are not supported"));
         };
         Ok(Tileset { id, width, height, count, zero_is_empty: flags & 4 != 0, pixels })
     }
@@ -160,7 +160,7 @@ pub(super) fn read_palette(chunk: &mut Reader, palette: &mut Vec<Colour>) -> Res
     let (from, to) = (chunk.u32()? as usize, chunk.u32()? as usize);
     chunk.skip(8)?;
     if size > 65536 || from > to || to >= size {
-        return Err(error("a palette is broken"));
+        return Err(error("invalid palette chunk"));
     }
     palette.resize(size, [0; 4]);
     for entry in &mut palette[from..=to] {

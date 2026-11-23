@@ -1,7 +1,7 @@
-//! The main panel of the selected item: the big preview, where it is
-//! cropped and trimmed, with the small picture of what the result will
-//! look like, and its settings beside and below it. What is drawn on the
-//! preview itself is `canvas`'s, and its timeline `timeline`'s.
+//! Main panel for the selected item: the interactive preview stage (cropping,
+//! trimming, and the live result inset), plus the settings column beside it
+//! and the settings scroll area below it. Stage rendering lives in `canvas`
+//! and the playback/trim bar in `timeline`.
 
 use crate::config::ResultPreview;
 use eframe::egui::{self, Color32, Rect, RichText, pos2, vec2};
@@ -22,35 +22,32 @@ use crate::media::{Clip, Load};
 use crate::result::{details, summary};
 use crate::{file_settings, predict, theme, timeline, widgets};
 
-/// Width of the column beside the preview, and the least it narrows to
-/// before the preview does.
+/// Default and minimum width of the settings column beside the preview (the
+/// side column shrinks down to `NARROWEST_SIDE` before the preview narrows).
 const SIDE: f32 = 300.0;
 const NARROWEST_SIDE: f32 = 228.0;
-/// The least the preview narrows to, which holds the row under it.
+/// Minimum preview width needed to fit the timeline row beneath it.
 const NARROWEST_PREVIEW: f32 = 366.0;
-/// The least the part of the window beside the list of files narrows to,
-/// before the list has to give way: the preview and the column beside it,
-/// which also makes room for the settings' widest rows.
+/// Minimum width of the main panel before the file list must give way: fits
+/// both the preview and side column, as well as the widest settings rows below.
 pub(crate) const NARROWEST_MAIN: f32 = 656.0;
-/// Side of a `.tgs` result's small picture at its largest: shapes have no
-/// pixels, so this is as sharp as it needs.
+/// Maximum side in pixels of the `.tgs` result inset preview (vector shapes
+/// are resolution-independent, so 256 px is sharp enough).
 const TGS_INSET: usize = 256;
-/// Room between the stage and the timeline's row under it, and as much
-/// between that row and the line under the preview, so that the row sits in
-/// the middle of the room it has; without a row, the stage ends as far over
-/// the line.
+/// Vertical spacing between the stage and the timeline row, and between the
+/// timeline row and the divider line (centring the row in its space; without a
+/// timeline row, the stage ends by the same margin above the line).
 const AROUND_ROW: f32 = 12.0;
-/// How high the line under the preview is to drag; it is drawn in its
-/// middle.
+/// Interactive drag height of the horizontal divider under the preview (drawn
+/// through its vertical centre).
 const HANDLE: f32 = 8.0;
-/// What lies between the bottom of what the preview's panel holds and the
-/// line under it: the margin egui's top panels keep inside them, and half
-/// the line's handle.
+/// Distance between the inner bottom of the preview top panel and the divider
+/// line centre: egui's 2 pt top-panel inner margin plus half of [`HANDLE`].
 const UNDER_PANEL: f32 = 2.0 + HANDLE / 2.0;
 
-/// The least and most of the height beside the list the preview takes, as
-/// the line under it is dragged: never so small it is no use, nor so large
-/// the settings below lose their first row.
+/// Minimum and maximum fraction of the main panel height that the preview may
+/// occupy when dragging the divider (keeps the preview usable and leaves at
+/// least one row of settings visible below).
 pub(crate) const LEAST_SHARE: f32 = 0.2;
 pub(crate) const MOST_SHARE: f32 = 0.85;
 
@@ -58,10 +55,10 @@ impl App {
     pub(crate) fn main_panel(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let selected = self.selected.filter(|&id| self.item(id).is_some());
-        // a number typed in the file shown, which is no longer the one
-        // picked, or is being removed: shown a frame more, as it was, for
-        // its field to take what was typed as Tab would, in its own file,
-        // before the one picked is shown
+        // If the currently drawn item has an uncommitted number edit and is
+        // being deselected or removed, draw it for one more frame after
+        // surrendering focus so its field commits the typed value to the right
+        // item before switching.
         let typed = widgets::typed_number(&ctx);
         if typed.is_some_and(|file| self.item(file).is_none()) {
             widgets::forget_typed_number(&ctx);
@@ -86,7 +83,8 @@ impl App {
             ui.add_space(crate::actions::below_bar(ui.style()));
         });
         self.banner.bar = Some(bar.response.rect.top());
-        // the rest is the file's own, which a button held there changes
+        // Record the per-item settings rectangle so pointer-held edits inside
+        // it are grouped for undo.
         self.edit_frames.settings_in(ui.available_rect_before_wrap());
         let output = self.item(id).map(|item| self.output_for(item));
         let copyable = self.copyable(id, output.as_deref()).is_some();
@@ -107,11 +105,11 @@ impl App {
         let preview_height =
             (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
-        // the line under it is the handle's, which moves it
+        // Omit the built-in panel separator; the custom drag handle draws the line below.
         let panel = egui::Panel::top("preview").exact_size(preview_height);
         panel.show_separator_line(false).show(ui, |ui| {
             ui.horizontal_top(|ui| {
-                // less the gap between the two, with its line
+                // Subtract the gap and vertical separator between the preview and side column.
                 let room = ui.available_width() - 30.0;
                 let side = SIDE.min(room - NARROWEST_PREVIEW).max(NARROWEST_SIDE);
                 let width = (room - side).max(NARROWEST_PREVIEW);
@@ -132,8 +130,8 @@ impl App {
                 );
                 ui.add_space(8.0);
                 ui.separator();
-                // to the panel's edge, whatever the gap took, so its bar
-                // is in line with the bar of the settings under it
+                // Extend to the right edge of the panel so the side column's
+                // scroll bar aligns with the lower settings scroll bar.
                 let side = ui.available_width().max(side);
                 ui.allocate_ui_with_layout(
                     vec2(side, ui.available_height()),
@@ -150,16 +148,14 @@ impl App {
                 );
             });
         });
-        // the line under the preview moves it
+        // Draggable horizontal divider under the preview.
         let (line, response) = ui
             .allocate_exact_size(vec2(ui.available_width(), HANDLE), egui::Sense::click_and_drag());
         let response = response.on_hover_cursor(egui::CursorIcon::ResizeVertical);
         response.widget_info(|| {
             egui::WidgetInfo::labeled(egui::WidgetType::Other, true, fl!("preview-divider"))
         });
-        // never so small the preview is no use, nor so large the settings
-        // below lose their first row; back to where it starts on a double
-        // click
+        // Clamp between LEAST_SHARE and MOST_SHARE; double-click resets to default.
         if response.dragged() {
             self.preview_share = ((preview_height + response.drag_delta().y) / height)
                 .clamp(LEAST_SHARE, MOST_SHARE);
@@ -167,7 +163,7 @@ impl App {
         if response.double_clicked() {
             self.preview_share = crate::app::PREVIEW_SHARE;
         }
-        // thicker where it can be taken, within its handle
+        // Highlight and thicken the line on hover or drag.
         let line_width = if response.hovered() || response.dragged() { 2.0 } else { 1.0 };
         let colour = if response.hovered() || response.dragged() {
             ui.visuals().widgets.hovered.fg_stroke.color
@@ -177,7 +173,7 @@ impl App {
         let stroke = egui::Stroke::new(line_width, colour);
         ui.painter().hline(line.x_range(), line.center().y, stroke);
         egui::CentralPanel::default().show(ui, |ui| {
-            // scrolled as each file was left
+            // Salt the scroll area with the item ID so each item preserves its scroll offset.
             let settings =
                 egui::ScrollArea::vertical().id_salt(("settings", id)).auto_shrink([false, false]);
             widgets::scrolled(ui, settings, |ui| {
@@ -193,8 +189,9 @@ impl App {
     }
 }
 
-/// The side column of `item`'s settings: how it is made, and what came of
-/// converting it.
+/// Draws the side column beside the preview: target/format/preset selectors,
+/// blockers, conversion progress or result summary/details, and the pre-run
+/// plan.
 fn side_settings(
     ui: &mut egui::Ui,
     item: &mut Item,
@@ -206,15 +203,15 @@ fn side_settings(
         ui.add_space(6.0);
         file_settings::make(ui, item, context);
         file_settings::blocked(ui, item);
-        // what converting did, where the eye is once Convert is pressed,
-        // before the plan, which matters most before there is a result
+        // What converting did goes above the plan, where the eye is once
+        // Convert is pressed; the plan matters most before there is a result.
         summary(ui, item, queued, copyable);
         details(ui, item);
         file_settings::plan(ui, item, context);
     });
 }
 
-/// The rest of `item`'s settings, under its preview.
+/// Draws the per-item settings below the preview.
 fn under_settings(ui: &mut egui::Ui, item: &mut Item, context: &file_settings::Context) {
     widgets::of_file(ui, "settings", item.id, |ui| {
         widgets::settings_spacing(ui);
@@ -223,8 +220,8 @@ fn under_settings(ui: &mut egui::Ui, item: &mut Item, context: &file_settings::C
     });
 }
 
-/// How fast `item` plays, as its result will, and what its result is made
-/// with: a `.tgs`'s options with its preset's.
+/// Returns `item`'s effective playback tempo and merged WebM and `.tgs`
+/// options.
 fn made_with(item: &Item, context: &file_settings::Context) -> (f64, Options, tgs::Options) {
     let (presets, config) = (context.presets, context.config);
     let tgs = item.choices.tgs_options(presets, config).unwrap_or_default();
@@ -233,8 +230,8 @@ fn made_with(item: &Item, context: &file_settings::Context) -> (f64, Options, tg
     (item.tempo(presets, config), webm, tgs)
 }
 
-/// The big preview of an item, its header and timeline. The input plays at
-/// `tempo`, as the result will.
+/// Draws the item preview header, stage, and timeline row. The input plays at
+/// `tempo` to match the output speed.
 fn preview(
     ui: &mut egui::Ui,
     (screen, inset): (&mut Screen, &mut Inset),
@@ -244,19 +241,19 @@ fn preview(
     (look, smooth): (&mut ResultPreview, bool),
 ) {
     let has_result = item.result_clip.ready().is_some();
-    // a change to what is used or how it is fitted shows on the input
+    // Switch back to the input view whenever crop, trim, or fitting changes.
     let framing = Framing::of(item);
     if item.view.framing.as_ref().is_some_and(|seen| *seen != framing) {
         item.view.show = Show::Input;
     }
     item.view.framing = Some(framing);
-    // the result chosen shows once it is read; the input meanwhile
+    // Show the result once decoded, or fall back to the input while loading.
     let shown = item.shown();
-    // level with the buttons of the header over the list beside it
+    // Align vertically with the header buttons above the file list.
     ui.add_space(9.0);
-    // the result's small picture's toggle, or under the bar where it
-    // doesn't fit beside the rest; there while the result shows too,
-    // greyed, so that nothing beside it moves as the two take turns
+    // Result preview toggle: placed on the header bar when it fits, or on a
+    // second row below when narrow. Remains visible (disabled) while viewing
+    // the result so adjacent controls do not shift when switching views.
     let toggle = |ui: &mut egui::Ui, inset: &mut bool, input: bool| {
         ui.add_enabled_ui(input, |ui| ui.toggle_value(inset, fl!("result-preview")))
             .inner
@@ -266,24 +263,23 @@ fn preview(
     let mut toggle_below = false;
     ui.horizontal(|ui| {
         let mut show = shown;
-        // what each takes is measured, as words are longer in some
-        // languages
+        // Measure button widths dynamically to accommodate translations.
         let gap = ui.spacing().item_spacing.x;
         let button =
             |text: &str| widgets::text_width(ui, text, 2.0 * ui.spacing().button_padding.x);
-        // the segments, a point apart, the result's as wide as it is when
-        // out of date, which its mark says
+        // Reserve width for the outdated result label so the segment group
+        // does not shift when a result becomes stale.
         let shows = button(&fl!("show-input")) + 1.0 + button(&fl!("show-result", "outdated"));
         let zoom_out = zoom_out_width(ui);
         let zooming = gap + zoom_out;
         let preview = gap + button(&fl!("result-preview"));
         let room = ui.available_width();
-        // zooming's buttons only while zoomed in where there is no room
+        // In narrow layouts, show the Zoom out button only while zoomed in.
         let compact = shows + zooming + preview > room;
         toggle_below = room < shows + preview;
-        // what the mouse does, in what is left with every button at its
-        // widest and the longest of its hints, so that it neither comes and
-        // goes nor moves as they change; whole, or not at all
+        // Show the mouse interaction hint only if the longest hint fits beside
+        // the widest button states, so it never shifts or flickers as state
+        // changes.
         let right = zooming + if toggle_below { 0.0 } else { preview };
         let hint_at = shows + gap + HINT_ROOM;
         let hint_fits = hint_at + widest_mouse_hint(ui) + HINT_ROOM + right <= room;
@@ -293,7 +289,8 @@ fn preview(
         let result_hint = if outdated { fl!("show-result", "hint") } else { String::new() };
         let choices =
             [(Show::Input, fl!("show-input"), String::new()), (Show::Result, result, result_hint)];
-        // a result that couldn't be read says why
+        // If decoding the result failed, show the decode error on the disabled
+        // Result segment tooltip.
         let unseen = match &item.result_clip {
             Load::Failed(why) if item.made.is_some() => why.clone(),
             _ => fl!("convert-first"),
@@ -303,20 +300,19 @@ fn preview(
         }) {
             item.view.show = show;
         }
-        // what doesn't fit is left out
+        // Leave out what does not fit.
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if !toggle_below {
                 toggle(ui, &mut item.view.inset, show == Show::Input);
             }
-            // always there where there is room, so nothing beside them
-            // moves as zooming starts
+            // Keep Zoom out visible whenever there is room so adjacent controls
+            // do not move when zooming begins.
             let zoom = item.view.zoom_mut(show);
-            // not while it eases out
+            // Disable Zoom out while an ease-out animation is already running.
             let zoomed = zoom.level > 1.0 && zoom.easing.is_none();
             if zoomed || !compact {
-                // how large its pixels show, as the result's small picture
-                // says it, on the button that zooms out, which is as wide
-                // as the widest it gets, so nothing moves as it changes
+                // Show the current pixel scale on the fixed-width Zoom out
+                // button so changing zoom level does not shift the layout.
                 let scale = zoom.scale.map(inset::scale_text).unwrap_or_default();
                 let button = egui::Button::new(fl!("zoom-out"))
                     .shortcut_text(scale)
@@ -336,8 +332,8 @@ fn preview(
             }
         });
         if hint_fits {
-            // where the result's segment ends at its widest, so that its
-            // mark doesn't move it
+            // Anchor the hint after the widest Result segment so the outdated
+            // indicator does not shift it.
             let row = ui.min_rect().y_range();
             let at = pos2(bar_left + hint_at, row.min);
             let place = Rect::from_min_size(at, vec2(room - hint_at - right, row.span()));
@@ -361,12 +357,14 @@ fn preview(
     let row_room = if row_height > 0.0 { row_height + AROUND_ROW } else { 0.0 };
     let size = ui.available_size() - vec2(0.0, row_room + AROUND_ROW - UNDER_PANEL);
     let (rect, _) = ui.allocate_exact_size(size, egui::Sense::hover());
-    // after a stall, playing goes on where it was rather than jumping ahead
+    // Cap frame delta at 0.1 s so playback resumes smoothly after a stall
+    // instead of jumping ahead.
     let dt = ui.input(|input| f64::from(input.stable_dt.min(0.1)));
     let range = item.range();
     let input_size = item.input_size();
-    // "Couldn't read it" says which file: once is enough, as when ffprobe
-    // fails on one of the inputs
+    // Strip any duplicate "Couldn't read <file>: " prefix (as when ffprobe
+    // fails on one of the inputs) so the filename is not repeated inside the
+    // preview error banner.
     let error = item.input_error().map(|message| {
         let said = item.inputs.iter().filter_map(|path| path.file_name()).find_map(|name| {
             let name = name.to_string_lossy();
@@ -374,7 +372,8 @@ fn preview(
         });
         said.unwrap_or(message).to_owned()
     });
-    // fields rather than methods, so the view and crop can change
+    // Borrow fields directly so `item.view` and `item.choices.crop` remain
+    // mutably accessible below.
     let (overview, part, still) = match item.format {
         Format::Webm | Format::Webp => (
             item.video.ready().map(|video| &video.overview),
@@ -392,21 +391,23 @@ fn preview(
 
     match shown {
         Show::Input => {
-            // for want of ffmpeg, which is said otherwise, nothing is wrong
-            // with the file
+            // When ffmpeg is missing, show a neutral notice rather than a
+            // file error.
             if error.is_some() && item.blockers.contains(&crate::item::Blocker::NeedsFfmpeg) {
                 message_in(ui, rect, &fl!("needs-ffmpeg"), ui.visuals().weak_text_color());
             } else if let Some(message) = error {
                 message_in(ui, rect, &fl!("unreadable", error = message), theme::bad(ui.visuals()));
             } else if let (Some(clip), Some(size)) = (overview, input_size) {
-                // a picture is one frame: shown still, where it is picked
+                // Static WebP output picks a single frame: pause playback at
+                // the chosen timestamp.
                 let picking = item.format == Format::Webp;
                 if picking {
                     item.view.playing = false;
                     let frame = item.choices.frame.unwrap_or(0.0);
                     item.view.time = length.map_or(0.0, |length| frame.clamp(0.0, length));
                 }
-                // play within the used part, as fast as the result will
+                // Loop playback within the trimmed range at the effective
+                // output tempo.
                 if let Some((start, end)) = range.filter(|_| !picking) {
                     if item.view.playing {
                         item.view.time += dt * tempo;
@@ -417,22 +418,22 @@ fn preview(
                     }
                 }
                 let time = item.view.time;
-                // its last frame starts at its end, and shows a little past it
+                // Keep using `part` slightly past `part.end()` so its final
+                // frame remains visible.
                 let part = part.filter(|part| part.start() <= time && time < part.end() + 0.05);
-                // paused: the sharp frame, once it is there
-                // and still images, which don't play, always
+                // Use the full-resolution `still` frame when paused at `time`
+                // (or for still images).
                 let still =
                     still.filter(|(at, _)| range.is_none() || (!item.view.playing && *at == time));
                 let clip = still.map(|(_, still)| still).or(part).unwrap_or(clip);
                 let frame = clip.index_at(time);
                 let picture = Picture { clip, frame, size, square: false };
-                // the result's small picture beside the input, not over it,
-                // with room for its longest label, eased into place when it
-                // is turned on or off, resized or moved
+                // Reserve space for the result inset beside the input (sized for its
+                // widest label) and ease between layouts when toggled, resized, or moved.
                 let widest = inset::widest_label(item.format != Format::Tgs);
                 let text = ui.visuals().text_color();
                 let label = ui.painter().layout_no_wrap(widest, inset::INSET_LABEL, text);
-                // the setting counts sizes from 1, for people
+                // User-facing size steps are 1-based.
                 let largest = inset::INSET_SIZES.len() as u8;
                 let step = usize::from(look.size.clamp(1, largest)) - 1;
                 let corner = look.corner;
@@ -444,7 +445,7 @@ fn preview(
                     corner,
                 );
                 let on = item.view.inset;
-                // turned off, it shrinks into its corner
+                // When turned off, collapse the inset into its chosen corner.
                 let layout = if on {
                     (beside, room)
                 } else {
@@ -457,7 +458,8 @@ fn preview(
                 ui.painter().rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
                 let ratio = file_settings::ratio(item.view.aspect, size);
                 let exact = file_settings::exact_of(webm).filter(|_| item.format != Format::Tgs);
-                // a `.tgs` square cut from the middle of what it shows
+                // For `.tgs` with Crop resize, shade the region outside the
+                // central square of the content bounds.
                 let kept = match item.format {
                     Format::Tgs if tgs.resize == Some(Resize::Crop) => {
                         let where_ =
@@ -472,13 +474,12 @@ fn preview(
                 };
                 let cropping = Cropping { crop: &mut item.choices.crop, ratio, kept, exact };
                 let zoom = &mut item.view.input_zoom;
-                // each file's own, so that a drag begun on one file's picture
-                // goes no further once another is shown, as when the file is
-                // removed or one is put back while the button is held
+                // Scope by item ID so a drag started on one item's canvas stops
+                // if another item replaces it mid-drag (e.g. via Remove/Undo).
                 ui.push_id(item.id, |ui| {
                     canvas::show(ui, screen, (rect, input_area), &picture, zoom, Some(cropping));
                 });
-                // after the crop moved
+                // Render the result inset after any crop drag update.
                 let showing = on || inset.leaving();
                 let mut change = None;
                 let place = ((rect, room, align), (corner, step, on));
@@ -489,8 +490,8 @@ fn preview(
                         Format::Webm | Format::Webp => {
                             let used = crop.map_or(size, |crop| (crop.width, crop.height));
                             let full = Crop::whole(size);
-                            // a crop that doesn't suit the integer scale yet is made to
-                            // fit on the next frame
+                            // If the crop does not yet satisfy the integer
+                            // scale, it will be adjusted next frame.
                             if let Some(mut sizes) =
                                 file_settings::webm_sizes(item.format, webm, crop.unwrap_or(full))
                             {
@@ -539,7 +540,7 @@ fn preview(
                     None => {}
                 }
             } else {
-                // drawn again once read, as reading asks
+                // Background loader requests a repaint when ready.
                 message_in(ui, rect, &fl!("reading"), ui.visuals().weak_text_color());
             }
         }
@@ -568,8 +569,8 @@ fn preview(
     }
 }
 
-/// How high the row under the stage is for `item` showing `shown`, in a
-/// preview `width` wide: none where there is nothing to play.
+/// Returns the height of the timeline/player row beneath the stage for `item`
+/// in view `shown` at `width`, or `0.0` for static images without a timeline.
 fn row_height(ui: &egui::Ui, item: &Item, shown: Show, width: f32) -> f32 {
     let result_length = item.result_clip.ready().filter(|clip| clip.is_animated());
     match shown {
@@ -582,8 +583,8 @@ fn row_height(ui: &egui::Ui, item: &Item, shown: Show, width: f32) -> f32 {
     }
 }
 
-/// Where the row under the `stage` goes: under it rather than after what
-/// was added last, which what is drawn over the stage would otherwise move.
+/// Computes the rectangle for the timeline row directly below `stage` (anchored
+/// to `stage` so overlays drawn on the stage cannot shift the cursor).
 fn row_place(ui: &egui::Ui, item: &Item, shown: Show, stage: Rect) -> Rect {
     let height = row_height(ui, item, shown, stage.width());
     Rect::from_min_size(
@@ -592,8 +593,8 @@ fn row_place(ui: &egui::Ui, item: &Item, shown: Show, stage: Rect) -> Rect {
     )
 }
 
-/// The row under the stage in `row`: the input's timeline, or its frame
-/// picker, or the result's player, as `shown` has it.
+/// Draws the row beneath the stage inside `row`: the input timeline, frame
+/// picker, or result player depending on `shown`.
 fn timeline_row(
     ui: &mut egui::Ui,
     row: Rect,
@@ -624,8 +625,7 @@ fn timeline_row(
                         used: &mut item.choices.length,
                         time: &mut item.view.time,
                         playing: &mut item.view.playing,
-                        // in the input's seconds, which the tempo makes 3 of the
-                        // result's
+                        // Convert Telegram's 3 s output limit into input seconds at `tempo`.
                         limit: telegram::MAX_SECONDS * tempo,
                         past: timeline::PastLimit::of(item.format, webm, tgs),
                         frames: frames.as_deref(),
@@ -641,14 +641,13 @@ fn timeline_row(
     });
 }
 
-/// Room on either side of what the mouse does, in the bar over the
-/// preview, so that it doesn't run into the buttons on either side.
+/// Horizontal padding on either side of the mouse interaction hint in the
+/// preview header bar.
 const HINT_ROOM: f32 = 12.0;
-/// Smaller than the bar's buttons, as it matters less.
+/// Font size for the mouse interaction hint (slightly smaller than bar buttons).
 const HINT_FONT: egui::FontId = egui::FontId::proportional(12.5);
 
-/// What the mouse does on the preview, as it shows the input, cropped or
-/// not, or the result.
+/// Returns the mouse interaction hint for the current view and crop state.
 fn mouse_hint(show: Show, cropped: bool) -> String {
     match (show, cropped) {
         (Show::Input, false) => fl!("input-hint"),
@@ -657,7 +656,7 @@ fn mouse_hint(show: Show, cropped: bool) -> String {
     }
 }
 
-/// Width of the longest of what the mouse does.
+/// Returns the pixel width of the longest mouse interaction hint.
 fn widest_mouse_hint(ui: &egui::Ui) -> f32 {
     let states = [(Show::Input, false), (Show::Input, true), (Show::Result, false)];
     let width = |(show, cropped)| {
@@ -668,26 +667,27 @@ fn widest_mouse_hint(ui: &egui::Ui) -> f32 {
     states.into_iter().map(width).fold(0.0, f32::max).ceil()
 }
 
-/// Least room between Zoom out's words and how far it is zoomed in, and
-/// the room at its ends, a little less than other buttons have, so that
-/// the bar's words fit whole in the narrowest window.
+/// Gap and horizontal padding inside the Zoom out button (slightly tighter
+/// than standard buttons so the header's words fit whole at
+/// [`crate::MIN_WIDTH`]).
 const ZOOM_GAP: f32 = 2.0;
 const ZOOM_PADDING: f32 = 6.0;
 
-/// Width of Zoom out, with how large the picture's pixels show on it: as
-/// wide as the widest it gets, so that nothing moves as it changes, the
-/// most digits of a share of their size, or of times it.
+/// Returns a fixed width for the Zoom out button large enough for its widest
+/// scale readout (either percentage or multiplier), preventing layout shifts
+/// as zoom changes.
 fn zoom_out_width(ui: &egui::Ui) -> f32 {
     let widest = [inset::scale_text(1.99), inset::scale_text(canvas::MOST_TIMES)];
     let widest = widest.map(|text| widgets::text_width(ui, &widgets::zeros(&text), 0.0));
-    // the gap on either side of the room between the two
+    // The gap sits on either side of the space between the two labels.
     let padding = 2.0 * (ZOOM_PADDING + ZOOM_GAP);
     let words = widgets::text_width(ui, &fl!("zoom-out"), padding);
     (words + widest[0].max(widest[1])).ceil()
 }
 
-/// What of `clip` a `.tgs` result shows, before it is made square: the
-/// `part` used, cut to what is visible unless it keeps the canvas.
+/// Returns the bounding box of `clip` used by a `.tgs` result before squaring:
+/// `part`, trimmed to visible pixels across the selected time range unless
+/// `keep_canvas` is enabled.
 fn tgs_bounds(
     inset: &mut Inset,
     clip: &Clip,
@@ -695,8 +695,8 @@ fn tgs_bounds(
     tgs: &tgs::Options,
 ) -> [usize; 4] {
     let keep = tgs.keep_canvas_or_default();
-    // only the frames the cut keeps, every one it overlaps, as normalising
-    // reads them
+    // Include every frame overlapping the trimmed [start, end) range, matching
+    // normalisation.
     let start = tgs.start.unwrap_or(0.0);
     let end = tgs.length.map_or(f64::INFINITY, |length| start + length);
     let spans = clip.times.windows(2).take(clip.frames.len());
@@ -707,11 +707,10 @@ fn tgs_bounds(
     inset.tgs_bounds(key, || predict::tgs_bounds(used, clip.width, part, keep))
 }
 
-/// What the label of an item's small picture of its result says under
-/// "Result": its size, which `.tgs` results, vectors, have none of in
-/// pixels. `None` while its size isn't known.
+/// Returns the dimension sub-label shown beneath "Result" in the result inset
+/// (`Some(None)` for resolution-independent `.tgs` vectors, or `None` when the
+/// crop is out of bounds or dimensions are not yet known).
 fn inset_label(item: &Item, size: (u32, u32), webm: &Options) -> Option<Option<String>> {
-    // nothing to show of a crop outside the picture
     if item.choices.crop.is_some_and(|crop| !crop.fits(size.0, size.1)) {
         return None;
     }
@@ -726,7 +725,7 @@ fn inset_label(item: &Item, size: (u32, u32), webm: &Options) -> Option<Option<S
     }
 }
 
-/// A key that changes when any of `parts` does.
+/// Hashes `parts` via `Debug` into a cache key for the result inset.
 fn inset_key(parts: impl std::fmt::Debug) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::hash::DefaultHasher::new();
@@ -737,7 +736,7 @@ fn inset_key(parts: impl std::fmt::Debug) -> u64 {
 fn message_in(ui: &egui::Ui, rect: egui::Rect, text: &str, colour: Color32) {
     let painter = ui.painter_at(rect);
     painter.rect_filled(rect, 0.0, theme::stage(ui.visuals().dark_mode));
-    // wrapped, as an error can run longer than the preview is wide
+    // Wrap long error messages to fit within the preview stage width.
     let mut job = egui::text::LayoutJob::simple(
         text.to_owned(),
         egui::FontId::proportional(15.0),

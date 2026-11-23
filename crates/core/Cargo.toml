@@ -1,6 +1,6 @@
 [package]
 name = "tgradish-core"
-description = "Library behind tgradish: Telegram video, static and pixel art sticker conversion, and WebM duration spoofing"
+description = "Core conversion library for tgradish: Telegram video, static and pixel-art stickers, plus WebM duration spoofing"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,18 +11,18 @@ readme = "README.md"
 keywords = ["telegram", "sticker", "emoji", "webm", "ffmpeg"]
 categories = ["multimedia::video", "multimedia::images", "multimedia::encoding"]
 
-# with the clipboard, but not the built-in ffmpeg, whose libraries docs.rs
-# doesn't have to link
+# Document the clipboard feature; docs.rs lacks the ffmpeg libraries `linked`
+# needs.
 [package.metadata.docs.rs]
 features = ["clipboard"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [features]
-# ffmpeg libraries linked into the binary, from the system or FFMPEG_DIR
+# Link ffmpeg libraries directly (from the system or FFMPEG_DIR).
 linked = ["dep:ffmpeg-next"]
-# link them statically, as release builds do
+# Link ffmpeg libraries statically, as release builds do.
 linked-static = ["linked", "ffmpeg-next/static"]
-# reading files and images from the clipboard
+# Read files and images from the system clipboard.
 clipboard = ["dep:arboard"]
 
 [dependencies]
@@ -37,7 +37,7 @@ ffmpeg-next = { workspace = true, optional = true }
 png.workspace = true
 schemars.workspace = true
 serde.workspace = true
-# options become flags in the order of their fields
+# Preserve struct field order when serialising options to CLI flags.
 serde_json = { workspace = true, features = ["preserve_order"] }
 shlex.workspace = true
 tempfile.workspace = true

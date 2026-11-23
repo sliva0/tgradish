@@ -1,47 +1,45 @@
-//! Animations assembled from several pictures: sprite sheets and image
-//! sequences.
+//! Animations assembled from sprite sheets and image sequences.
 
 use std::fmt;
 use std::time::Duration;
 
 use crate::frames::{Animation, Cancelled, DecodeOptions, Error, Frame, Limits, Result, decode};
 
-/// How a sprite sheet is laid out: equal cells, frames row by row. Built
-/// with [`Sheet::new`], then changed field by field, so that what is added
-/// later keeps its default.
+/// Sprite sheet layout: uniform grid cells read left-to-right, top-to-bottom.
+/// Construct with [`Sheet::new`] and override fields as needed so future
+/// fields retain their defaults.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Sheet {
-    /// Cells across.
+    /// Number of columns across.
     pub columns: u32,
-    /// Cells down.
+    /// Number of rows down.
     pub rows: u32,
-    /// How many cells hold frames. By default all of them, except fully
-    /// transparent cells at the end.
+    /// Number of cells containing frames (`None` uses all cells except
+    /// trailing fully transparent ones).
     pub frames: Option<u32>,
-    /// How long each frame shows; zero stands for
-    /// [`DEFAULT_FRAME_DURATION`](crate::frames::DEFAULT_FRAME_DURATION).
+    /// Duration of each frame (`Duration::ZERO` uses
+    /// [`DEFAULT_FRAME_DURATION`](crate::frames::DEFAULT_FRAME_DURATION)).
     pub frame_duration: Duration,
 }
 
 impl Sheet {
-    /// `columns` by `rows` cells, every one holding a frame but fully
-    /// transparent ones at the end, each shown for
+    /// Creates a `columns × rows` sprite sheet layout that drops trailing
+    /// transparent cells and displays each frame for
     /// [`DEFAULT_FRAME_DURATION`](crate::frames::DEFAULT_FRAME_DURATION).
     pub fn new(columns: u32, rows: u32) -> Sheet {
         Sheet { columns, rows, frames: None, frame_duration: Duration::ZERO }
     }
 }
 
-/// Splits a still image into the frames of a sprite sheet. Animated
-/// images are refused, as [`split_sheet`] refuses them.
+/// Decodes a still image from `bytes` and splits it into sprite sheet frames
+/// according to `sheet`. Rejects multi-frame animated inputs.
 pub fn sprite_sheet(bytes: &[u8], sheet: &Sheet, limits: &Limits) -> Result<Animation> {
     split_sheet(&decode(bytes, &DecodeOptions::default(), limits)?, sheet, limits)
 }
 
-/// Splits a decoded still `image` into the frames of a sprite sheet,
-/// counting them against `limits` beside the image. An animation of
-/// several frames is refused, as which of them holds the sheet isn't
-/// this function's to guess.
+/// Splits a decoded single-frame `image` into sprite sheet frames, counting
+/// extracted frame memory alongside `image` against `limits`. Multi-frame
+/// animations are rejected because the sheet frame would be ambiguous.
 pub fn split_sheet(image: &Animation, sheet: &Sheet, limits: &Limits) -> Result<Animation> {
     let [picture] = image.frames() else {
         return Err(Error::SheetAnimated { frames: image.frames().len() });
@@ -96,12 +94,12 @@ pub fn split_sheet(image: &Animation, sheet: &Sheet, limits: &Limits) -> Result<
     Animation::new(cell_width, cell_height, frames)
 }
 
-/// Joins images of one size into an animation. Still images are shown for
-/// `frame_duration`, zero standing for
-/// [`DEFAULT_FRAME_DURATION`](crate::frames::DEFAULT_FRAME_DURATION); animated ones
-/// keep their own frames and timing. Each image is decoded as it comes,
-/// so an iterator that reads them one at a time holds one file at once;
-/// [`Sequence`] does the same for callers that loop themselves.
+/// Combines same-sized images into an animation. Still images use
+/// `frame_duration` (`Duration::ZERO` uses
+/// [`DEFAULT_FRAME_DURATION`](crate::frames::DEFAULT_FRAME_DURATION));
+/// animated inputs keep their own frames and durations. Images are decoded as
+/// the iterator yields them so callers streaming from disk only hold one
+/// encoded file in memory at a time; use [`Sequence`] to push images manually.
 pub fn sequence(
     images: impl IntoIterator<Item = impl AsRef<[u8]>>,
     frame_duration: Duration,
@@ -114,14 +112,14 @@ pub fn sequence(
     sequence.finish()
 }
 
-/// An animation [`sequence`] joins, given its images one at a time, so
-/// each file's bytes can go once it is decoded:
+/// Incremental builder for [`sequence`], allowing each input buffer to be
+/// dropped right after decoding:
 ///
 /// ```
 /// use std::time::Duration;
 /// use tgradish_tgs::frames::{Limits, Sequence};
 ///
-/// // a GIF of one black pixel
+/// // A 1x1 black pixel GIF.
 /// let gif = b"GIF89a\x01\0\x01\0\x80\0\0\0\0\0\xff\xff\xff,\0\0\0\0\x01\0\x01\0\0\x02\x02D\x01\0;";
 /// let mut sequence = Sequence::new(Duration::from_millis(50), &Limits::default());
 /// for _ in 0..3 {
@@ -134,12 +132,12 @@ pub struct Sequence<'a> {
     frame_duration: Duration,
     limits: Limits,
     cancelled: Option<Cancelled<'a>>,
-    /// The first image's size, once there is one.
+    /// Dimensions of the first image, once pushed.
     size: Option<(u32, u32)>,
     frames: Vec<Frame>,
-    /// Bytes of the frames so far.
+    /// Total RGBA bytes of frames accumulated so far.
     held: usize,
-    /// Images pushed so far.
+    /// Number of images pushed so far.
     images: usize,
 }
 
@@ -156,8 +154,8 @@ impl fmt::Debug for Sequence<'_> {
 }
 
 impl<'a> Sequence<'a> {
-    /// An empty sequence, whose still images show for `frame_duration`, as
-    /// [`sequence`]'s do, and which holds no more than `limits` allow.
+    /// Creates an empty sequence builder with the given still-image
+    /// `frame_duration` and memory `limits`.
     pub fn new(frame_duration: Duration, limits: &Limits) -> Sequence<'a> {
         Sequence {
             frame_duration,
@@ -170,16 +168,16 @@ impl<'a> Sequence<'a> {
         }
     }
 
-    /// The sequence, asking `cancelled` before each image and each of its
-    /// frames, as [`DecodeOptions::cancelled`] is.
+    /// Sets a cancellation callback polled before each image and frame (like
+    /// [`DecodeOptions::cancelled`]).
     pub fn cancelled_by(self, cancelled: Cancelled<'a>) -> Sequence<'a> {
         Sequence { cancelled: Some(cancelled), ..self }
     }
 
-    /// Decodes the next image and adds its frames, in what the images
-    /// before left of the limits. An image that doesn't decode, or is of
-    /// another size than the first, is an error, the sequence staying as
-    /// it was; [`Error::SequenceSize`] counts images from 0.
+    /// Decodes `bytes` within the remaining memory budget and appends its
+    /// frames. If decoding fails or the dimensions differ from the first
+    /// image, returns an error (with 0-based index in [`Error::SequenceSize`])
+    /// and leaves `self` unchanged.
     pub fn push(&mut self, bytes: &[u8]) -> Result<()> {
         let index = self.images;
         let limits = &self.limits;
@@ -205,7 +203,8 @@ impl<'a> Sequence<'a> {
         Ok(())
     }
 
-    /// The animation of the images pushed, or [`Error::Empty`] for none.
+    /// Finishes and returns the combined [`Animation`], or [`Error::Empty`] if
+    /// no images were pushed.
     pub fn finish(self) -> Result<Animation> {
         let (width, height) = self.size.ok_or(Error::Empty)?;
         Animation::new(width, height, self.frames)

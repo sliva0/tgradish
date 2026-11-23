@@ -1,6 +1,5 @@
-//! Where a picture lands in a WebM or static sticker, as the options scale,
-//! crop and pad it, and telling pixel art, which auto scaling keeps sharp,
-//! from filmed pictures.
+//! Image framing (scaling, cropping and padding) for WebM and WebP outputs,
+//! plus pixel-art detection so `auto` scaling keeps pixel art crisp.
 
 use crate::CancelToken;
 use crate::backend::{Backend, FramesRequest};
@@ -11,8 +10,8 @@ use crate::telegram::{self, Target};
 use crate::webm::Options;
 use crate::webm::Plan;
 
-/// The nearest side to `value` that `format` takes: even for WebM, as
-/// [`Format::even_sides`] says why, and any but none for a picture.
+/// Rounds `value` to the nearest valid dimension for `format` (even and >= 2
+/// for WebM; >= 1 for WebP).
 fn side(format: Format, value: f64) -> u32 {
     match format.even_sides() {
         true => ((value / 2.0).round() as u32 * 2).max(2),
@@ -20,56 +19,52 @@ fn side(format: Format, value: f64) -> u32 {
     }
 }
 
-/// Where a picture `scaled` long starts along a side `out` long of a
-/// `format` result it is padded into, around the middle: exactly there,
-/// the half pixel before it where the margin is odd, or, where `format`
-/// has even sides, on the even pixel at or before that, as a WebM keeps a
-/// colour sample to each 2 × 2 pixels, which would blend the picture's
-/// edge with the margin. The conversion pads by it, and front-ends showing
-/// the result place the picture by it, so the two can't disagree.
+/// Computes the centring pad offset along an axis of length `out` for content
+/// of length `scaled`. When `format.even_sides()` is true, rounds down to an
+/// even pixel so WebM 4:2:0 chroma subsampling does not bleed the margin into
+/// the image edge. Shared by encoding and GUI previews.
 pub fn pad_offset(format: Format, out: u32, scaled: u32) -> u32 {
     let middle = out.saturating_sub(scaled) / 2;
     if format.even_sides() { middle / 2 * 2 } else { middle }
 }
 
-/// How a picture lands in the result.
+/// Resolved scaling and output dimensions for a WebM or WebP conversion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Sizes {
-    /// What the picture is scaled to.
+    /// Dimensions after scaling and before cropping or padding.
     pub scaled: (u32, u32),
-    /// The result's width, which the scaled picture is cropped or padded
-    /// to, around its middle.
+    /// Final output width in pixels, to which the scaled image is
+    /// centre-cropped or centre-padded.
     pub width: u32,
-    /// The result's height, as the width.
+    /// Final output height in pixels, as the width.
     pub height: u32,
-    /// The scaling used: [`Scaling::Auto`] is smooth until the picture
-    /// turns out to be pixel art, and integer scaling needs room to grow.
+    /// Effective scaling filter (`Auto` resolves to `Smooth` until pixel-art
+    /// detection runs; `Integer` falls back to `Sharp` when downscaling).
     pub scaling: Scaling,
 }
 
 impl Sizes {
-    /// A picture scaled to `scaled` with `scaling`, cropped or padded to a
-    /// `width` by `height` result: for front-ends that work out sizes of
-    /// their own, as for a smaller preview.
+    /// Constructs a [`Sizes`] value (useful for front-ends computing preview
+    /// geometry).
     pub fn new(scaled: (u32, u32), width: u32, height: u32, scaling: Scaling) -> Sizes {
         Sizes { scaled, width, height, scaling }
     }
 
-    /// Whether transparent margins fill part of the result.
+    /// Returns true if transparent padding will be added around the image.
     pub fn pads(&self) -> bool {
         self.scaled.0 < self.width || self.scaled.1 < self.height
     }
 
-    /// How many times larger the picture gets, at least, from `used`.
+    /// Minimum upscale factor along either axis relative to `used`.
     pub fn enlarges(&self, used: (u32, u32)) -> f64 {
         let along = |scaled: u32, used: u32| f64::from(scaled) / f64::from(used.max(1));
         along(self.scaled.0, used.0).min(along(self.scaled.1, used.1))
     }
 }
 
-/// Where a `used` picture (the crop, or all of the input) lands in a
-/// `format` result for `target`, as `resize` and `scaling` place it.
+/// Computes output dimensions for `used` source dimensions under `format`,
+/// `target`, `resize` and `scaling`.
 pub fn sizes(
     format: Format,
     target: Target,
@@ -112,10 +107,13 @@ pub fn sizes(
     Sizes { scaled, width, height, scaling }
 }
 
-/// Where a `used` picture lands at an exact `scale`, which must keep it
-/// within the box. Transparent margins fill the rest of what `target` and
-/// `resize` need: the box for emoji and padded stickers, otherwise 512 on
-/// the longer side, with even sides where `format` has them.
+/// Computes output dimensions for an explicit [`IntegerScale`], which must
+/// keep the image within the target box. Pads the remaining area with
+/// transparency to satisfy `target` and `resize` (the full target box for
+/// emoji or `Resize::Pad`, or 512 px on the longer side for `Resize::Contain`,
+/// with even sides for WebM ([`Format::even_sides`])), using
+/// [`Scaling::Integer`] when enlarging and [`Scaling::Sharp`] for `1` or
+/// `1/N`.
 pub fn exact_sizes(
     format: Format,
     target: Target,
@@ -126,27 +124,27 @@ pub fn exact_sizes(
     let (box_w, box_h) = target.box_size();
     let invalid = |reason: String| Error::invalid("integer-scale", reason);
     if !scale.is_valid() {
-        // written out, as none is written as nothing
+        // Format {up}/{down} directly because IntegerScale::NONE formats as "".
         let IntegerScale { up, down } = scale;
         return Err(invalid(format!("{up}/{down} has a side of 0: use N or 1/N")));
     }
     let (Some(width), Some(height)) = (scale.apply(used.0), scale.apply(used.1)) else {
         let down = scale.down;
         return Err(invalid(format!(
-            "{scale} needs the crop's sides in multiples of {down} pixels"
+            "{scale} requires crop dimensions to be multiples of {down} pixels"
         )));
     };
     if width > box_w || height > box_h {
         let most = scale.most_input(box_w.max(box_h));
         return Err(invalid(match most {
-            0 => format!("{scale} makes a pixel larger than a whole {}", target.name()),
-            most => format!("{scale} takes a crop of at most {most} pixels on its longer side"),
+            0 => format!("{scale} makes a single pixel larger than the target {}", target.name()),
+            most => format!("{scale} requires a crop of at most {most} pixels on the longer side"),
         }));
     }
     let even = |side: u32| if format.even_sides() { side.next_multiple_of(2) } else { side };
     let result = match resize {
         Resize::Crop | Resize::Stretch => {
-            let reason = "keeps the picture whole with an integer scale: use contain or pad";
+            let reason = "cannot be used with integer-scale; use contain or pad";
             let name = if resize == Resize::Crop { "crop" } else { "stretch" };
             return Err(Error::invalid("resize", format!("{name} {reason}")));
         }
@@ -160,17 +158,17 @@ pub fn exact_sizes(
     Ok(Sizes { scaled: (width, height), width: result.0, height: result.1, scaling })
 }
 
-/// Whether `frames` of a `width` wide picture look like pixel art within
-/// `crop`, as auto scaling decides it: few colours, so it is drawn rather
-/// than filmed.
+/// Returns true if `frames` (with width `width`) look like pixel art inside
+/// `crop`, defined as having at most [`PIXEL_ART_COLOURS`] distinct
+/// non-transparent colours.
 pub fn is_pixel_art(frames: &[Vec<u8>], width: u32, crop: Option<Crop>) -> bool {
     has_few_colours(frames, width, crop, PIXEL_ART_COLOURS)
 }
 
-/// Whether `frames` of a `width` wide picture have at most `most` colours
-/// within `crop`, not counting transparent pixels. What of the crop lies
-/// outside a frame holds no colours: front-ends ask this of frames made
-/// smaller than the input the crop was drawn on.
+/// Returns true if `frames` have at most `most` distinct non-transparent
+/// colours inside `crop`. Any part of `crop` outside the frame bounds is
+/// ignored because front-ends call this on preview frames downscaled from the
+/// full input on which `crop` was drawn.
 pub fn has_few_colours(frames: &[Vec<u8>], width: u32, crop: Option<Crop>, most: usize) -> bool {
     let mut colours = std::collections::HashSet::new();
     let width = width as usize;
@@ -198,18 +196,17 @@ pub fn has_few_colours(frames: &[Vec<u8>], width: u32, crop: Option<Crop>, most:
     true
 }
 
-/// More colours than this is a photo or a video, not pixel art.
+/// Maximum distinct non-transparent colours considered pixel art.
 pub const PIXEL_ART_COLOURS: usize = 256;
 
-/// How a result fills its box when not told: emoji must be exactly
-/// their size, so are padded; stickers keep the picture's shape.
+/// Default resize mode for `target`: [`Resize::Pad`] for emoji (which must be
+/// exactly 100x100) and [`Resize::Contain`] for stickers.
 pub fn default_resize(target: Target) -> Resize {
     if target.requires_exact_size() { Resize::Pad } else { Resize::Contain }
 }
 
-/// The sizes a WebM or static (`format`) result of a `used` part of the
-/// input has, as `options` ask. Planning a conversion uses this, and so
-/// can front-ends showing what it will make, so the two can't disagree.
+/// Computes WebM or WebP output sizes for `used` dimensions and `options`.
+/// Shared between conversion planning and GUI previews.
 pub fn picture_sizes(format: Format, options: &Options, used: (u32, u32)) -> Result<Sizes> {
     let target = options.target.unwrap_or_default();
     let resize = options.resize.unwrap_or(default_resize(target));
@@ -219,14 +216,14 @@ pub fn picture_sizes(format: Format, options: &Options, used: (u32, u32)) -> Res
     }
 }
 
-/// Auto scaling keeps pixels sharp for pixel art made at least this many
-/// times as large. Less, and blocks of one and two pixels would alternate,
-/// which shows more than blending them does.
+/// Minimum upscale factor at which `auto` scaling switches to sharp scaling for
+/// pixel art. Below 2x, nearest-neighbour produces uneven 1-pixel and 2-pixel
+/// blocks that look worse than smooth scaling.
 pub const AUTO_SHARP_FROM: f64 = 2.0;
 
-/// What auto scaling, as `options` leave it, makes of the input: sharp
-/// pixels for pixel art made at least [`AUTO_SHARP_FROM`] times as large,
-/// smooth as [`plan`] has it otherwise.
+/// Updates `plan.scaling` to [`Scaling::Sharp`] when `options` use automatic
+/// scaling, the image is upscaled by at least [`AUTO_SHARP_FROM`], and sampled
+/// frames look like pixel art.
 pub(crate) fn choose_auto_scaling(
     backend: &Backend,
     plan: &mut Plan,
@@ -243,10 +240,9 @@ pub(crate) fn choose_auto_scaling(
     looked.map(|_| ())
 }
 
-/// Whether auto scaling, as `options` leave it, gives a picture made
-/// `enlarges` times as large sharp pixels: when it is that much larger
-/// and `looks_like_art`, which is asked only then, as it reads frames.
-/// Front-ends showing what a conversion makes ask this too.
+/// Returns true if `auto` scaling should switch to sharp scaling for an image
+/// upscaled by `enlarges`. Only invokes `looks_like_art` when needed. Shared
+/// with GUI previews.
 pub fn turns_sharp(
     options: &Options,
     enlarges: f64,
@@ -255,13 +251,12 @@ pub fn turns_sharp(
     options.auto_scaling() && enlarges >= AUTO_SHARP_FROM && looks_like_art()
 }
 
-/// How many frames auto scaling looks at to tell pixel art from filmed
-/// pictures, from where the used part starts: enough to see more than a
-/// title card, few enough to read quickly.
+/// Number of frames sampled for pixel-art detection: enough to look past a
+/// title card while staying fast to decode.
 pub const PIXEL_ART_SAMPLES: usize = 3;
 
-/// A few frames of the planned part at full size, to tell pixel art from
-/// filmed pictures.
+/// Decodes up to [`PIXEL_ART_SAMPLES`] full-resolution frames and checks
+/// whether they look like pixel art.
 fn looks_like_pixel_art(backend: &Backend, plan: &Plan, cancel: &CancelToken) -> Result<bool> {
     let request = FramesRequest {
         start: plan.start,

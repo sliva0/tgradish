@@ -1,34 +1,33 @@
-//! Places a [`Scene`] on the 512x512 canvas and turns it into Lottie: the
-//! art is scaled to fill the canvas along its longer side and centred, or
-//! stretched to fill all of it.
+//! Places a [`Scene`] on the 512×512 canvas and builds a Lottie [`Animation`].
+//! Non-square art is scaled to fit its longer side and centred, or stretched
+//! to fill the canvas.
 //!
-//! Lottie coordinates are in art pixels (the grid's scale), measured from
-//! half an art pixel before where the art pixel grid starts. Rectangles
-//! are written by their centre, and most are an odd number of art pixels
-//! wide or high (often one), so their centres come out whole: shorter
-//! numbers. Inner edges are at halves even when the canvas cut art pixels.
+//! Lottie coordinates are measured in art pixels (the grid scale), shifted by
+//! half an art pixel before the grid origin. Rectangles are written by centre
+//! and most have odd width or height (often 1), so their centres become whole
+//! numbers and take fewer JSON bytes. Interior edges stay on half-integers
+//! even when outer art pixels were clipped.
 
 use crate::limits::telegram::CANVAS;
 use crate::lottie::{Animation, Item, Layer, Transform};
 use crate::normalise::{Grid, PixelAnim};
 use crate::scene::{Group, Layer as SceneLayer, Scene, Shape};
 
-/// How far Lottie coordinates start before the art pixel grid, in art
-/// pixels.
+/// Coordinate shift before the pixel grid origin, in art pixels.
 const SHIFT: f64 = 0.5;
 
-/// Where the cells of a [`PixelAnim`] land.
+/// Cell-to-canvas placement for a [`PixelAnim`].
 #[derive(Debug, Clone, PartialEq)]
 pub struct Placement {
     columns: Vec<f64>,
     rows: Vec<f64>,
-    /// Layer coordinates to canvas pixels.
+    /// Transform from layer coordinates to canvas pixels.
     pub transform: Transform,
 }
 
 impl Placement {
-    /// Where the cells of `grid` land: art that isn't square fills the
-    /// canvas along its longer side, or `stretch`ed, all of it.
+    /// Computes placement for `grid`. Non-square art fits along its longer
+    /// side unless `stretch` is true, in which case it fills the whole canvas.
     pub fn new(grid: &Grid, stretch: bool) -> Placement {
         let width = f64::from(*grid.columns.last().unwrap());
         let height = f64::from(*grid.rows.last().unwrap());
@@ -37,7 +36,7 @@ impl Placement {
         let coordinates = |edges: &[u32], origin: u32| {
             edges.iter().map(|&edge| (f64::from(edge) - f64::from(origin)) / unit - SHIFT).collect()
         };
-        // canvas pixels per input pixel, across and down
+        // Canvas pixels per input pixel along x and y.
         let canvas = f64::from(CANVAS);
         let (across, down) = match stretch {
             true => (canvas / width, canvas / height),
@@ -56,12 +55,12 @@ impl Placement {
         }
     }
 
-    /// Layer coordinates of a cell corner.
+    /// Returns the layer coordinates of a cell corner.
     pub fn point(&self, column: u32, row: u32) -> [f64; 2] {
         [self.columns[column as usize], self.rows[row as usize]]
     }
 
-    /// Canvas pixels of a cell corner.
+    /// Returns the canvas pixel coordinates of a cell corner.
     #[cfg(any(test, feature = "internals"))]
     pub fn canvas(&self, column: u32, row: u32) -> [f64; 2] {
         let [x, y] = self.point(column, row);
@@ -70,8 +69,8 @@ impl Placement {
     }
 }
 
-/// The Lottie for a scene of `anim`'s cells, `stretch`ed to fill the
-/// canvas or not.
+/// Converts `scene` into a Lottie [`Animation`] using `anim`'s grid and
+/// palette, optionally stretching it to fill the square canvas.
 pub fn lay_out(scene: &Scene, anim: &PixelAnim, name: Option<String>, stretch: bool) -> Animation {
     let placement = Placement::new(anim.grid(), stretch);
     let layers = scene
@@ -119,8 +118,8 @@ pub fn lay_out(scene: &Scene, anim: &PixelAnim, name: Option<String>, stretch: b
     Animation { name, ticks: scene.ticks, layers }
 }
 
-/// Hold keyframes on a group's opacity that show it only over its spans
-/// of frames, within its layer's.
+/// Builds hold keyframes on a group's opacity so it shows only during its
+/// visible spans within `layer`.
 fn opacity(layer: &SceneLayer, group: &Group) -> Vec<(u32, u8)> {
     let Some(&(first, _)) = group.shown.first() else { return Vec::new() };
     let mut keys = Vec::new();
@@ -136,9 +135,9 @@ fn opacity(layer: &SceneLayer, group: &Group) -> Vec<(u32, u8)> {
     keys
 }
 
-/// What [`lay_out`] makes of `scene` comes to on Telegram's server
-/// ([`telegram::cost`](crate::limits::telegram::cost)): each group adds
-/// itself, its fill and its transform to its shapes.
+/// Computes Telegram's server complexity ([`crate::limits::telegram::cost`])
+/// for what [`lay_out`] generates from `scene`. Each group adds 3 shape items
+/// (itself, its fill, and its transform).
 pub fn cost(scene: &Scene) -> usize {
     let groups = scene.layers.iter().flat_map(|layer| &layer.groups);
     let shapes = groups.map(|group| group.shapes.len() + 3).sum();

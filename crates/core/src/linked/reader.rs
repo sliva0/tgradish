@@ -1,6 +1,6 @@
-//! Decoding the input the way the ffmpeg command line does: first video
-//! stream, timestamps counted from the file's start, seek to the start and
-//! drop frames before it, stop after the read window, repeat still images.
+//! Input decoding matching the external `ffmpeg` CLI: selects the first video
+//! stream, counts timestamps from the file start, seeks and trims to the read
+//! window, and loops still images at 25 fps.
 
 use std::ffi::CStr;
 use std::path::Path;
@@ -77,10 +77,9 @@ pub(super) struct Reader {
     done: bool,
 }
 
-/// Opens the file `name` and reads what streams it has, with `interrupt`
-/// asked whether to give up on reads that take long. ffmpeg-next's
-/// `input_with_interrupt` does the same, but takes the name as text and
-/// panics on one that isn't Unicode.
+/// Opens `name` and probes its streams with an interrupt callback. Mirrors
+/// `ffmpeg_next::format::input_with_interrupt`, but accepts non-UTF-8 paths on
+/// Unix without panicking.
 fn open_input(
     name: &CStr,
     interrupt: impl FnMut() -> bool + Send + 'static,
@@ -133,7 +132,7 @@ impl Reader {
         if !std::fs::metadata(path).is_ok_and(|m| m.is_file()) {
             return Err(Error::Unreadable {
                 path: path.to_path_buf(),
-                message: "not a regular file; the built-in ffmpeg only reads files".into(),
+                message: "not a regular file (built-in ffmpeg only reads regular files)".into(),
             });
         }
         // lets ffmpeg give up on reads that take long, like on network drives

@@ -1,11 +1,11 @@
-# Text is checked out with LF everywhere, Windows too: the licence notices
-# are built into the binaries and compared with what xtask generates, and
-# a test or build that reads a checked-out file should see the same bytes
-# on every platform. rc.exe and the manifest read LF as well.
+# Check out text files with LF line endings on all platforms (including
+# Windows): licence notices are embedded into binaries and compared against
+# xtask output, and tests/builds expect identical bytes everywhere. Both
+# rc.exe and the Windows manifest parser accept LF.
 * text=auto eol=lf
 
-# cargo-about copies crates' licence files as they are, and a few end their
-# lines in CRLF; `cargo xtask licenses --check` compares them byte for byte
+# cargo-about copies upstream crate licence files verbatim (some with CRLF
+# endings), and `cargo xtask licenses --check` compares this file byte-for-byte.
 crates/core/licenses/THIRD-PARTY-CRATES.txt -text
 
 *.png binary

@@ -1,9 +1,8 @@
-//! Whether the GUI moves: eases scrolling, and fades and moves what
-//! changes, or shows each change at once. The setting says, unless the
-//! system asks for less motion: on Linux the desktop portal, as GNOME's
-//! "Animations" and other desktops' say it, or in a Plasma session KDE's
-//! animation speed set to instant; on Windows "Show animations in Windows".
-//! What moves asks [`motion`], the one place this is decided.
+//! UI animation and reduced-motion detection. Smooth scrolling and transitions
+//! follow `config.gui.motion` unless the OS requests reduced motion (via the
+//! XDG desktop portal or GNOME's `enable-animations` on Linux, KDE Plasma's
+//! `AnimationDurationFactor=0`, or Windows's `SPI_GETCLIENTAREAANIMATION`).
+//! Everything that moves asks [`motion`], the one place this is decided.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};

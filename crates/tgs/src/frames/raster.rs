@@ -1,6 +1,6 @@
-//! GIF, PNG/APNG, WebP, JPEG and BMP through the `image` crate, which
-//! composites frames (disposal, blending, sub-rectangles) into full-size
-//! RGBA.
+//! Decodes GIF, PNG/APNG, WebP, JPEG and BMP via the `image` crate, which
+//! composites animation frames (disposal, blending, sub-rectangles) into
+//! full-size RGBA buffers.
 
 use std::io::Cursor;
 use std::time::Duration;
@@ -18,8 +18,8 @@ use crate::frames::{
     check,
 };
 
-/// The `image` crate's errors as ours: a codec stopped by its limits says
-/// the input is too large, anything else that it doesn't decode.
+/// Maps `image` crate errors into [`Error`]: limit violations become
+/// [`Error::TooLarge`], and other failures become [`Error::Decode`].
 fn image_error(format: Format, limits: &Limits) -> impl Fn(ImageError) -> Error + Copy {
     let limits = *limits;
     move |err| match err {

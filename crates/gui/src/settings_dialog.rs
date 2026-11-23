@@ -1,7 +1,9 @@
-//! The Settings dialog, of the GUI's own settings: ffmpeg, how many
-//! threads converting uses, where results go, and what new files start
-//! with. Changes apply at once, and are kept in `config.toml` at once too:
-//! as typing or dragging pauses, and only what is typed that makes sense.
+//! Application Settings dialog: `ffmpeg` selection, worker thread limit, output
+//! directory, interface appearance, and defaults for new files.
+//!
+//! Changes apply immediately and are saved to `config.toml` automatically
+//! (debounced while typing or dragging, and written only when typed values are
+//! valid).
 
 use std::path::{Path, PathBuf};
 
@@ -19,7 +21,7 @@ use crate::media::Task;
 use crate::theme;
 use crate::widgets::{self, note, row, segments};
 
-/// Where something was drawn, nowhere until it is.
+/// Last rendered bounding rectangle (`Rect::NOTHING` until drawn).
 #[derive(Clone, Copy, Debug)]
 struct Drawn(egui::Rect);
 
@@ -32,69 +34,65 @@ impl Default for Drawn {
 #[derive(Default)]
 pub(crate) struct SettingsDialog {
     open: bool,
-    /// What checking ffmpeg found: whether it is ready, and what to say.
+    /// Result of the last `ffmpeg` check: `(is_ready, status_message)`.
     ffmpeg_status: Option<(bool, String)>,
-    /// Checking ffmpeg, which runs it, on a thread of its own: stopped if
-    /// the dialog is opened again or the GUI closes.
+    /// Background task running `ffmpeg` to check its version and encoders
+    /// (cancelled if the dialog is reopened or the GUI exits).
     checking: Option<Task<(bool, String)>>,
-    /// What writing the settings did last: where they went, or why they
-    /// didn't.
+    /// Result of the last `config.toml` write (`Ok(message)` or `Err(error)`).
     saved: Option<Result<String, String>>,
-    /// The settings as they were last written, or as the dialog opened.
+    /// Snapshot of `Config` as last written to disk (or when the dialog opened).
     written: Option<Config>,
-    /// The settings as the last frame left them, and when they last
-    /// changed: a change waits to be written while it is typed or dragged.
+    /// Snapshot of `Config` on the previous frame and the timestamp when it
+    /// last changed, used to debounce saves while typing or dragging.
     seen: Option<(Config, f64)>,
-    /// The paths typed in the fields of the ffmpeg program and of the
-    /// folder for results.
+    /// Current text in the `ffmpeg` path and output directory text fields.
     ffmpeg_typed: Typed,
     folder_typed: Typed,
-    /// Reset to defaults was clicked, which `App` takes up, as it may
-    /// be undone from its message.
+    /// Set when "Reset to defaults" is clicked; handled by `App` so the reset
+    /// can be undone from a banner action.
     pub(crate) reset: bool,
-    /// What the fields show while empty, found once the dialog opens: the
-    /// ffmpeg on PATH, and a folder results could go to.
+    /// Placeholder strings resolved on open: the detected `ffmpeg` on `PATH`
+    /// and an example output directory.
     placeholders: (String, String),
-    /// A file dialog asked for, which `App` opens.
+    /// Pending native file-picker request for `App` to open.
     pub(crate) pick: Option<crate::files::Pick>,
-    /// Results are to go in a folder not chosen yet: kept here, as the
-    /// settings never hold a folder without a name.
+    /// True when "In a folder" is selected but no directory path has been
+    /// entered yet (`Config` never stores an empty `output_dir`).
     folder_unchosen: bool,
-    /// A default preset picked for a format, which `App` takes up, as
-    /// the items that follow it may then fit another way.
+    /// Newly chosen default preset for a format; handled by `App` so items
+    /// inheriting the default can update their fitting ranges.
     pub(crate) default_preset: Option<(Format, String)>,
-    /// The settings file was written, which `App` takes up, as what
-    /// it said of the file is past.
+    /// Set when `config.toml` was saved, allowing `App` to clear any stale
+    /// config error banner.
     pub(crate) wrote: bool,
-    /// The accent colour of one's own as typed, `#rrggbb`, while it is.
+    /// Current `#rrggbb` string in the custom accent hex input.
     accent_typed: String,
-    /// The scale's button clicked this frame, where it is, or nowhere for
-    /// the one back to 100%.
+    /// Bounding box of the scale stepper button clicked this frame (or
+    /// `Rect::NOTHING` when the 100% reset button was clicked).
     stepped: Option<egui::Rect>,
-    /// Where the scale's button last clicked is on the screen, in pixels,
-    /// and how far it is from the dialog's corner, in points, with the
-    /// settings scrolled to their top: the dialog is kept so that the
-    /// button stays there as everything grows or shrinks around it, under
-    /// the pointer, rather than in the window's middle, and where it can't
-    /// move far enough within the window, its settings are scrolled.
+    /// Screen-pixel centre of the last clicked scale button and its point
+    /// offset from the dialog's top-left corner when unscrolled. While set,
+    /// the dialog is anchored (and scrolled if necessary) so the button stays
+    /// stationary under the cursor as UI scale changes.
     pinned: Option<(egui::Pos2, egui::Vec2)>,
-    /// When the scale's button was last clicked.
+    /// Timestamp of the last scale button click.
     stepped_at: f64,
-    /// Where the scale's row is, as last drawn, which the pointer keeps the
-    /// dialog pinned near.
+    /// Last rendered bounding rectangle of the scale setting row; moving the
+    /// pointer away from this row releases `pinned`.
     scale_row: Option<egui::Rect>,
-    /// Where the dialog's corner was as it went back to the window's middle
-    /// from where it was pinned, and when.
+    /// Starting top-left position and timestamp when easing the dialog back to
+    /// the window centre after releasing `pinned`.
     returning: Option<(egui::Pos2, f64)>,
-    /// Where the dialog was drawn last.
+    /// Bounding rectangle of the dialog on the previous frame.
     drawn: Drawn,
-    /// How the settings were scrolled as last drawn.
+    /// Scroll state of the settings area on the previous frame.
     scrolled: Scrolled,
 }
 
-/// How the dialog's settings were scrolled, in points: how far, how tall
-/// they all are, how much of them shows, and how far under the dialog's
-/// top that starts.
+/// Scroll metrics of the dialog's settings area in points: scroll offset,
+/// total content height, visible viewport height, and vertical offset from the
+/// dialog top.
 #[derive(Clone, Copy, Debug, Default)]
 struct Scrolled {
     offset: f32,
@@ -113,7 +111,7 @@ impl SettingsDialog {
         let folder = tgradish_core::paths::pictures_dir()
             .map(|dir| fl!("for-example", example = dir.join("Stickers").display().to_string()))
             .unwrap_or_default();
-        // `pinned` goes: the dialog opens in the window's middle again
+        // Reset `pinned` so the dialog opens centred in the window.
         *self = SettingsDialog {
             open: true,
             placeholders: (ffmpeg, folder),
@@ -125,27 +123,26 @@ impl SettingsDialog {
         self.open
     }
 
-    /// Forgets what is typed and not taken, and a folder to be chosen, as
-    /// the settings are put back to their defaults, or back from them.
+    /// Clears uncommitted path edits and `folder_unchosen` when resetting or
+    /// restoring settings.
     pub(crate) fn forget_typed(&mut self) {
         (self.ffmpeg_typed, self.folder_typed) = Default::default();
         self.folder_unchosen = false;
     }
 }
 
-/// A path typed in a field, and the setting it shows: what is typed is
-/// kept while it isn't a path the setting can take, and follows the
-/// setting once that changes otherwise, as by Choose….
+/// Buffers text typed into a path field alongside the last `setting` value it
+/// was synced from (preserving invalid intermediate text while syncing external
+/// changes such as "Choose…").
 #[derive(Default)]
 struct Typed {
     text: String,
     of: Option<Option<PathBuf>>,
 }
 
-/// A field of a path, for `setting`, which takes what is typed where
-/// `problem` finds nothing wrong with it: an empty field leaves it unset.
-/// Gives what is wrong with what is typed, which keeps the setting as it
-/// was, and whether the setting changed.
+/// Draws a path text field bound to `setting`. Updates `setting` whenever
+/// `problem` returns `None` (an empty field clears `setting` to `None`), and
+/// returns `(validation_error, setting_changed)`.
 fn path_field(
     ui: &mut egui::Ui,
     typed: &mut Typed,
@@ -171,15 +168,14 @@ fn path_field(
     (wrong, changed)
 }
 
-/// What is wrong with `path` as the ffmpeg program: it must be there,
-/// unless it is a name alone, which is looked for on PATH.
+/// Validates an `ffmpeg` path: must exist on disk unless it is a bare command
+/// name (which is resolved via `PATH`).
 fn ffmpeg_problem(path: &Path) -> Option<String> {
     let named = path.components().count() == 1 && !path.has_root();
     (!named && !path.exists()).then(|| fl!("ffmpeg-program", "missing"))
 }
 
-/// What is wrong with `path` as the folder for results: it must be whole,
-/// and not a file.
+/// Validates an output directory path: must be absolute and not an existing file.
 fn folder_problem(path: &Path) -> Option<String> {
     if !path.is_absolute() {
         Some(fl!("in-a-folder", "relative"))
@@ -190,9 +186,8 @@ fn folder_problem(path: &Path) -> Option<String> {
     }
 }
 
-/// What checking ffmpeg found, in `colour`, on as many lines as there is
-/// room for, two, and cut short only past them, as an error naming a long
-/// path may be, said in full on hover.
+/// Draws the `ffmpeg` check status in `colour`, wrapping up to two lines and
+/// showing a full-text tooltip if truncated.
 fn ffmpeg_status(ui: &mut egui::Ui, status: &str, colour: egui::Color32) {
     let font = egui::TextStyle::Body.resolve(ui.style());
     let mut job = egui::text::LayoutJob::single_section(
@@ -213,7 +208,7 @@ fn ffmpeg_status(ui: &mut egui::Ui, status: &str, colour: egui::Color32) {
     }
 }
 
-/// What is wrong with a field's content, said under it.
+/// Draws a field validation error below the control when `wrong` is `Some`.
 fn problem(ui: &mut egui::Ui, wrong: Option<String>) {
     if let Some(wrong) = wrong {
         let text = egui::RichText::new(wrong).color(theme::bad(ui.visuals())).size(12.5);
@@ -221,11 +216,12 @@ fn problem(ui: &mut egui::Ui, wrong: Option<String>) {
     }
 }
 
-/// How long a change waits to be written while it is typed or dragged.
+/// Debounce delay in seconds before writing `config.toml` while a text field
+/// has focus or a mouse button is held.
 const SETTLE: f64 = 0.6;
 
-/// Writes `config` to `config_path` as it changes, once typing or dragging
-/// pauses, or at once as the dialog `closing` does.
+/// Persists `config` to `config_path` when modified (debounced by [`SETTLE`]
+/// while typing or dragging, or written immediately when `closing`).
 fn keep(
     ctx: &egui::Context,
     dialog: &mut SettingsDialog,
@@ -253,14 +249,14 @@ fn keep(
         None => Err(fl!("no-home")),
     });
     dialog.wrote = matches!(dialog.saved, Some(Ok(_)));
-    // tried once, whether it worked or not, until it changes again
+    // Record the attempt so a failing save is not retried every frame until
+    // `config` changes again.
     dialog.written = Some(config.clone());
 }
 
-/// Saves `config` to `path`, or says why it couldn't. A file there that
-/// can't be read is kept beside it first, as what it held is lost
-/// otherwise: the settings shown are the defaults where it was unreadable
-/// as the GUI started.
+/// Saves `config` to `path` and returns a localised status or error string. If
+/// `path` already exists but cannot be parsed, backs it up beside `path` first
+/// so an unreadable config file from startup is not overwritten.
 fn save(config: &mut Config, path: &Path) -> Result<String, String> {
     let shown = path.display().to_string();
     match write(config, path) {
@@ -272,9 +268,8 @@ fn save(config: &mut Config, path: &Path) -> Result<String, String> {
     }
 }
 
-/// Writes `config` to `path`, a file there that can't be read kept beside
-/// it first, and nothing written where it can't be. Gives where that file
-/// went, or why nothing was written.
+/// Writes `config` to `path`, backing up any existing unparseable file at
+/// `path` first and returning the backup path if one was created.
 pub(crate) fn write(
     config: &mut Config,
     path: &Path,
@@ -287,59 +282,56 @@ pub(crate) fn write(
     Ok(kept)
 }
 
-/// How near the scale's row the pointer keeps the dialog where it is, as
-/// its buttons change the scale, and for how long after the last click.
+/// Pointer distance around the scale row (in points) and timeout (in seconds)
+/// for keeping the dialog pinned after clicking a scale button.
 const NEAR: f32 = 24.0;
 const HELD: f64 = 1.5;
-/// How long the dialog takes back to the window's middle.
+/// Duration in seconds of the ease-back animation to the window centre.
 const RETURNING: f64 = 0.15;
 
-/// How tall the settings may show, scrolling within the rest of the
-/// dialog, so that it fits the window.
+/// Maximum height of the scrollable settings area inside the dialog.
 fn settings_room(ctx: &egui::Context) -> f32 {
     (ctx.content_rect().height() - 210.0).max(200.0)
 }
 
-/// How far within the settings that show the scale's button is kept from
-/// their top and bottom, where the last of them fade out: all of it shows.
+/// Minimum margin from the top and bottom edges of the scroll viewport to keep
+/// the pinned scale button clear of the scroll fade region.
 const KEPT_IN: f32 = widgets::SCROLL_FADE + 16.0;
 
-/// Where the dialog goes, and how its settings show.
+/// Computed position and scroll state for the Settings dialog.
 struct Placed {
-    /// Where its corner goes, or the window's middle.
+    /// Top-left dialog position (`None` to centre in the window).
     corner: Option<egui::Pos2>,
-    /// How far its settings are scrolled, where that changes.
+    /// Override scroll offset for the settings area when pinned near a window edge.
     scroll: Option<f32>,
-    /// How tall its settings show at the most.
+    /// Maximum height of the settings scroll viewport.
     room: f32,
 }
 
-/// Where the dialog's corner goes: where it keeps the scale's button
-/// clicked under the pointer, or on its way back to the window's middle
-/// from there, within the window either way; `None` in the middle. Where
-/// it can't move far enough to keep the button there, its settings are
-/// scrolled, and shown shorter, so that it ends at the window's edge.
+/// Computes the dialog placement for this frame: anchored to keep a clicked
+/// scale button under the pointer (scrolling or shrinking the viewport if the
+/// dialog hits a window edge), easing back to the centre, or `None` when centred.
 fn placed(ctx: &egui::Context, dialog: &mut SettingsDialog) -> Placed {
     let window = ctx.content_rect();
     let room = settings_room(ctx);
     let scrolled = dialog.scrolled;
     let drawn = dialog.drawn.0.size().max(egui::Vec2::ZERO);
-    // how tall it is with `shown` of its settings showing at the most
+    // Total dialog height when the scroll viewport is at most `shown` points tall.
     let rest = (drawn.y - scrolled.shown).max(0.0);
     let height = |shown: f32| rest + shown.min(scrolled.content);
-    // all of it in the window, its corner at the least where it is larger
+    // Clamp the top-left corner so the dialog stays inside the window.
     let within = |corner: egui::Pos2, shown: f32| {
         let most = (window.max - egui::vec2(drawn.x, height(shown))).max(window.min);
         corner.clamp(window.min, most)
     };
     if let Some((at, offset)) = dialog.pinned {
         let at = at / ctx.pixels_per_point();
-        // where its top is with the settings scrolled `scroll`
+        // Dialog top Y when the settings area is scrolled by `scroll`.
         let top = |scroll: f32| at.y - offset.y + scroll;
-        // not over the window's top: scrolled further instead
+        // If the dialog top would extend above the window, scroll down instead.
         let mut scroll = scrolled.offset.max(window.top() - top(0.0)).max(0.0);
-        // nor past its bottom: scrolled back as far as that keeps it under
-        // the window's top, then its settings shown shorter
+        // If the dialog bottom would extend below the window, scroll back up as
+        // far as the top allows, then shrink the scroll viewport height.
         let fits = window.bottom() - height(room) - top(0.0);
         if scroll > fits {
             scroll = fits.max(window.top() - top(0.0)).max(0.0);
@@ -350,7 +342,7 @@ fn placed(ctx: &egui::Context, dialog: &mut SettingsDialog) -> Placed {
             let least = at.y + KEPT_IN - top(scroll) - scrolled.top;
             shown = (shown - over).max(least);
         }
-        // as far as the settings scroll, the button in what shows of them
+        // Clamp scroll to valid bounds while keeping the button visible inside `shown`.
         let most = (scrolled.content - shown).min(offset.y - scrolled.top - KEPT_IN);
         let scroll = scroll.min(most).max(0.0);
         let corner = within(egui::pos2(at.x - offset.x, top(scroll)), shown);
@@ -368,21 +360,21 @@ fn placed(ctx: &egui::Context, dialog: &mut SettingsDialog) -> Placed {
     Placed { corner: Some(corner), ..unplaced }
 }
 
-/// Whether the wheel turned this frame, as to scroll.
+/// Returns true if a mouse wheel event occurred this frame.
 fn wheeled(ctx: &egui::Context) -> bool {
     let wheel = |event: &egui::Event| matches!(event, egui::Event::MouseWheel { .. });
     ctx.input(|input| input.raw.events.iter().any(wheel))
 }
 
-/// Lets the dialog go back to the window's middle, from where it is drawn.
+/// Unpins the dialog and starts easing it back to the window centre.
 fn release(dialog: &mut SettingsDialog, now: f64) {
     if dialog.pinned.take().is_some() {
         dialog.returning = Some((dialog.drawn.0.min, now));
     }
 }
 
-/// Shows the dialog if it is open. `ffmpeg_given` says an ffmpeg was given
-/// as tgradish was started, which it uses over the settings'.
+/// Draws the Settings dialog if open. `ffmpeg_given` indicates that an
+/// `ffmpeg` override was passed on the command line for this session.
 pub(crate) fn show(
     ctx: &egui::Context,
     dialog: &mut SettingsDialog,
@@ -400,8 +392,7 @@ pub(crate) fn show(
     }
     let mut close = false;
     let now = ctx.input(|input| input.time);
-    // its settings scrolled by hand while it is kept: let go, rather than
-    // moved to keep the button where it was
+    // Manual wheel scrolling unpins the dialog instead of fighting the scroll offset.
     if dialog.pinned.is_some() && wheeled(ctx) {
         release(dialog, now);
     }
@@ -413,8 +404,7 @@ pub(crate) fn show(
     }
     let modal = modal.show(ctx, |ui| {
         close = widgets::dialog_title(ui, widgets::title_text(ui, fl!("settings")));
-        // the dialog fits the window, its settings scrolling within, and
-        // shown shorter where it is kept low in it
+        // Shown shorter while the dialog is pinned low.
         let mut area = egui::ScrollArea::vertical().max_height(room);
         if let Some(scroll) = scroll {
             area = area.vertical_scroll_offset(scroll);
@@ -427,11 +417,10 @@ pub(crate) fn show(
             offset: scrolled.state.offset.y,
             content: scrolled.content_size.y,
             shown: scrolled.inner_rect.height(),
-            // from the window's top until it is drawn
+            // Adjusted to be relative to `modal.response.rect.top()` below.
             top: scrolled.inner_rect.top(),
         };
-        // what writing them did, under the settings, where a path has
-        // the dialog's width
+        // Show the save status footer across the full width of the dialog.
         ui.add_space(4.0);
         match &dialog.saved {
             Some(Ok(saved)) => widgets::note(ui, saved),
@@ -442,7 +431,8 @@ pub(crate) fn show(
         }
         widgets::dialog_buttons(ui, |ui| {
             close |= ui.add(widgets::dialog_button(fl!("close"))).clicked();
-            // at the left, as it isn't the way out
+            // Put Reset to defaults at the left, apart from the buttons that
+            // close.
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 let reset = ui.add(widgets::dialog_button(fl!("reset-settings")));
                 if reset.on_hover_text(fl!("reset-settings", "hint")).clicked() {
@@ -455,8 +445,8 @@ pub(crate) fn show(
     dialog.scrolled.top -= modal.response.rect.top();
     match dialog.stepped.take() {
         Some(button) if button.is_positive() => {
-            // the button kept there already clicked again: kept there as
-            // it was, so that what egui rounds to pixels doesn't add up
+            // If the same pinned button was clicked again, keep its original
+            // pixel anchor so sub-pixel rounding errors do not accumulate.
             let ppp = ctx.pixels_per_point();
             let again = dialog.pinned.is_some_and(|(at, _)| button.contains(at / ppp));
             if !again {
@@ -467,15 +457,16 @@ pub(crate) fn show(
             dialog.stepped_at = now;
             dialog.returning = None;
         }
-        // back to 100%, from a button that stays where it is
+        // Clicking the 100% reset button unpins the dialog (it does not move
+        // as the scale changes).
         Some(_) => release(dialog, now),
         None => {}
     }
-    // held while the pointer is on the scale's row, for the next click,
-    // and back to the middle once it leaves, or a while after a click
+    // Keep the dialog pinned while the pointer remains near the scale row and
+    // within `HELD` seconds of the last click.
     if dialog.pinned.is_some() {
         let pointer = ctx.input(|input| input.pointer.hover_pos());
-        // without a pointer, as clicked by the keyboard, for a while
+        // Keep pinned until `HELD` expires when activated via keyboard (no pointer).
         let near = match (dialog.scale_row, pointer) {
             (Some(row), Some(at)) => row.expand(NEAR).contains(at),
             (_, None) => true,
@@ -507,8 +498,9 @@ fn sections(
         note(ui, fl!("ffmpeg-given"));
     }
     let builtin = Backend::select(FfmpegChoice::Builtin, None).is_ok();
-    // without one built in, Automatic is the system's: nothing to choose,
-    // unless the built-in one is chosen, as by another build's settings
+    // Hide the backend selector in builds without built-in ffmpeg (where Auto
+    // always uses the system binary), unless `Builtin` is currently selected
+    // in `config.toml` from another build.
     let choosing = builtin || config.ffmpeg.choice == FfmpegChoice::Builtin;
     if choosing {
         ffmpeg_use(ui, config, builtin);
@@ -535,17 +527,16 @@ fn sections(
                 .on_hover_text(fl!("check", "hint"))
                 .clicked();
             if clicked {
-                // the settings being edited, even where another ffmpeg
-                // was given for this run: Check sits beside them, and
-                // Save keeps them
+                // Check the configured `ffmpeg` setting even if a CLI override
+                // is active for this run.
                 let ffmpeg = config.ffmpeg.clone();
                 dialog.checking = Some(Task::spawn(ui.ctx(), move |cancel| {
                     Ok(check_ffmpeg(ffmpeg.choice, ffmpeg.path.as_deref(), cancel))
                 }));
                 dialog.ffmpeg_status = None;
             }
-            // in room for two lines, kept from the start, so the settings
-            // under it stay where they are as it is checked
+            // Reserve two lines of height so checking `ffmpeg` does not shift
+            // the controls below.
             let lines = 2.0 * ui.text_style_height(&egui::TextStyle::Body);
             let room = egui::vec2(ui.available_width(), lines.max(theme::CONTROL));
             let layout = egui::Layout::left_to_right(egui::Align::Center);
@@ -600,7 +591,8 @@ fn sections(
         if elsewhere {
             problem(ui, wrong);
         }
-        // its room kept, so that choosing a folder moves nothing under it
+        // Always reserve space for the unchosen-folder hint so toggling modes
+        // does not shift controls below.
         if elsewhere && gui.output_dir.is_none() {
             widgets::hint(ui, fl!("in-a-folder", "unchosen"));
         } else {
@@ -612,11 +604,11 @@ fn sections(
     });
 
     widgets::section(ui, &fl!("interface"));
-    // only once there is more than English to pick
+    // Show the language selector only when translations other than English exist.
     let languages = l10n::languages();
     if languages.len() > 1 {
         row(ui, &fl!("language"), &fl!("language", "hint"), Ok(()), |ui| {
-            // the system's, then each by its own name
+            // The system's, then each by its own name.
             let tags: Vec<Option<String>> = std::iter::once(None)
                 .chain(languages.iter().map(|(language, _)| Some(language.to_string())))
                 .collect();
@@ -669,7 +661,7 @@ fn sections(
         [(Format::Webm, fl!("preset-for-webm")), (Format::Tgs, fl!("preset-for-tgs"))]
     {
         let names = file_settings::preset_names(presets);
-        // what built-in presets do differs by format
+        // Use format-specific descriptions for built-in presets.
         let choices: Vec<widgets::Choice<&str>> = names
             .iter()
             .map(|(name, description)| {
@@ -695,8 +687,7 @@ fn sections(
     }
 }
 
-/// Which ffmpeg to use: the one built in, where `builtin` says there is
-/// one, or the system's, or either.
+/// Draws the ffmpeg backend selector (`Auto`, `Builtin`, `System`).
 fn ffmpeg_use(ui: &mut egui::Ui, config: &mut Config, builtin: bool) {
     row(ui, &fl!("ffmpeg-use"), &fl!("ffmpeg-use", "hint"), Ok(()), |ui| {
         let choices = [
@@ -711,8 +702,8 @@ fn ffmpeg_use(ui: &mut egui::Ui, config: &mut Config, builtin: bool) {
     });
 }
 
-/// How many threads converting uses: automatic, which stands for as many
-/// as the machine runs at once, or at most a number of one's own.
+/// Draws the worker thread limit control (`Auto` for hardware concurrency, or
+/// a custom limit).
 fn threads(ui: &mut egui::Ui, config: &mut Config) {
     use std::num::NonZeroU32;
     use tgradish_core::config::Threads;
@@ -729,34 +720,32 @@ fn threads(ui: &mut egui::Ui, config: &mut Config) {
     }
 }
 
-/// The most threads the field of [`threads`] goes to: far more than any
-/// machine it runs on makes use of.
+/// Upper bound for the custom thread count field (far more than any machine it
+/// runs on makes use of).
 const MOST_THREADS: u32 = 256;
 
-/// The scale, `scale`, smaller and larger by the steps egui's keys
-/// take, and back to 100%, which `App` applies at once, with those keys
-/// under it, as the other hints write keys. Gives the button that changed it,
-/// where one did: nowhere for the one back to 100%.
+/// Draws the UI scale stepper (− and + step by the steps egui's keys take;
+/// holding either repeats while staying under the pointer) and 100% reset
+/// button. Returns the bounding box of the clicked stepper button (or
+/// `Rect::NOTHING` when reset to 100% was clicked).
 fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
     use crate::keys::{Command, key_text, shortcut_of};
     let mut stepped = None;
-    // the setting changes, which `App` then applies, as it does a
-    // theme: kept once saved, like the rest of Settings; egui would only
-    // apply a scale asked of it on the next frame, which `App` would
-    // take for its keys', which it keeps at once
+    // Change the setting and let `App` apply it, as for the theme, so it is
+    // saved with the rest of Settings. Zooming egui directly would only take
+    // effect next frame, where `App` would mistake it for a keyboard zoom and
+    // save it at once.
     let mut changed = None;
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 3.0;
         let side = ui.spacing().interact_size.y;
-        // held, each steps on, kept under the pointer as all around it
-        // grows or shrinks, until the end of the scales
         let least = *scale <= *config::SCALES.start() + 1e-6;
         let (smaller, step) = widgets::stepper(ui, "−", !least, &fl!("scale-smaller"));
         if step {
             changed = Some(config::scale_step(*scale, -1));
             stepped = Some(smaller.rect);
         }
-        // as wide as the widest, so + stays put
+        // Fix the percentage label width to its widest value ("500%") so `+` never shifts.
         let percent = fl!("scale-percent", percent = (*scale * 100.0).round());
         let widest = fl!("scale-percent", percent = 500);
         let width = widgets::text_width(ui, &widgets::zeros(&widest), 4.0);
@@ -775,10 +764,7 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
     if let Some(changed) = changed {
         *scale = changed;
     }
-    // as the other hints write keys, Ctrl+V: so Ctrl++, rather
-    // than egui's Ctrl+Plus
-    // the first of each, as the dialog of shortcuts lists them, though
-    // Ctrl+= does it too
+    // Format primary shortcuts with `key_text` (e.g. `Ctrl++` rather than `Ctrl+Plus`).
     let keys = |command| key_text(&shortcut_of(command).keys[0]);
     widgets::hint(
         ui,
@@ -793,8 +779,8 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
     stepped
 }
 
-/// The accent colours to choose from: the system's, Plasma's, and one's
-/// own, which a colour picker under it sets, or `typed` as `#rrggbb`.
+/// Draws the accent colour selector: system accent, Plasma palette swatches,
+/// and a custom colour swatch with a popup HSV/hex picker.
 fn accents(ui: &mut egui::Ui, accent: &mut Accent, typed: &mut String) {
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
@@ -822,7 +808,7 @@ fn accents(ui: &mut egui::Ui, accent: &mut Accent, typed: &mut String) {
         let picker = egui::Popup::from_toggle_button_response(&swatch)
             .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
         picker.show(|ui| {
-            // from the accent shown, until one is picked
+            // Initialise from the currently active accent until a custom colour is picked.
             let mut colour = own.unwrap_or_else(|| theme::accent(ui.visuals()));
             if widgets::colour_picker(ui, &mut colour) {
                 *accent = Accent::Own(colour);
@@ -845,7 +831,7 @@ fn accents(ui: &mut egui::Ui, accent: &mut Accent, typed: &mut String) {
     });
 }
 
-/// The name of one of [`theme::ACCENTS`], in the GUI's language.
+/// Returns the localised display name for a built-in [`theme::ACCENTS`] entry.
 fn accent_name(name: &str) -> String {
     match name {
         "pink" => fl!("accent-pink"),
@@ -863,11 +849,9 @@ fn accent_name(name: &str) -> String {
 }
 
 impl App {
-    /// Makes `name` the default preset for `format`. The items without a
-    /// preset of their own follow it, and may then fit another way, as
-    /// when they pick another preset: their own range to search goes
-    /// where it counts in another unit. That is no step to undo of theirs,
-    /// but how they are from then on.
+    /// Sets `name` as the default preset for `format` without recording an item
+    /// undo step, clearing any per-item `fit_range` whose fitting unit no
+    /// longer matches the new default preset.
     pub(crate) fn set_default_preset(&mut self, format: Format, name: String) {
         self.settle_edits();
         let fit = |choices: &_, config: &_| file_settings::fit_of(choices, &self.presets, config);
@@ -885,8 +869,8 @@ impl App {
     }
 }
 
-/// Whether the ffmpeg chosen, or at `path`, can make stickers, and what to
-/// say of it. Runs it, so it may take a while.
+/// Probes the selected `ffmpeg` backend for version and `libvpx-vp9` support,
+/// returning `(is_ready, status_message)`. Runs it, so it may take a while.
 fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken) -> (bool, String) {
     let backend = match Backend::select(choice, path) {
         Ok(backend) => backend,
@@ -894,8 +878,9 @@ fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken)
     };
     match backend.capabilities(cancel) {
         Ok(caps) => {
-            // "ffmpeg version 8.0 Copyright (c) …", or "… (built in)", where
-            // builds from ffmpeg's git tags say "n8.0"
+            // Version strings look like "ffmpeg version 8.0 Copyright (c) …"
+            // or "… (built in)"; builds from git tags say "n8.0". Strip the
+            // prefix, the copyright and that leading 'n'.
             let version = caps.version.trim_start_matches("ffmpeg version ");
             let version = version.split(" Copyright").next().unwrap_or(version).trim();
             let version = match version.strip_prefix('n') {

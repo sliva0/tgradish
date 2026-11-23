@@ -1,21 +1,20 @@
 /target/
-# the maintainer's clones of the AUR packages, which `cargo xtask release
-# aur` updates
+# Maintainer AUR package clones updated by `cargo xtask release aur`.
 /.aur/
-# tgs-lab, a workspace of its own
+# Standalone tgs-lab workspace build artefacts.
 /crates/tgs-lab/target/
 
-# local test media
+# Local test media.
 /references/
 
-# conversion results accidentally left in the repo root
+# Conversion outputs accidentally written in the repo root.
 /*.mp4
 /*.webm
 /*.tgs
 /*.webp
 /*.gif
 
-# what makepkg and updpkgsums leave beside the AUR packages
+# Artefacts left by makepkg and updpkgsums in AUR package directories.
 /packaging/aur/*/src/
 /packaging/aur/*/pkg/
 /packaging/aur/*/*.tar.*

@@ -1,9 +1,10 @@
-//! The GUI's settings: core's `config.toml`, with the `[gui]` table core
-//! keeps for the GUI read here. They are read leniently, unlike the
-//! rest of the file: a key a newer tgradish wrote, or one renamed since, is
-//! left as it is, and a value that can't be read gives that setting its
-//! default rather than failing the file, which the command line reads too,
-//! and is left as it is until that setting is changed.
+//! GUI configuration loaded from `[gui]` in `config.toml`.
+//!
+//! Unlike core settings, `[gui]` keys are parsed leniently so the CLI and
+//! older/newer GUI versions can share the same config file: unknown keys (or
+//! renamed legacy keys) are preserved, and invalid values fall back to their
+//! defaults and remain untouched on disk until that specific setting is
+//! modified in the GUI.
 
 use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
@@ -15,13 +16,13 @@ use tgradish_core::telegram::Target;
 
 use crate::theme;
 
-/// Core's config, and the GUI's own settings from its `[gui]` table.
-/// It stands for core's where that is asked for, as presets are chosen by
-/// it.
+/// Wrapper around [`tgradish_core::config::Config`] with parsed [`GuiConfig`]
+/// fields from `[gui]`. Dereferences to the core config, which presets are
+/// chosen by.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct Config {
-    /// Core's, its `[gui]` holding only what the GUI doesn't know of:
-    /// keys, and values of its own keys it can't read.
+    /// Core config whose `gui` table retains only unknown keys and unparseable
+    /// values of known keys.
     core: tgradish_core::config::Config,
     pub(crate) gui: GuiConfig,
 }

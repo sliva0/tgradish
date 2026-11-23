@@ -1,5 +1,5 @@
-//! Fitting a sticker to the limit: reductions chosen by estimates of
-//! their size, and those estimates measured against the real encoder.
+//! Size-fitting loop: selects lossy reductions using fast size estimates
+//! calibrated once against the real encoder and zopfli.
 
 use crate::frames::Animation;
 
@@ -12,37 +12,34 @@ use crate::encode::{Effort, Settings};
 use crate::normalise::{self, PixelAnim, Report, normalise};
 use crate::reduce::{Kind, Reduction, distortion};
 
-// Fitting works on estimates, since the real encoder and zopfli can take
-// minutes: a quick encode at Fast effort packed by `gzip -9`, scaled to
-// what the real ones make of it. The scale is ZOPFLI_SHARE until the art
-// comes within CALIBRATE_WITHIN times the target, then measured once on
-// the art as it is. Each round keeps the reduction that saves the most bytes
-// for the least added error, and the last one is weakened while it still
-// fits. Should the real result miss all the same, the target drops by
-// RETARGET and fitting goes on, while it has reductions left. A result
-// over the limit even at ZOPFLI_BEST of its gzip size is packed by gzip.
+// Fitting evaluates candidates using Fast-effort encoding + `gzip -9` (because
+// running the real encoder and zopfli on every candidate could take minutes),
+// scaled to match real output. It uses ZOPFLI_SHARE until size comes within
+// CALIBRATE_WITHIN × target, then calibrates once with the real encoder and
+// zopfli. Each round picks the best bytes-saved-per-distortion reduction, and
+// binary-searches the final step to weaken it while still fitting. If the real
+// output still exceeds the limit, target scales down by RETARGET and fitting
+// continues while reductions remain. Outputs still above max_bytes even at
+// ZOPFLI_BEST × gzip size are left gzip-packed to avoid wasted zopfli time.
 
-/// What zopfli packs to, as a share of `gzip -9`, until it is measured on
-/// the art; most art packs a little smaller, so estimates lean high.
+/// Initial ratio of zopfli size to `gzip -9` size before calibration (most art
+/// compresses slightly smaller, so estimates lean conservative).
 pub(super) const ZOPFLI_SHARE: f64 = 0.93;
-/// A share of `gzip -9` zopfli is taken never to come under: a result over
-/// the limit by more is packed quickly rather than at length for nothing.
-/// Regular patterns come down to about 0.75, so this is far from the edge;
-/// whether a sticker fits is still decided on the file that is packed.
+/// Optimistic lower bound on zopfli/gzip ratio: if even this exceeds the limit,
+/// skip zopfli and return the gzip result. Regular patterns reach ~0.75, so
+/// 0.5 leaves a wide margin, and final fit is still checked on the packed file.
 pub(super) const ZOPFLI_BEST: f64 = 0.5;
-/// When the real size misses an estimate, the next target is this much
-/// lower.
+/// Multiplier applied to target size when the real compressed output misses
+/// the limit.
 pub(super) const RETARGET: f64 = 0.96;
-/// Estimates are measured against the real encoder once fitting comes
-/// within this many times the limit, on the art as it is by then: farther
-/// over it, fitting shrinks the art a lot anyway, and the real encoder's
-/// search of all of it can take minutes.
+/// Calibrate against the real encoder once estimated size drops within this
+/// multiple of the target (farther above the limit, fitting will shrink the
+/// art substantially anyway, and calibrating on the unreduced art could take
+/// minutes).
 const CALIBRATE_WITHIN: f64 = 2.0;
-/// How much of the size, on a log scale, a round of reductions takes off
-/// at first, about, which tells how many rounds fitting seems to take
-/// before one is done.
+/// Initial log-scale size reduction assumed per round for progress estimation.
 const TAKEN_A_ROUND: f64 = 0.2;
-/// How many times weakening the last reduction halves the strength.
+/// Binary-search steps when weakening the final reduction.
 const HALVINGS: usize = 5;
 
 /// What a quick encode of an animation comes to before it is scaled to

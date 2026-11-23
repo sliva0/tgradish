@@ -1,10 +1,9 @@
 # tgradish-corpus
 
-Synthetic test inputs for the crates of
-[tgradish](https://github.com/sliva0/tgradish): pixel art drawn in code,
-written in each format tgradish reads, and video clips made with ffmpeg,
-so every machine tests with the same inputs and none of them belongs to
-anyone else.
+Synthetic test media for [tgradish](https://github.com/sliva0/tgradish):
+pixel art generated in code in each format tgradish reads, plus video
+clips generated with ffmpeg. This keeps tests reproducible across
+machines without bundling third-party media.
 
-It isn't published: the other crates use it only in their tests, so
-their packages leave it out.
+This crate is not published: tgradish's crates use it only in tests (and
+tgs-lab as a tool), so their packages leave it out.

@@ -1,4 +1,5 @@
-//! Conversions, run on a worker thread, reporting what they do as they go.
+//! Background conversion jobs running on worker threads and streaming progress
+//! updates back to the GUI.
 
 use std::panic::AssertUnwindSafe;
 use std::path::{Path, PathBuf};

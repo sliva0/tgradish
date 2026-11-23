@@ -1,7 +1,5 @@
-//! What a sticker file is and holds, whichever of the three kinds it is,
-//! and what Telegram would say of it: what the command line's `inspect`
-//! prints and the GUI's Inspect shows. The command line inspects what
-//! stickers are made of too, as [`inspect_any`] reads it.
+//! Inspects sticker files and source media against Telegram's limits.
+//! Used by `tgradish inspect` and the GUI's Inspect view.
 
 use std::path::Path;
 
@@ -17,109 +15,108 @@ use crate::telegram::{self, Target};
 use crate::webm::container::{self, WebmInfo};
 use crate::{tgs, webp};
 
-/// What a sticker file holds, as `info`, and what Telegram would refuse
-/// of it, as `issues`, tagged by its `format`.
+/// Inspection result tagged by `format`, containing parsed metadata (`info`)
+/// and Telegram validation issues (`issues`).
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "format", rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum Inspected {
-    /// A WebP picture, judged as `target`.
+    /// Static or animated WebP file checked against `target`.
     Webp {
-        /// What it was judged as.
+        /// Target limits applied.
         target: Target,
-        /// What it is.
+        /// Parsed WebP properties.
         info: webp::Info,
-        /// What Telegram would refuse of it as `target`.
+        /// Telegram validation issues for `target`.
         issues: Vec<telegram::Issue>,
     },
-    /// A `.tgs`, whose limits are the same for stickers and emoji.
+    /// `.tgs` file (stickers and emoji share the same `.tgs` limits).
     Tgs {
-        /// What its Lottie holds.
+        /// Parsed Lottie statistics.
         info: Box<check::Stats>,
-        /// What breaks Telegram's limits or renderers, by severity.
+        /// Telegram validation and renderer compatibility issues.
         issues: Vec<telegram::Issue>,
     },
-    /// A WebM video, judged as `target`.
+    /// WebM file checked against `target`.
     Webm {
-        /// What it was judged as.
+        /// Target limits applied.
         target: Target,
-        /// What its container says.
+        /// Parsed WebM container properties.
         info: Box<WebmInfo>,
-        /// What Telegram would refuse of it as `target`.
+        /// Telegram validation issues for `target`.
         issues: Vec<telegram::Issue>,
     },
-    /// What a sticker is made of, which Telegram takes as none: a picture,
-    /// an animation, an Aseprite file or a video, judged as `target` by
-    /// what a sticker made of it would keep.
+    /// Source media file (not a sticker yet), checked against `target` as if
+    /// converted without changing dimensions, duration or frame rate.
     Input {
-        /// What it was judged as.
+        /// Target limits applied.
         target: Target,
-        /// What it is.
+        /// Parsed source media properties.
         info: Box<InputInfo>,
-        /// What Telegram would refuse of a sticker that kept its size,
-        /// length and frame rate.
+        /// What Telegram would reject in a sticker that kept the input's
+        /// dimensions, duration and frame rate.
         issues: Vec<telegram::Issue>,
     },
 }
 
-/// What [`Inspected::Input`] found of a file a sticker is made of.
+/// Metadata collected for a non-sticker source file in [`Inspected::Input`].
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub struct InputInfo {
-    /// What kind of file it is.
+    /// Media category.
     pub kind: InputKind,
-    /// Its size in bytes.
+    /// File size in bytes.
     pub bytes: u64,
-    /// Its size in pixels.
+    /// Width in pixels.
     pub width: u32,
-    /// Its height in pixels.
+    /// Height in pixels.
     pub height: u32,
-    /// How many frames it has: counted for what tgradish reads itself, and
-    /// for a video worked out from its length and frame rate.
+    /// Frame count (exact for pixel-art formats; estimated from duration * fps
+    /// for videos).
     pub frames: Option<u64>,
-    /// How long it plays, in seconds: none for a still picture.
+    /// Playback duration in seconds (`None` for still images).
     pub duration: Option<f64>,
-    /// Its average frame rate: none for a still picture.
+    /// Average frame rate (`None` for still images).
     pub fps: Option<f64>,
-    /// Whether it can be transparent.
+    /// Whether the file can be transparent.
     pub alpha: bool,
-    /// Its codec, as ffprobe names it, for what ffmpeg reads.
+    /// Codec name from `ffprobe` for files read via ffmpeg.
     pub codec: Option<String>,
 }
 
-/// The kinds of file [`InputInfo`] tells apart.
+/// Source media categories reported in [`InputInfo`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum InputKind {
-    /// A still picture: PNG, JPEG, BMP, or a GIF of one frame.
+    /// Still image (PNG, JPEG, BMP, or single-frame GIF).
     Picture,
-    /// An animated GIF or PNG.
+    /// Animated GIF or APNG.
     Animation,
-    /// An Aseprite file, all of its frames.
+    /// Aseprite file.
     Aseprite,
-    /// Anything ffmpeg reads: videos, and other pictures.
+    /// Video or other format read via ffmpeg.
     Video,
 }
 
 impl Inspected {
-    /// Whether Telegram would refuse the file, as [`telegram::refuses`]
-    /// its issues.
+    /// Returns true if Telegram would reject this file (always true for
+    /// [`Inspected::Input`], or whenever [`telegram::refuses`] returns true).
     pub fn refused(&self) -> bool {
         match self {
             Inspected::Webp { issues, .. }
             | Inspected::Webm { issues, .. }
             | Inspected::Tgs { issues, .. } => telegram::refuses(issues),
-            // no sticker at all yet
+            // Not a sticker format yet.
             Inspected::Input { .. } => true,
         }
     }
 }
 
-/// What the sticker at `path` holds, judged as `target`, or else as what
-/// its size says it is. A file of no kind a sticker is, as a GIF, is
-/// [`Error::NotSticker`](crate::Error::NotSticker).
+/// Inspects a WebM, WebP or `.tgs` sticker file against `target` (inferring
+/// sticker vs emoji from dimensions when `target` is `None`). Returns
+/// [`Error::NotSticker`](crate::Error::NotSticker) for other formats.
 pub fn inspect(path: &Path, target: Option<Target>) -> Result<Inspected> {
     Ok(match sniff_readable(path)? {
         FileKind::Webp { .. } => {
@@ -142,11 +139,10 @@ pub fn inspect(path: &Path, target: Option<Target>) -> Result<Inspected> {
     })
 }
 
-/// What the file at `path` holds: a sticker as [`inspect`] reads it, or
-/// else what a sticker would be made of, judged as `target`, a sticker
-/// unless it says. Pictures, animations and Aseprite files are read here;
-/// anything else by the ffmpeg `backend` gives, which is asked for only
-/// then.
+/// Inspects a sticker file via [`inspect`], or inspects source media against
+/// `target` (defaulting to [`Target::Sticker`]). Images, animations and
+/// Aseprite files are decoded directly; `backend` is only called for videos
+/// and other ffmpeg-only formats.
 pub fn inspect_any(
     path: &Path,
     target: Option<Target>,

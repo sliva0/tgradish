@@ -1,17 +1,17 @@
-//! SIGTERM and SIGHUP, as `kill`, a service manager stopping tgradish or
-//! a terminal closing send: taken as a plain cancel, not as Ctrl-C's
-//! keeping the best so far, so that ffmpeg is stopped and reaped, and
-//! temporary files and a result cut short go as when cancelled. Then
-//! tgradish ends by the signal itself, as whoever sent it expects to see:
-//! a shell says "Terminated", and a service manager counts it a clean
-//! stop. Ctrl-C, SIGINT, is ctrlc's in other commands, see `main.rs`; the
-//! GUI, where it has no other meaning, takes it here as the other two,
-//! closing as its window closes, and ends by it, as a shell expects of a
-//! program Ctrl-C ended: a script running it stops there.
+//! Handles SIGTERM and SIGHUP (from `kill`, a service manager, or a closing
+//! terminal) as a plain cancellation rather than Ctrl-C's settle-on-best
+//! behaviour. This stops and reaps ffmpeg, removes temporary files and partial
+//! outputs, and then re-raises the signal so the parent sees the expected
+//! termination status (for example, "Terminated" in a shell or a clean stop in
+//! a service manager).
 //!
-//! ctrlc can't say which signal it caught, so these have a handler of
-//! their own which, as ctrlc's, only notes the signal and wakes a thread,
-//! here by a pipe; the thread does the rest.
+//! For CLI commands, Ctrl-C (SIGINT) is handled by `ctrlc` in `main.rs`. For
+//! the GUI, SIGINT is handled here just like SIGTERM and SIGHUP: it closes the
+//! window and exits by signal so wrapping scripts stop on Ctrl-C.
+//!
+//! `ctrlc` does not report which signal arrived, so this module installs its
+//! own async-signal-safe handler that writes one byte to a self-pipe to wake a
+//! dedicated thread.
 
 #![allow(unsafe_code)]
 
@@ -22,28 +22,29 @@ use std::time::Duration;
 
 use nix::sys::signal::{SaFlags, SigAction, SigHandler, SigSet, SigmaskHow, Signal};
 
-/// The signal to end by, the first that came; 0 until one does.
+/// First termination signal received, or 0 if none has arrived.
 static RECEIVED: AtomicI32 = AtomicI32::new(0);
 
-/// The write end of the pipe that wakes the thread acting on a signal,
-/// open for as long as the program runs; -1 until there is one.
+/// Write end of the wake pipe for the termination thread, or -1 before setup.
+/// Stays open for the lifetime of the process.
 static WAKE: AtomicI32 = AtomicI32::new(-1);
 
-/// How long after a signal tgradish ends by it whether or not it has
-/// stopped by then: stopping takes a moment, killing ffmpeg rather than
-/// letting it finish, and the GUI gives its conversions 3 seconds, so only
-/// something stuck takes longer, which a signal to end must not wait for.
+/// Maximum wait after a termination signal before forcing exit.
+///
+/// Stopping normally kills ffmpeg promptly, and the GUI gives conversions 3
+/// seconds; anything longer means something is stuck and must not block exit.
 const AT_MOST: Duration = Duration::from_secs(10);
 
-/// Takes SIGTERM and SIGHUP from now on, and SIGINT too where `interrupt`,
-/// as the GUI does, calling `stop` on a thread of
-/// its own as the first comes, to stop what is under way: after which
-/// whoever waits for it ends the program with [`end_by_received`], or the
-/// thread does, after [`AT_MOST`]. Nothing is written to stdout or stderr
-/// from then on: on SIGHUP the terminal may be gone, which writes would
-/// fail at, and the signal says why it ended. A signal ignored as the
-/// program started, as `nohup` ignores SIGHUP and a shell SIGINT for what
-/// a script runs in the background, stays ignored.
+/// Installs handlers for SIGTERM and SIGHUP (and SIGINT when `interrupt` is
+/// true, as in the GUI).
+///
+/// On the first signal, stdout and stderr are redirected to `/dev/null` (on
+/// SIGHUP the terminal may already be gone, and the exit signal itself reports
+/// why the process ended) and `stop` runs on a background thread. The caller
+/// should call [`end_by_received`] once work finishes; if that takes longer
+/// than [`AT_MOST`], the background thread exits by signal anyway. Signals that
+/// were already ignored at startup (such as SIGHUP under `nohup` or SIGINT in a
+/// background job) remain ignored.
 pub fn on_termination(
     interrupt: bool,
     stop: impl FnOnce() + Send + 'static,
@@ -63,22 +64,23 @@ pub fn on_termination(
     let action = SigAction::new(SigHandler::Handler(handle), SaFlags::SA_RESTART, SigSet::empty());
     let interrupt = interrupt.then_some(Signal::SIGINT);
     for signal in [Signal::SIGTERM, Signal::SIGHUP].into_iter().chain(interrupt) {
-        // SAFETY: `handle` does only what a signal handler may
+        // SAFETY: `handle` only performs async-signal-safe operations.
         let before = unsafe { nix::sys::signal::sigaction(signal, &action) }?;
         if matches!(before.handler(), SigHandler::SigIgn) {
-            // SAFETY: as it was
+            // SAFETY: restores the previous disposition unchanged.
             unsafe { nix::sys::signal::sigaction(signal, &before) }?;
         }
     }
     Ok(())
 }
 
-/// Notes the signal, and wakes the thread: async-signal-safe, as it
-/// touches atomics and write(2) alone, and errno as it found it. Only the
-/// first signal wakes it, as a second is asking for the same, which a
-/// terminal closing may send HUP twice for, and Ctrl-C pressed again
-/// while the GUI closes cuts no shorter; so one byte at most is ever
-/// written, and the write never waits on a full pipe.
+/// Records the first signal and wakes the termination thread.
+///
+/// Async-signal-safe: touches only atomics and `write(2)`, and preserves
+/// `errno`. Only the first signal wakes the thread because a second signal asks
+/// for the same shutdown (a closing terminal may send SIGHUP twice, and
+/// pressing Ctrl-C again while the GUI closes cuts shutdown no shorter), so at
+/// most one byte is ever written and `write(2)` cannot block.
 extern "C" fn handle(signal: nix::libc::c_int) {
     if RECEIVED.compare_exchange(0, signal, Ordering::SeqCst, Ordering::SeqCst).is_err() {
         return;
@@ -86,24 +88,24 @@ extern "C" fn handle(signal: nix::libc::c_int) {
     let errno = nix::errno::Errno::last_raw();
     let fd = WAKE.load(Ordering::SeqCst);
     if fd >= 0 {
-        // SAFETY: the pipe's write end, which is never closed
+        // SAFETY: `fd` is the write end of the wake pipe and is never closed.
         let _ = nix::unistd::write(unsafe { BorrowedFd::borrow_raw(fd) }, &[0]);
     }
     nix::errno::Errno::set_raw(errno);
 }
 
-/// The signal that came, if one did.
+/// Returns the first termination signal received, if any.
 pub fn received() -> Option<i32> {
     Some(RECEIVED.load(Ordering::SeqCst)).filter(|&signal| signal != 0)
 }
 
-/// Ends the program by the signal that came, if one did, as its default
-/// action would have: for its parent to see that it was ended by it.
+/// Terminates the process with the received signal's default action so the
+/// parent sees signal termination. Does nothing if no signal was received.
 pub fn end_by_received() {
     let Some(number) = received() else { return };
     if let Ok(signal) = Signal::try_from(number) {
-        // SAFETY: the default action, which ends the program, takes the
-        // place of `handle`
+        // SAFETY: restores the default signal disposition to terminate the
+        // process.
         let _ = unsafe { nix::sys::signal::signal(signal, SigHandler::SigDfl) };
         let _ = nix::sys::signal::pthread_sigmask(
             SigmaskHow::SIG_UNBLOCK,
@@ -112,17 +114,16 @@ pub fn end_by_received() {
         );
         let _ = nix::sys::signal::raise(signal);
     }
-    // where it couldn't be raised, as shells show a program it ended
+    // Fallback if raising failed: match shell convention (128 + signal).
     std::process::exit(128 + number);
 }
 
-/// Sends what is still written to stdout and stderr nowhere.
+/// Redirects stdout and stderr to `/dev/null`.
 fn quieten() {
     use std::os::fd::AsRawFd;
     let Ok(null) = std::fs::OpenOptions::new().write(true).open("/dev/null") else { return };
     for fd in [nix::libc::STDOUT_FILENO, nix::libc::STDERR_FILENO] {
-        // SAFETY: both stay open, now on /dev/null, which is all that
-        // changes for whoever writes to them
+        // SAFETY: both descriptors stay open, redirected to /dev/null.
         unsafe { nix::libc::dup2(null.as_raw_fd(), fd) };
     }
 }

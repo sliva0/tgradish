@@ -1,8 +1,9 @@
-//! Reading and decoding inputs and results, and converting, each on a
-//! worker thread so the GUI keeps drawing meanwhile. It starts
-//! what is due and takes in what is done each time it draws, and lets go
-//! of decoded frames where an item isn't looked at, as they take much
-//! memory.
+//! Background worker scheduling for probing/decoding inputs and results and
+//! running conversions without blocking the UI thread.
+//!
+//! [`App::pump`] runs on every frame to poll finished tasks, start queued
+//! work, and evict decoded full-resolution frames (as they take much memory)
+//! for items that are not currently viewed.
 
 use eframe::egui;
 use tgradish_core::backend::Backend;
@@ -18,12 +19,13 @@ use crate::l10n::fl;
 use crate::media::{self, Art, Clip, Load, Task, Video};
 use crate::outputs::Written;
 
-/// How many items read their inputs at once, besides the selected one.
+/// Maximum concurrent background input loads besides the selected item.
 const READING: usize = 2;
 
 impl App {
-    /// What converting as `recipe` says runs with: `backend`, which a
-    /// `.tgs` needs only for videos, and as many threads as Settings say.
+    /// Builds a conversion [`Setup`] for `recipe` using `backend` (which
+    /// `.tgs` conversions only require when decoding video inputs) and the
+    /// configured worker thread limit.
     pub(crate) fn setup(
         &self,
         recipe: Recipe,
@@ -44,10 +46,12 @@ impl App {
         }
     }
 
-    /// Takes in loads and conversions, and starts what is due.
+    /// Polls active loads and conversions, evicts unused frame buffers, and
+    /// starts due background tasks.
     pub(crate) fn pump(&mut self, ctx: &egui::Context) {
         let backend = self.backend();
-        // as when ffmpeg is installed, or another chosen in Settings
+        // Retry failed or in-progress loads whenever the ffmpeg backend
+        // changes.
         if self.read_with.as_ref() != Some(&backend) {
             self.items.iter_mut().for_each(read_again);
             self.read_with = Some(backend.clone());
@@ -64,16 +68,17 @@ impl App {
             })
             .count();
         for item in &mut self.items {
-            // a .tgs that keeps the crop's shape keeps it square, shown or not
+            // A `.tgs` that keeps the crop's shape (`Resize::Contain`) keeps
+            // the crop square, shown or not.
             crate::file_settings::keep_square(item, &self.presets, &self.config);
             item.recipe = item.choices.recipe(item.format, &self.presets, &self.config).ok();
             check_earlier(ctx, item);
             let is_selected = selected == Some(item.id);
-            // and what is queued to convert, which may wait for it to be read
+            // Retain decoded frames for items waiting in the conversion queue.
             let queued = item.job.as_ref().is_some_and(|conversion| conversion.job.is_waiting());
             let kept = is_selected || self.recent.contains(&item.id) || queued;
             if item.sniffed.poll() {
-                // taken by its name where it couldn't be read
+                // Fall back to the extension-derived kind if magic-byte sniffing fails.
                 let kind = item.sniffed.ready().copied().unwrap_or(item.kind);
                 item.take_kind(kind);
             }
@@ -108,8 +113,7 @@ impl App {
                     item.result_clip = Load::Idle;
                 }
             }
-            // the result's thumbnail, as made in an earlier run, and all of
-            // it for the selected item
+            // Decode the result clip when selected or when its thumbnail is not yet built.
             let result_wanted = is_selected || item.result_thumb.is_none();
             if result_wanted
                 && item.result_clip.is_idle()
@@ -119,12 +123,11 @@ impl App {
                 load_result_clip(ctx, item, &backend);
                 reading += usize::from(item.result_clip.is_loading());
             }
-            // read what the item needs
             let wanted = is_selected || item.input_thumb.is_none() || queued;
             if !wanted || (!is_selected && reading >= READING) {
                 continue;
             }
-            // what the file is by its content, which says what reads it
+            // Sniff file content first to determine which loader to run.
             if item.sniffed.is_idle() {
                 let path = item.inputs[0].clone();
                 item.sniffed = Load::Loading(Task::spawn(ctx, move |_| Ok(Kind::of_file(&path))));
@@ -150,7 +153,8 @@ impl App {
             } else if matches!(item.format, Format::Webm | Format::Webp)
                 && !(item.format_guessed && item.art.is_loading())
             {
-                // pixel art drawn again with another tag, layers or rate
+                // Re-render Aseprite or frame-sequence inputs when tag, layer,
+                // or fps choices change.
                 let drawing = match item.kind {
                     Kind::Aseprite | Kind::Frames => {
                         item.choices.drawing(item.format, &self.presets, &self.config)
@@ -178,9 +182,9 @@ impl App {
         self.convert_next(ctx, &backend);
     }
 
-    /// Reads more of the selected video once what is looked at stays put
-    /// for a moment: the used part at full rate, and the frame shown while
-    /// paused at full size.
+    /// Loads higher-detail video frames for the selected item once playback or
+    /// trim controls settle: the trimmed segment at full frame rate, and the
+    /// current paused frame at full resolution.
     fn load_detail(&mut self, ctx: &egui::Context, backend: &Result<Backend, String>) {
         let Some(id) = self.selected else { return };
         let Ok(backend) = backend else { return };
@@ -189,7 +193,7 @@ impl App {
             return;
         }
         let range = item.range().map(|(start, end)| (start, end - start));
-        // drawn pixel art has every frame at its full size already
+        // Rendered pixel-art clips already contain every frame at full resolution.
         let Some(video) = item.video.ready().filter(|video| !video.complete) else { return };
         let still = video.probe.still_image;
         if !item.view.playing || still {
@@ -212,7 +216,6 @@ impl App {
     }
 
     fn convert_next(&mut self, ctx: &egui::Context, backend: &Result<Backend, String>) {
-        // finished jobs become results
         let mut finished = Vec::new();
         for item in &mut self.items {
             if let Some(Conversion { job, .. }) = &mut item.job
@@ -251,7 +254,7 @@ impl App {
         }
         while let Some(id) = self.queue.pop_front() {
             let Some(item) = self.item(id) else { continue };
-            // found, once read, to ask for what its input hasn't
+            // Fail queued jobs that developed a blocker after being enqueued.
             if let Some(blocker) = item.blockers.first() {
                 let why = fl!("blocked", reason = blocker.reason());
                 let item = self.item_mut(id).expect("found above");
@@ -264,8 +267,9 @@ impl App {
             let Some(Conversion { format, choices: Some(choices), .. }) = &item.job else {
                 continue;
             };
-            // a .tgs keeping the crop's shape keeps a square one, which its
-            // size, once read, says: waited for, where it is being read
+            // When a `.tgs` job keeps the crop's shape (`Resize::Contain`),
+            // wait for `item.art` so its size is known before squaring the
+            // crop.
             if *format == Format::Tgs
                 && crate::file_settings::keeps_crop_shape(choices, &self.presets, &self.config)
             {
@@ -294,7 +298,7 @@ impl App {
             let recipe = choices.recipe(*format, &self.presets, &self.config);
             let setup = recipe.clone().and_then(|recipe| self.setup(recipe, backend));
             let overwrite = self.may_replace(id, &job.output);
-            // a result of another time, rather than this item's own
+            // Warn when overwriting an existing file not written for this item.
             let replaces = job.output.exists() && !self.wrote(id, &job.output);
             let input = item.input();
             let item = self.item_mut(id).expect("found above");
@@ -309,7 +313,7 @@ impl App {
                 }
                 Err(message) => {
                     job.status = Status::Failed(message);
-                    // taken in next frame, which nothing else may ask for
+                    // Taken in next frame, which nothing else may request.
                     ctx.request_repaint();
                 }
             }
@@ -317,8 +321,8 @@ impl App {
     }
 }
 
-/// Whether `value`, kept under `key`, has stayed the same for `wait`
-/// seconds; asks for a repaint to look again when it hasn't.
+/// Returns true if `value` (tracked under `key`) has remained unchanged for
+/// `wait` seconds, scheduling a repaint while waiting.
 fn settled(
     ctx: &egui::Context,
     key: impl std::hash::Hash + std::fmt::Debug,
@@ -340,9 +344,9 @@ fn settled(
     settled
 }
 
-/// Makes the input thumbnail and settles the guessed format once an input
-/// is read. A crop that doesn't fit, as kept from when the file was another,
-/// larger one, is kept, and said to keep it from being converted.
+/// Builds the input thumbnail texture and finalises auto-detected output format
+/// once an input finishes loading. Out-of-bounds crops (e.g. from a replaced
+/// smaller file) are left in place so `find_blockers` flags them.
 fn settle(ctx: &egui::Context, item: &mut Item) {
     if item.format_guessed
         && let Some(art) = item.art.ready()
@@ -351,7 +355,7 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
         if art.clip.looks_like_pixel_art() {
             item.format = Format::Tgs;
         } else if !art.clip.is_animated() {
-            // a photo or a drawing stays a picture
+            // Non-pixel-art still images default to static WebP.
             item.format = Format::Webp;
         }
         item.history.follow_guess(item.format, false);
@@ -365,9 +369,9 @@ fn settle(ctx: &egui::Context, item: &mut Item) {
     }
 }
 
-/// Reads what an earlier run's result is, on a thread of its own, and
-/// takes it as made once read; it goes if the file has, or if the item was
-/// converted meanwhile.
+/// Verifies a restored session's previous output file on a background thread
+/// and promotes it to `item.made` if still valid on disk (dropped if the file
+/// is gone or the item was converted meanwhile).
 fn check_earlier(ctx: &egui::Context, item: &mut Item) {
     let Some((earlier, load)) = &mut item.earlier else { return };
     if load.is_idle() {
@@ -390,9 +394,9 @@ fn check_earlier(ctx: &egui::Context, item: &mut Item) {
     }
 }
 
-/// Lets what of an item failed to be read, or is still being read, be
-/// read again, once ffmpeg changed: what is being read is read with the
-/// ffmpeg it started with, which may fail where the new one wouldn't.
+/// Resets failed or in-flight media loads on `item` when the ffmpeg backend
+/// changes (an in-flight load using the old backend could still fail where the
+/// new backend succeeds).
 fn read_again(item: &mut Item) {
     item.video.restart();
     item.art.restart();
@@ -405,8 +409,8 @@ fn read_again(item: &mut Item) {
     }
 }
 
-/// Frees an item's big frames; its thumbnails stay. All are read again
-/// when it is selected.
+/// Drops full-resolution decoded frame buffers for `item` while keeping its
+/// list thumbnails; frames are reloaded when `item` is selected again.
 pub(crate) fn release(item: &mut Item) {
     if item.video.ready().is_some() {
         item.video = Load::Idle;
@@ -432,13 +436,13 @@ fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backe
         (Format::Webm, Ok(backend)) => {
             Load::Loading(media::load_result(ctx, backend.clone(), &done.output))
         }
-        // small enough to read at once
+        // Static WebP results are small enough to decode synchronously.
         (Format::Webp, _) => match webp::preview(&done.output) {
             Ok(preview) => Load::Ready(Clip::from_preview(preview, true)),
             Err(err) => Load::Failed(crate::jobs::failure(&err)),
         },
-        // drawn from the art it was just made of, and once that is let
-        // go, from its file, which shows the same
+        // Render `.tgs` from the in-memory `Drawing` when just converted, or
+        // parse and render from disk if reloaded later.
         (Format::Tgs, _) => {
             let (output, drawing) = (done.output.clone(), done.drawing.take());
             Load::Loading(Task::spawn(ctx, move |_| {

@@ -10,7 +10,7 @@ pub(super) fn error(message: impl ToString) -> Error {
 }
 
 pub(super) fn truncated() -> Error {
-    error("the file ends too early")
+    error("unexpected end of file")
 }
 
 /// Little-endian reads that fail instead of running past the end.
@@ -79,12 +79,9 @@ pub(super) fn inflate(data: &[u8], size: usize) -> Result<Vec<u8>> {
     flate2::read::ZlibDecoder::new(data)
         .take(size as u64 + 1)
         .read_to_end(&mut out)
-        .map_err(|err| error(format!("compressed data is broken: {err}")))?;
+        .map_err(|err| error(format!("corrupt compressed data: {err}")))?;
     if out.len() != size {
-        return Err(error(format!(
-            "compressed data has {} bytes, {size} were expected",
-            out.len()
-        )));
+        return Err(error(format!("decompressed data has {} bytes, expected {size}", out.len())));
     }
     Ok(out)
 }

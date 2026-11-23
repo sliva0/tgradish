@@ -1,26 +1,24 @@
-//! Named sets of options that say how to convert: three built in (fast,
-//! balanced and best), more from TOML files in the `presets` directory of
-//! the config dir. What to make, a sticker or an emoji as WebM, `.tgs` or
-//! an image, is chosen separately, so one preset serves every kind of
-//! result.
+//! Named conversion presets: three built-in presets (`fast`, `balanced`,
+//! `best`) plus user-defined `<name>.toml` files in `<config-dir>/presets/`.
+//! The target (sticker or emoji) is chosen separately from the preset.
 //!
-//! A preset file looks like this, and is named after the preset:
+//! Each preset can configure both `[webm]` (used for WebM and WebP) and `[tgs]`
+//! so a single preset works across all output formats:
 //!
 //! ```toml
 //! description = "Small and fast, for previews"
-//! extends = "fast"  # optional, options of the base preset come first
+//! extends = "fast"  # optional; inherits base preset options
 //!
-//! [webm]            # options for WebM results, and for static results
-//! crf = 40          # where a still picture has them
+//! [webm]            # options for WebM and static WebP
+//! crf = 40
 //!
-//! [tgs]             # options for TGS results
+//! [tgs]             # options for TGS
 //! effort = "balanced"
 //! ```
 //!
-//! Either table can be left out. A user preset with the name of a built-in
-//! one replaces it. A preset says how to convert, never what: the options
-//! of one file, [`PER_FILE`], are refused in one, and left out of one
-//! saved.
+//! Either table may be omitted. A user preset with the same name as a built-in
+//! preset overrides it. Per-file options ([`PER_FILE`]) are rejected when
+//! loading presets and stripped when saving them.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -37,31 +35,30 @@ use crate::webm::Options;
 /// The built-in presets' names, fastest first.
 pub const BUILTIN: [&str; 3] = ["fast", "balanced", "best"];
 
-/// The preset used for WebM output when none is given.
+/// The default preset for WebM and WebP output.
 pub const DEFAULT_PRESET: &str = "balanced";
-/// The preset used for `.tgs` output when none is given: its best encoding
-/// takes seconds, not minutes.
+/// The default preset for `.tgs` output (`best` takes seconds, not minutes).
 pub const DEFAULT_TGS_PRESET: &str = "best";
 
-/// What kind of file a conversion makes.
+/// Output format for conversions.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Format {
-    /// Video stickers and emoji, from any video or image.
+    /// Video stickers and custom emoji (VP9 in WebM), from any video or image.
     #[default]
     Webm,
-    /// Animated stickers, from pixel art.
+    /// Animated vector stickers and custom emoji (TGS), from pixel art.
     Tgs,
-    /// Static stickers and emoji: one frame of a video, or an image, as
-    /// WebP. They take WebM's options where a still picture has them.
-    /// Read as `static` too, the kind of sticker it makes, and as `image`,
-    /// as it once was.
+    /// Static stickers and custom emoji (WebP), from an image or a single video
+    /// frame. Accepts the WebM options that apply to still images. Also parsed
+    /// as `static` or `image`.
     #[serde(alias = "static", alias = "image")]
     Webp,
 }
 
 impl Format {
-    /// What `--format` and the JSON call it, which messages name it by.
+    /// Canonical format name used by `--format`, JSON output and error
+    /// messages.
     pub fn name(self) -> &'static str {
         match self {
             Format::Webm => "webm",
@@ -70,7 +67,7 @@ impl Format {
         }
     }
 
-    /// The extension of the files it makes, without a dot.
+    /// Output file extension without a leading dot.
     pub fn extension(self) -> &'static str {
         match self {
             Format::Webm => "webm",
@@ -79,9 +76,8 @@ impl Format {
         }
     }
 
-    /// The largest file of this format Telegram takes as `target`, in
-    /// bytes: a video's limit is the target's, a `.tgs` and a static
-    /// sticker or emoji have one of their own.
+    /// Maximum file size Telegram accepts for this format and `target`, in
+    /// bytes.
     pub fn max_bytes(self, target: Target) -> u64 {
         match self {
             Format::Webm => target.max_bytes(),
@@ -90,15 +86,14 @@ impl Format {
         }
     }
 
-    /// Whether its pictures' sides are even. A WebM's VP9 keeps colour in
-    /// 4:2:0, a sample to each 2 × 2 pixels, which an odd side doesn't
-    /// divide into; a WebP is encoded from full colour, of any size, and
-    /// Telegram takes any within the box. A `.tgs` is drawn in vectors.
+    /// Returns true if pixel dimensions must be even. VP9 uses 4:2:0 chroma
+    /// subsampling (2x2 blocks), so WebM requires even sides; WebP supports
+    /// any dimension and `.tgs` is vector-based.
     pub fn even_sides(self) -> bool {
         matches!(self, Format::Webm)
     }
 
-    /// The format a file name asks for, by its extension.
+    /// Infers the format from `path`'s extension, if recognised.
     pub fn of_path(path: &Path) -> Option<Format> {
         match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
             "webm" => Some(Format::Webm),
@@ -108,10 +103,9 @@ impl Format {
         }
     }
 
-    /// Whether this format uses the option `key`, as files, JSON and flags
-    /// name it, or once named it: WebM all of [`Options`], `.tgs` all of
-    /// [`tgs::Options`], and static stickers those of WebM's a still
-    /// picture has, [`crate::webp::PICTURE_OPTIONS`].
+    /// Returns true if this format supports option `key` (or its legacy alias):
+    /// all of [`Options`] for WebM, all of [`tgs::Options`] for `.tgs`, and
+    /// [`crate::webp::PICTURE_OPTIONS`] for WebP.
     pub fn uses(self, key: &str) -> bool {
         let key = crate::options::current_key(key);
         static WEBM: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
@@ -130,8 +124,9 @@ impl Format {
         }
     }
 
-    /// Those of `keys` this format doesn't use, as [`Format::uses`] says,
-    /// in their order: what a front-end refuses rather than quietly drop.
+    /// Returns the deduplicated keys from `keys` that this format does not use,
+    /// preserving order. Front-ends refuse these rather than drop them
+    /// silently.
     pub fn unused<'k>(self, keys: impl IntoIterator<Item = &'k str>) -> Vec<&'k str> {
         let mut unused: Vec<&str> = Vec::new();
         for key in keys {
@@ -142,8 +137,8 @@ impl Format {
         unused
     }
 
-    /// The built-in preset it is made with when none is given or
-    /// configured: [`DEFAULT_PRESET`] or [`DEFAULT_TGS_PRESET`].
+    /// Built-in default preset name for this format ([`DEFAULT_PRESET`] or
+    /// [`DEFAULT_TGS_PRESET`]).
     pub fn default_preset(self) -> &'static str {
         match self {
             Format::Webm | Format::Webp => DEFAULT_PRESET,
@@ -152,20 +147,20 @@ impl Format {
     }
 }
 
-/// Options of either format.
+/// Format-specific options bundled with their target format.
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum FormatOptions {
-    /// WebM's options.
+    /// Options for WebM output.
     Webm(Options),
-    /// `.tgs` options.
+    /// Options for `.tgs` output.
     Tgs(tgs::Options),
-    /// WebM's options, for an image.
+    /// Options for static WebP output.
     Webp(Options),
 }
 
 impl FormatOptions {
-    /// The format they are for.
+    /// Returns the [`Format`] these options target.
     pub fn format(&self) -> Format {
         match self {
             FormatOptions::Webm(_) => Format::Webm,
@@ -174,7 +169,7 @@ impl FormatOptions {
         }
     }
 
-    /// What they make, a sticker unless they say.
+    /// Returns the configured [`Target`], defaulting to [`Target::Sticker`].
     pub fn target(&self) -> Target {
         match self {
             FormatOptions::Webm(options) | FormatOptions::Webp(options) => options.target,
@@ -184,12 +179,9 @@ impl FormatOptions {
     }
 }
 
-/// The options that say something of one file only: what to make, the
-/// part of it to use and its time, its tag and layers, its title, and how a
-/// sprite sheet is laid out. A preset says how to convert any file, so it
-/// holds none of them: they are refused in one's file, and left out of
-/// one saved. The size of the art's pixels isn't among them, as files from
-/// one place often share it.
+/// Per-file options that are disallowed in presets (rejected on load and
+/// stripped on save). `pixel-scale` is excluded because files from the same
+/// source often share a pixel scale.
 pub const PER_FILE: [&str; 10] = [
     "target",
     "tag",
@@ -212,21 +204,20 @@ struct PresetFile {
     tgs: toml::Table,
 }
 
-/// A named set of options for either format, built in or a user's file.
+/// Named preset definition (built-in or loaded from a `.toml` file).
 #[derive(Debug, Clone, PartialEq, Serialize, JsonSchema)]
 pub struct Preset {
-    /// What it is called: its file's name, without `.toml`.
+    /// Preset name (filename without `.toml` for user presets).
     pub name: String,
-    /// What it is for, in the user's words; may be empty.
+    /// Optional human-readable description.
     pub description: String,
-    /// The preset whose options it starts from, if any.
+    /// Base preset name inherited before applying this preset's own options.
     pub extends: Option<String>,
-    /// Options for WebM and static results set by this preset itself,
-    /// without the presets it extends: those its file sets.
+    /// WebM and WebP options set directly by this preset (before inheritance).
     pub webm: Options,
-    /// The same for `.tgs` results.
+    /// `.tgs` options set directly by this preset (before inheritance).
     pub tgs: tgs::Options,
-    /// File the preset was loaded from, `None` for built-in presets.
+    /// Source file path, or `None` for built-in presets.
     pub path: Option<PathBuf>,
 }
 
@@ -250,7 +241,7 @@ impl Preset {
             if let Some(key) = options.keys().find(|key| !format.uses(key)) {
                 let known = preset_keys(format).join(", ");
                 return Err(broken(&format_args!(
-                    "[{table}] {key} isn't an option a preset sets; those are: {known}"
+                    "[{table}] {key} is not a valid preset option; valid options: {known}"
                 )));
             }
         }
@@ -306,22 +297,22 @@ fn builtin() -> Vec<Preset> {
     vec![
         preset(
             "fast",
-            "WebM fits only the bitrate, with the fast encoder: takes seconds, but blurrier. TGS \
-             takes under a second, a few percent larger",
+            "WebM fits bitrate only with the fast encoder: seconds, but blurrier. TGS takes under \
+             a second, a few percent larger.",
             Options { fit: Some(Fit::Bitrate), effort: Some(Effort::Fast), ..Default::default() },
             effort(Effort::Fast),
         ),
         preset(
             "balanced",
-            "WebM fits the bitrate, and tries lower frame rates where they could look better. \
-             TGS is between fast and best",
+            "WebM fits bitrate and tries lower frame rates when they look better. TGS sits \
+             between fast and best.",
             Options { fit: Some(Fit::Auto), effort: Some(Effort::Balanced), ..Default::default() },
             effort(Effort::Balanced),
         ),
         preset(
             "best",
-            "WebM is like balanced, with the slowest encoder: takes minutes for long videos. TGS \
-             takes a few seconds, the smallest file",
+            "WebM as balanced with the slowest encoder: minutes for long videos. TGS takes a few \
+             seconds for the smallest file.",
             Options { fit: Some(Fit::Auto), effort: Some(Effort::Best), ..Default::default() },
             effort(Effort::Best),
         ),
@@ -333,7 +324,7 @@ fn builtin() -> Vec<Preset> {
 #[non_exhaustive]
 pub enum PresetError {
     /// No preset has the name; `known` are those that do.
-    #[error("preset {name:?} doesn't exist; available: {}", known.join(", "))]
+    #[error("preset {name:?} does not exist; available: {}", known.join(", "))]
     Unknown {
         /// The name asked for.
         name: String,
@@ -342,28 +333,28 @@ pub enum PresetError {
     },
     /// Its file, or that of one it extends, isn't a preset's: the message
     /// names it and says why.
-    #[error("broken preset {0}")]
+    #[error("invalid preset {0}")]
     Broken(String),
     /// Presets that extend each other, in a loop: each extends the next,
     /// and the last is the first again.
     #[error("{}", extends_loop(.0))]
     ExtendsInLoop(Vec<String>),
     /// A name too short, too long or starting with a space.
-    #[error("a preset's name has 1 to {LONGEST_NAME} characters, not starting with a space")]
+    #[error("preset name must be 1 to {LONGEST_NAME} characters and cannot start with a space")]
     NameLength,
     /// A name with what a file's name shouldn't have.
-    #[error("a preset's name has only letters, digits, spaces, - and _")]
+    #[error("preset name may only contain letters, digits, spaces, - and _")]
     NameCharacters,
     /// Another preset, built in or not, has the name.
-    #[error("another preset is named {0:?}")]
+    #[error("preset {0:?} already exists")]
     NameTaken(String),
     /// Renaming or deleting it would break the preset named, which
     /// extends it.
-    #[error("{0:?} extends it: change that first")]
+    #[error("preset {0:?} extends this preset; change {0:?} first")]
     Extended(String),
     /// A preset's file sets an option of one file, one of [`PER_FILE`],
     /// as `key` names it in its table, `webm.crop`; `place` is the file.
-    #[error("broken preset {place}: {key} is one file's to choose, which a preset says nothing of")]
+    #[error("invalid preset {place}: {key} is a per-file option and cannot be set in a preset")]
     PerFile {
         /// The preset's file.
         place: String,
@@ -372,12 +363,12 @@ pub enum PresetError {
     },
 }
 
-/// What [`PresetError::ExtendsInLoop`] says: "a extends itself", or "a →
-/// b → a extend each other".
+/// What [`PresetError::ExtendsInLoop`] says: "a extends itself", or
+/// "circular inheritance: a → b → a".
 fn extends_loop(names: &[String]) -> String {
     match names {
         [one, _] => format!("{one} extends itself"),
-        names => format!("{} extend each other", names.join(" → ")),
+        names => format!("circular inheritance: {}", names.join(" → ")),
     }
 }
 
@@ -539,8 +530,8 @@ pub fn user_dir() -> Option<PathBuf> {
 /// Longest name a preset saved here can have.
 pub const LONGEST_NAME: usize = 64;
 
-/// Whether `name` can name a preset file: letters, digits, spaces, `-`
-/// and `_`, not starting with a space, at most 64 of them.
+/// Validates `name` for saving a preset: 1 to [`LONGEST_NAME`] characters,
+/// using letters, digits, spaces, `-` or `_`, and not starting with a space.
 pub fn check_name(name: &str) -> Result<()> {
     let allowed = |c: char| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_');
     if name.trim().is_empty() || name.starts_with(' ') || name.chars().count() > LONGEST_NAME {
@@ -552,17 +543,16 @@ pub fn check_name(name: &str) -> Result<()> {
     Ok(())
 }
 
-/// The options of `options` a preset keeps: all but [`PER_FILE`].
+/// Returns a copy of `options` with all [`PER_FILE`] keys removed.
 pub fn shareable<T: Serialize + serde::de::DeserializeOwned>(options: &T) -> T {
     let mut table = table(options);
     table.retain(|key, _| !PER_FILE.contains(&key));
     table.try_into().expect("options read back with fewer set")
 }
 
-/// Writes a preset named `name` into `dir`, said to be `description`, of
-/// `webm` and `tgs` without what only makes sense for one file
-/// ([`PER_FILE`]), and returns its file. One there already is replaced
-/// only with `replace`.
+/// Saves a preset named `name` into `dir` with `description` and the shareable
+/// options from `webm` and `tgs` (excluding [`PER_FILE`]). Replaces an existing
+/// file only when `replace` is true.
 pub fn save(
     dir: &Path,
     name: &str,
@@ -584,9 +574,8 @@ pub fn save(
     Ok(path)
 }
 
-/// Whether the preset `from` can be renamed `to`: a name no other preset
-/// has, built in or not, for one no other preset extends, as that one
-/// would break.
+/// Validates renaming preset `from` to `to`: `to` must be valid and unused,
+/// and no other preset may extend `from`.
 pub fn check_rename(from: &str, to: &str, presets: &Presets) -> Result<()> {
     check_name(to)?;
     if to != from && presets.iter().any(|(name, _)| name == to) {
@@ -598,8 +587,7 @@ pub fn check_rename(from: &str, to: &str, presets: &Presets) -> Result<()> {
     Ok(())
 }
 
-/// Whether the preset `name` can be deleted: not while another extends
-/// it, which would break.
+/// Validates deleting preset `name` (fails if another preset extends it).
 pub fn check_remove(name: &str, presets: &Presets) -> Result<()> {
     match presets.extending(name) {
         Some(other) => Err(PresetError::Extended(other.name.clone()).into()),
@@ -607,12 +595,13 @@ pub fn check_remove(name: &str, presets: &Presets) -> Result<()> {
     }
 }
 
-/// Renames the preset `from` in `dir` to `to`, as [`check_rename`] allows.
+/// Renames preset `from` to `to` in `dir` after validating via
+/// [`check_rename`].
 pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<PathBuf> {
     check_rename(from, to, presets)?;
     let (old, new) = (file_in(dir, from)?, file_in(dir, to)?);
-    // a name changed only in case names the same file where case doesn't
-    // matter; where it does, the other file is another preset's
+    // Allow case-only renames on case-insensitive filesystems; refuse
+    // clobbering a distinct file on case-sensitive filesystems.
     if new.exists() && !same_file(&old, &new) {
         return Err(Error::OutputExists(new));
     }
@@ -620,10 +609,8 @@ pub fn rename(dir: &Path, from: &str, to: &str, presets: &Presets) -> Result<Pat
     Ok(new)
 }
 
-/// The file of the preset `name` in `dir`, refused for a name that would
-/// lead out of it. Names of presets already there are file names, which
-/// [`check_name`] needn't allow, as those saved by hand; only new names
-/// are held to it.
+/// Resolves `<name>.toml` inside `dir`, rejecting path traversal. Less strict
+/// than [`check_name`] so hand-created preset files can still be managed.
 fn file_in(dir: &Path, name: &str) -> Result<PathBuf> {
     let file = format!("{name}.toml");
     let mut parts = Path::new(&file).components();
@@ -653,8 +640,8 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
-/// Says the preset at `path` is `description`, keeping its options. The
-/// file is written anew, without any comments it had.
+/// Updates the `description` field of the preset file at `path`, keeping all
+/// options. Rewrites the file without preserving TOML comments.
 pub fn set_description(path: &Path, description: &str) -> Result<()> {
     let text = std::fs::read_to_string(path).map_err(Error::io(FileAction::Read, path))?;
     let mut file: toml::Table = toml::from_str(&text)
@@ -667,8 +654,8 @@ pub fn set_description(path: &Path, description: &str) -> Result<()> {
     crate::fsutil::write_output(path, text.as_bytes(), true)
 }
 
-/// Deletes the preset `name` in `dir`, as [`check_remove`] allows, and
-/// returns what it held, which [`restore`] puts back.
+/// Deletes preset `name` in `dir` (after [`check_remove`]) and returns its
+/// previous file contents so [`restore`] can undo the deletion.
 pub fn remove(dir: &Path, name: &str, presets: &Presets) -> Result<String> {
     check_remove(name, presets)?;
     let path = &file_in(dir, name)?;
@@ -677,8 +664,8 @@ pub fn remove(dir: &Path, name: &str, presets: &Presets) -> Result<String> {
     Ok(text)
 }
 
-/// Puts back as `name` in `dir` a preset [`remove`] deleted, which held
-/// `text`, unless another of its name is there now.
+/// Restores a previously removed preset file to `dir` unless `<name>.toml`
+/// already exists in `dir`.
 pub fn restore(dir: &Path, name: &str, text: &str) -> Result<PathBuf> {
     let path = file_in(dir, name)?;
     std::fs::create_dir_all(dir).map_err(Error::io(FileAction::Create, dir))?;
@@ -922,9 +909,9 @@ mod tests {
         let broken = presets.webm("broken").unwrap_err().to_string();
         assert!(broken.contains("broken.toml") && broken.contains("fsp"), "{broken}");
         // naming only what a preset may set, not what one file chooses
-        assert!(broken.contains("fsp isn't an option a preset sets; those are: "), "{broken}");
+        assert!(broken.contains("fsp is not a valid preset option; valid options: "), "{broken}");
         // of the options, not of where the file is, which may be anywhere
-        let options = broken.split("those are: ").nth(1).unwrap_or_default();
+        let options = broken.split("valid options: ").nth(1).unwrap_or_default();
         assert!(options.contains(" fps,") && !options.contains("target"), "{broken}");
         // a file broken in one table is broken as a whole
         assert!(presets.tgs("broken").is_err());
@@ -936,14 +923,14 @@ mod tests {
             );
         }
         let looped = presets.webm("loop-a").unwrap_err().to_string();
-        assert!(looped.ends_with(" extend each other") && looped.contains(" → "), "{looped}");
+        assert!(looped.starts_with("circular inheritance: ") && looped.contains(" → "), "{looped}");
         // crf isn't a .tgs option
         assert!(presets.tgs("wrong").unwrap_err().to_string().contains("crf"));
         assert!(presets.get("old").is_err());
         // a file's own faults say it is broken, and end where the message does
         for name in ["broken", "wrong", "emoji", "sheet", "unreadable"] {
             let err = presets.get(name).unwrap_err().to_string();
-            assert!(err.starts_with("broken preset ") && err.trim_end() == err, "{err:?}");
+            assert!(err.starts_with("invalid preset ") && err.trim_end() == err, "{err:?}");
         }
         assert_eq!(presets.iter().count(), 14);
     }

@@ -1,22 +1,18 @@
-//! One GUI at a time for each session. The GUI that keeps the session
-//! listens beside it, on a Unix socket next to its lock, or on Windows a
-//! named pipe named after it; a GUI started while it runs hands it the files
-//! it was given, with what the system gave it to bring a window forward
-//! with, and ends rather than open a second.
+//! Single-instance session handoff. The GUI holding the session lock listens on
+//! a Unix socket beside the lock file (or a named pipe derived from the lock
+//! path on Windows). A second GUI launched for the same session sends its CLI
+//! file paths and window-activation tokens to the running instance and exits.
 //!
-//! What is handed over is one line of JSON, of no more than [`LONGEST`]
-//! bytes, which the GUI answers with [`ACCEPTED`] once it has read it whole.
-//! It holds paths to add, as dropped files are, and the tokens a window is
-//! raised with, and nothing else is taken from it. A GUI that doesn't
-//! answer within [`ANSWER`], or a socket that nothing listens on any more,
-//! is given up on, and the GUI started opens as a second one would.
+//! The handoff message is a single JSON line of at most [`LONGEST`] bytes
+//! containing absolute file paths and activation tokens; nothing else is taken
+//! from it. The listener replies with [`ACCEPTED`] once it has read the line.
+//! If the listener does not reply within [`ANSWER`] (or the socket is stale),
+//! the new process opens its own window without a session lock.
 //!
-//! The files are the started GUI's until it says otherwise: having the
-//! answer in time, it writes [`CONFIRMED`] and ends, and the GUI that
-//! keeps the session adds them only once it has read that. One that
-//! answers too late, or is never told, adds nothing, so the files are
-//! opened by one GUI at most, and never by both: the one byte is either
-//! written, and the started GUI ends, or isn't, and it opens them itself.
+//! To prevent both instances from opening the same files if a timeout races
+//! with [`ACCEPTED`], a new process that gets [`ACCEPTED`] in time writes
+//! [`CONFIRMED`] and exits, and the listener adds the files only after
+//! reading [`CONFIRMED`], so one GUI opens them, never both.
 
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};

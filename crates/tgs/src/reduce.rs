@@ -1,8 +1,9 @@
-//! Lossy reductions for animations that don't fit a sticker losslessly,
-//! and how much each one changes.
+//! Lossy reductions for animations that do not fit Telegram's limits
+//! losslessly, plus a distortion metric comparing reduced results against the
+//! original.
 //!
-//! Every reduction keeps the crop and the length, so results compare with
-//! the original pixel for pixel and frame for frame.
+//! Every reduction preserves crop bounds and total duration so outputs can be
+//! compared pixel-for-pixel and frame-for-frame.
 
 use std::collections::HashMap;
 
@@ -12,51 +13,51 @@ use crate::grid::{Edges, Grid, grid_starts};
 use crate::normalise::{PixelAnim, PixelFrame, assemble, assemble_with};
 use crate::{Error, Result};
 
-/// One reduction at one strength. [`Reduction::apply`] refuses strengths
-/// outside the range each kind gives.
+/// A single lossy reduction at a specific strength. [`Reduction::apply`]
+/// rejects out-of-range strengths.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, serde::Deserialize)]
 #[serde(tag = "reduction", rename_all = "kebab-case", rename_all_fields = "kebab-case")]
 #[non_exhaustive]
 pub enum Reduction {
-    /// Snaps the art onto a pixel grid most of it follows, of art pixels
-    /// `scale` input pixels wide: 1 or more, and past the art's size it
-    /// makes no difference.
+    /// Snaps pixels onto a grid of `scale` (>= 1) input pixels per art pixel
+    /// that most of the art follows (scales beyond the art's dimensions have
+    /// no further effect).
     SnapToGrid {
         /// Input pixels per art pixel.
         scale: u32,
     },
-    /// Joins colours closer than `distance` in OKLab into the more common:
-    /// 0 or more, where 0 joins none.
+    /// Merges colours within OKLab `distance` (>= 0) into the more common
+    /// colour.
     MergeColours {
-        /// How far apart colours may be to be joined.
+        /// Maximum OKLab colour distance to merge.
         distance: f64,
     },
-    /// Joins neighbouring frames that differ in at most this share of the
-    /// area, from 0 to 1.
+    /// Merges consecutive frames differing in at most `changed` (`0.0..=1.0`)
+    /// of the total area.
     MergeFrames {
-        /// The share of the area that may differ.
+        /// Maximum fraction of area that may differ.
         changed: f64,
     },
-    /// Drops this share of frames, from 0 to 1, the least different first,
-    /// giving their time to the frame before. However small the share, one
-    /// frame goes, so that a weak step still does something, and however
-    /// large, the first stays.
+    /// Drops `share` (`0.0..=1.0`) of frames, least-different first, adding
+    /// their time to the preceding frame. Always drops at least one frame
+    /// (when more than one exists) so a weak step still makes progress, and
+    /// always keeps the first frame.
     DropFrames {
-        /// The share of frames to drop.
+        /// Fraction of frames to drop.
         share: f64,
     },
-    /// Replaces cells that match none of their 8 neighbours with the most
+    /// Replaces isolated cells that differ from all 8 neighbours with the most
     /// common neighbouring colour.
     Despeckle,
-    /// Scales the art down by `factor`, between 0 and 1 and neither.
+    /// Scales the art down by `factor` (`0.0 < factor < 1.0`).
     Downscale {
-        /// The size kept, as a share of the art's.
+        /// Target size as a fraction of the current size.
         factor: f64,
     },
 }
 
-/// The kinds of reductions, roughly from least to most visible.
+/// Categories of lossy reductions, roughly from least to most visible.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -77,7 +78,7 @@ pub enum Kind {
 }
 
 impl Kind {
-    /// Every kind, in the order fitting tries them.
+    /// All reduction kinds, in the order fitting tries them.
     pub const ALL: &'static [Kind] = &[
         Kind::SnapToGrid,
         Kind::MergeColours,
@@ -87,16 +88,18 @@ impl Kind {
         Kind::Downscale,
     ];
 
-    /// Whether this reduction gives up motion rather than detail.
+    /// Returns true if this reduction sacrifices motion rather than visual
+    /// detail.
     pub fn motion(self) -> bool {
         matches!(self, Kind::MergeFrames | Kind::DropFrames)
     }
 
-    /// The strengths tried, weakest first, from barely visible (colours an
-    /// OKLab distance of 0.02 apart, about the least difference eyes tell)
-    /// to drastic; fitting weakens its last step to between two of them
-    /// (see [`Reduction::between`]). `likely_scale` is the scale snapping
-    /// would use, if the art has one.
+    /// Returns the candidate strengths tried during fitting, weakest first
+    /// (from barely perceptible, such as OKLab distance 0.02, about the
+    /// smallest difference the eye can tell, for [`Kind::MergeColours`], up to
+    /// aggressive). Fitting refines its final step between adjacent levels via
+    /// [`Reduction::between`]. `likely_scale` is the candidate scale for
+    /// [`Kind::SnapToGrid`].
     pub(crate) fn ladder(self, likely_scale: Option<u32>) -> Vec<Reduction> {
         match self {
             Kind::SnapToGrid => {
@@ -119,29 +122,29 @@ impl Kind {
     }
 }
 
-/// What fitting gives up first. Art that is mostly motion, such as a
-/// machine of moving parts, can lose either frames or detail: which looks
-/// better depends on the art. Fitting uses only the kinds this puts first
-/// while any of their strengths are left untried, then the rest; in each
-/// round, the kind that saves the most bytes for the least added error
-/// wins.
+/// Which quality dimension fitting gives up first when reducing an animation
+/// to fit the byte limit ([`crate::Options::max_bytes`], 64 KiB by default).
+/// Fitting exhausts preferred kinds before trying the rest; in each round it
+/// picks the step with the best bytes-saved-per-distortion ratio. Art that is
+/// mostly motion, such as a machine of moving parts, can lose either frames
+/// or detail; which looks better depends on the art.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Compromise {
-    /// Whatever changes the animation least for the bytes it saves.
+    /// Pick whichever reduction saves the most bytes for the least distortion.
     #[default]
     Auto,
-    /// Frames are merged and dropped before the picture changes: full
-    /// detail, choppier motion.
+    /// Merge and drop frames before changing artwork (full detail, choppier
+    /// motion).
     Motion,
-    /// The picture changes (grid, colours, specks, resolution) before any
-    /// frame goes: smooth motion, less detail.
+    /// Simplify artwork (grid, colours, specks, resolution) before dropping
+    /// frames (smoother motion, less detail).
     Detail,
 }
 
 impl Compromise {
-    /// Whether fitting uses `kind` before the others, as long as it helps.
+    /// Returns true if fitting should try `kind` in the first tier.
     pub(crate) fn first(self, kind: Kind) -> bool {
         match self {
             Compromise::Auto => true,
@@ -152,7 +155,7 @@ impl Compromise {
 }
 
 impl Reduction {
-    /// Which kind of reduction this is.
+    /// Returns this reduction's [`Kind`].
     pub fn kind(&self) -> Kind {
         match self {
             Reduction::SnapToGrid { .. } => Kind::SnapToGrid,
@@ -164,8 +167,8 @@ impl Reduction {
         }
     }
 
-    /// The same reduction at a strength between this one's and `weaker`'s
-    /// (`share` 0 is `weaker`, 1 this one), for kinds that have one.
+    /// Interpolates strength between `weaker` (`share == 0`) and `self`
+    /// (`share == 1`) for continuous reduction kinds.
     pub(crate) fn between(&self, weaker: Option<&Reduction>, share: f64) -> Option<Reduction> {
         let mix = |from: f64, to: f64| from + (to - from) * share;
         Some(match (*self, weaker.copied()) {
@@ -233,10 +236,10 @@ impl Reduction {
         }
     }
 
-    /// `anim` reduced, or an error when the strength is outside the range
-    /// its kind gives. One that would leave nothing to see, as snapping
-    /// or downscaling a few lone pixels can, leaves `anim` as it is: a
-    /// blank sticker is the smallest of all, and no use.
+    /// Returns the reduced animation, or an error if the reduction parameter
+    /// is out of range. If a reduction would make visible art completely
+    /// transparent (e.g. snapping or downscaling a few isolated pixels),
+    /// returns `anim` unchanged because a blank sticker is smallest and useless.
     pub fn apply(&self, anim: &PixelAnim) -> Result<PixelAnim> {
         self.check()?;
         let reduced = match *self {
@@ -300,10 +303,10 @@ fn distance(a: [u8; 4], b: [u8; 4]) -> f64 {
     Seen::of(a).distance(Seen::of(b))
 }
 
-/// How much `reduced` differs from `original`: how different every input
-/// pixel looks at every 60 fps frame, averaged. Colours differ by their
-/// OKLab distance where both show, plus the difference in opacity (1
-/// between transparent and opaque).
+/// Computes the mean perceptual distortion between `original` and `reduced`
+/// across all input pixels and 60 fps ticks. Colour differences combine OKLab
+/// distance (weighted by minimum opacity) and alpha difference (`1.0` between
+/// transparent and opaque).
 pub fn distortion(original: &PixelAnim, reduced: &PixelAnim) -> f64 {
     // the edges of both grids together; each piece is in one cell of each
     let overlay = |a: &[u32], b: &[u32]| {

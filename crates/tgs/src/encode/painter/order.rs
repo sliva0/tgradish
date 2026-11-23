@@ -1,19 +1,20 @@
-//! The order colours are drawn in: guessed, searched exactly over
-//! subsets for few colours, greedily for more, and with [`Effort::Best`]
-//! improved by real packed sizes.
+//! Colour drawing-order search: heuristic ordering, exact subset DP for small
+//! palettes, greedy ordering for medium palettes, and compressed-size hill
+//! climbing under [`Effort::Best`].
 
 use super::{Effort, EncodeError, IMPOSSIBLE, Mask, Painter, Scene, cost};
 
-/// Up to this many colours, the order is searched exactly.
+/// Maximum colour count for exact subset DP search.
 const EXACT_ORDER: usize = 10;
-/// Above this many colours times cells times frames, the order is only
-/// guessed whatever the effort: searching it would take minutes. The
-/// corpus comes to at most 11 million, `blue_ball_machine` to 1.9 billion.
+/// Maximum `colours * cells * frames` work budget before falling back to
+/// heuristic order regardless of effort, because searching would take minutes
+/// (the corpus peaks at 11 million; `blue_ball_machine` hits 1.9 billion).
 const SEARCH_WORK: u64 = 200_000_000;
-/// Above this many colours, the order isn't searched at all.
+/// Above this many colours, order search is skipped completely and the
+/// heuristic order is used.
 const GREEDY_ORDER: usize = 256;
-/// Most encodings [`Effort::Best`] tries, each a whole encode scored by
-/// packing it, so that art with many colours still ends.
+/// Maximum full encode+compress trials under [`Effort::Best`] so animations
+/// with many colours still finish in bounded time.
 const BEST_TRIES: usize = 200;
 
 impl Painter<'_> {

@@ -1,6 +1,6 @@
-//! Time, for videos and animations: how fast and how smoothly the result
-//! plays, and for WebM what Telegram is told of its length. A picture
-//! made from a video has only the frame it is made of.
+//! Timing settings for videos and animations: trim range, playback speed, frame
+//! rate, and (for WebM) duration spoofing. Static images from video only pick a
+//! single frame timestamp.
 
 use eframe::egui;
 use tgradish_core::options::{Spoof, TEMPOS};
