@@ -799,7 +799,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let mut harness = opened(dir.path(), &["wide.png"]);
         let path = dir.path().join("session");
-        harness.state_mut().session = crate::session::Store::open(path.clone());
+        harness.state_mut().keeping.store = crate::session::Store::open(path.clone());
         type_width(&mut harness, "40 px", "20");
         harness
             .input_mut()
@@ -810,7 +810,7 @@ mod tests {
             .push(egui::ViewportEvent::Close);
         harness.step();
         eframe::App::on_exit(harness.state_mut(), None);
-        harness.state_mut().session = None;
+        harness.state_mut().keeping.store = None;
         let mut store = crate::session::Store::open(path.clone()).unwrap();
         let saved = store.read().unwrap().session.restore(&path, 1).items;
         assert_eq!(saved[0].choices.crop.map(|crop| crop.width), Some(20));

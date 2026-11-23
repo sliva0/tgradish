@@ -79,16 +79,13 @@ pub(crate) struct App {
     /// The scale asked of egui, and the pointer kept where it is on the
     /// screen as it changes.
     pub(crate) scaling: crate::scaling::Scaling,
-    /// Where the open files are kept between runs; `None` where they
-    /// aren't.
-    pub(crate) session: Option<session::Store>,
+    /// Where and when the session is kept, and the window's layout in it.
+    pub(crate) keeping: session::Keeping,
     /// Where GUIs started while this one runs hand it their files.
     pub(crate) instance: Option<instance::Listener>,
     /// The window asked for attention, for files handed over, until it
     /// has the focus.
     pub(crate) attention: bool,
-    /// When to see whether the session changed.
-    pub(crate) next_save: f64,
     /// The system's fonts for what tgradish's own lack.
     pub(crate) fallbacks: fallback::Fallbacks,
     /// What the texts were when fonts were last looked for them.
@@ -129,9 +126,6 @@ pub(crate) struct App {
     pub(crate) hovering: bool,
     /// Share of the main panel's height the preview takes.
     pub(crate) preview_share: f32,
-    /// How the window is laid out, kept in the session: as it was last
-    /// time until it is drawn.
-    pub(crate) window: Option<session::Window>,
     /// The system's accent colour, as it changes.
     pub(crate) accent: Option<accent::Accent>,
     /// The accent the look was made with last: the one chosen, or
@@ -198,7 +192,7 @@ impl App {
         // laid out as last time, whether or not its files are opened again
         if let Some(window) = session::window(store.path()) {
             self.preview_share = window.preview;
-            self.window = Some(window);
+            self.keeping.window = Some(window);
         }
         // with the setting off, the first save empties what is there
         if self.config.gui.reopen_files {
@@ -225,7 +219,7 @@ impl App {
                 self.say(Message::info(fl!("files-gone", count = restored.gone)));
             }
         }
-        self.session = Some(store);
+        self.keeping.store = Some(store);
     }
 
     /// Shows `message` under what is said already, unless it is among it:
@@ -239,7 +233,7 @@ impl App {
     /// they can be opened again. Where one can't be copied the session
     /// can't be kept: that is said once, as when writing it fails.
     fn copy_pasted(&mut self) {
-        let Some(store) = &mut self.session else { return };
+        let Some(store) = &mut self.keeping.store else { return };
         if !self.config.gui.reopen_files {
             return;
         }
@@ -249,7 +243,7 @@ impl App {
                 Ok(name) => item.pasted_copy = Some(name),
                 Err(err) => {
                     let message = session_unsaved(store.path(), &err);
-                    self.session = None;
+                    self.keeping.store = None;
                     return self.say(message);
                 }
             }
@@ -298,7 +292,7 @@ impl App {
     pub(crate) fn save_session(&mut self) {
         // those pasted while the setting was on have none yet
         self.copy_pasted();
-        let Some(store) = &mut self.session else { return };
+        let Some(store) = &mut self.keeping.store else { return };
         // with the setting off, nothing is kept: an empty session, whose
         // saving removes the copies of pasted images, so they are copied
         // again once it is back on
@@ -312,11 +306,11 @@ impl App {
             (&[], Vec::new())
         };
         let session = session::Session::of(items, self.selected, &self.outputs.written);
-        let session = session.with_window(self.window);
+        let session = session.with_window(self.keeping.window);
         if let Err(err) = store.save(&session, held) {
             let message = session_unsaved(store.path(), &err);
             // once is enough
-            self.session = None;
+            self.keeping.store = None;
             self.say(message);
         }
     }
@@ -341,10 +335,9 @@ impl App {
             theme_shown: None,
             scale_shown: None,
             scaling: Default::default(),
-            session: None,
+            keeping: session::Keeping::default(),
             instance: None,
             attention: false,
-            next_save: 0.0,
             fallbacks: fallback::Fallbacks::new(fonts()),
             fonts_checked: None,
             banner: Banner::default(),
@@ -364,7 +357,6 @@ impl App {
             _toplevel_icon: None,
             hovering: false,
             preview_share: PREVIEW_SHARE,
-            window: None,
             accent: None,
             applied_accent: None,
             system_motion: None,
@@ -431,7 +423,7 @@ impl App {
             let other = viewport.minimized == Some(true) || viewport.fullscreen == Some(true);
             (viewport.inner_rect, viewport.outer_rect, viewport.maximized == Some(true), other)
         });
-        let window = self.window.get_or_insert(session::Window {
+        let window = self.keeping.window.get_or_insert(session::Window {
             size: [1280.0, 820.0],
             position: None,
             maximized: false,
@@ -1094,7 +1086,7 @@ impl eframe::App for App {
         let small = widest < FILES_WIDTH;
         let id = if small { "files-small" } else { "files" };
         // as wide as last time
-        let width = match self.window {
+        let width = match self.keeping.window {
             Some(window) if !small => window.list,
             _ => FILES_WIDTH,
         };
@@ -1196,11 +1188,13 @@ impl eframe::App for App {
         // every few seconds, so a crash loses little; what changed is kept
         // even if nothing is drawn again before then
         let now = ctx.input(|input| input.time);
-        if now >= self.next_save {
-            self.next_save = now + 2.0;
+        if now >= self.keeping.next_save {
+            self.keeping.next_save = now + 2.0;
             self.save_session();
-        } else if self.session.is_some() {
-            ctx.request_repaint_after(std::time::Duration::from_secs_f64(self.next_save - now));
+        } else if self.keeping.store.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_secs_f64(
+                self.keeping.next_save - now,
+            ));
         }
     }
 }
@@ -1237,7 +1231,7 @@ mod tests {
             let said = crate::testing::said(app).contains("kept for next time");
             app.banner.rows.clear();
             assert_eq!(said, app.items.len() == 2);
-            assert!(app.session.is_none() && app.items.last().unwrap().pasted_copy.is_none());
+            assert!(app.keeping.store.is_none() && app.items.last().unwrap().pasted_copy.is_none());
         }
         harness.state_mut().save_session();
         assert_eq!(std::fs::read(&copies).unwrap(), b"in the way");
@@ -1313,7 +1307,7 @@ mod tests {
         // a second instance meanwhile, whose own files are kept nowhere
         let mut second = harness(Config::default());
         second.state_mut().reopen(state.clone());
-        assert!(second.state().session.is_none() && second.state().items.is_empty());
+        assert!(second.state().keeping.store.is_none() && second.state().items.is_empty());
         let art = dir.path().join("art.png");
         square(&art, [255, 0, 0, 255]);
         second.state_mut().add(vec![art]);
@@ -1656,7 +1650,7 @@ mod tests {
         first.state_mut().add(vec![art]);
         first.run_steps(2);
         // the list made wider, by its edge
-        let edge = first.state().window.unwrap().list;
+        let edge = first.state().keeping.window.unwrap().list;
         let drag = |pos| egui::Event::PointerMoved(pos);
         let press = |pos, pressed| egui::Event::PointerButton {
             pos,
@@ -1670,7 +1664,7 @@ mod tests {
             first.step();
         }
         first.run_steps(2);
-        let window = first.state().window.unwrap();
+        let window = first.state().keeping.window.unwrap();
         assert!((window.list - (edge + 60.0)).abs() <= 2.0, "{} from {edge}", window.list);
         first.state_mut().save_session();
         drop(first);
@@ -1688,7 +1682,7 @@ mod tests {
             });
         second.run_steps(2);
         assert_eq!(second.state().preview_share, 0.4);
-        assert_eq!(second.state().window.unwrap().list, window.list);
+        assert_eq!(second.state().keeping.window.unwrap().list, window.list);
         assert_eq!(session::window(&state).map(|window| window.list), Some(window.list));
     }
 

@@ -183,6 +183,21 @@ pub(crate) struct Unreadable {
     pub(crate) aside: PathBuf,
 }
 
+/// What keeps the open files and the window's layout between runs, as
+/// `App` saves them every few seconds; what is kept is `App`'s, which
+/// [`Session::of`] takes, so this holds only where and when.
+#[derive(Default)]
+pub(crate) struct Keeping {
+    /// Where the open files are kept between runs; `None` where they
+    /// aren't.
+    pub(crate) store: Option<Store>,
+    /// When to see whether the session changed.
+    pub(crate) next_save: f64,
+    /// How the window is laid out, kept in the session: as it was last
+    /// time until it is drawn.
+    pub(crate) window: Option<Window>,
+}
+
 /// Active session file store: tracks the last serialised JSON, owned pasted
 /// image copies, and the advisory lock file.
 pub(crate) struct Store {
