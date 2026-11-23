@@ -241,6 +241,15 @@ fn number_typed_now(ctx: &egui::Context) -> bool {
     draft(ctx).is_some() || number_taken_now(ctx)
 }
 
+/// Tells history `said` of the edit of the file being drawn (set by
+/// [`of_file`]), if one is: fields and steppers elsewhere, as in dialogs,
+/// edit no file's settings.
+fn tell(ctx: &egui::Context, said: fn(&egui::Context, u64)) {
+    if let Some(file) = ctx.data(|data| data.get_temp::<u64>(egui::Id::new(DRAWING))) {
+        said(ctx, file);
+    }
+}
+
 /// Surrenders focus from any active number field so its typed value is committed
 /// when drawn this frame.
 pub(crate) fn finish_typed_number(ctx: &egui::Context) {
@@ -628,6 +637,10 @@ impl egui::Widget for Number<'_> {
         if value != old {
             self.set(value);
         }
+        // a screen reader's change is done with as it is made
+        if (asked.is_some() || steps_asked != 0.0) && value != old {
+            tell(ui.ctx(), crate::history::commit);
+        }
         let escaped = ui.input(|input| input.key_pressed(egui::Key::Escape));
         let typing: Option<Typing> = ui.data(|data| data.get_temp(id));
         // If focus left before this widget was drawn (via Escape, Tab, or
@@ -640,8 +653,12 @@ impl egui::Widget for Number<'_> {
             if lately && typing.value == value {
                 if escaped {
                     value = self.put_back(ui, typing, value);
-                } else if let Some(taken) = self.take(ui, id, typing) {
-                    value = taken;
+                    tell(ui.ctx(), crate::history::cancel);
+                } else {
+                    if let Some(taken) = self.take(ui, id, typing) {
+                        value = taken;
+                    }
+                    tell(ui.ctx(), crate::history::commit);
                 }
             }
         }
@@ -665,6 +682,8 @@ impl egui::Widget for Number<'_> {
                 }
                 typing = self.typing(ui, value, value);
                 cursor_to_end(ui, id, &typing.text);
+                // a step of its own, as the field goes on being typed in
+                tell(ui.ctx(), crate::history::commit);
             }
             // Consume Shift+arrow presses before plain arrows because
             // `Modifiers::NONE` matches shifted presses too.
@@ -740,13 +759,20 @@ impl egui::Widget for Number<'_> {
                     data.insert_temp(id, typing);
                     data.insert_temp(egui::Id::new(TYPED), Typed { field: id, file });
                 });
+                // what its keys and the wheel step, and what is typed, is
+                // one step once it is done with
+                tell(ui.ctx(), crate::history::underway);
             } else {
                 // Editing finished via Enter or a pointer press outside.
                 ui.data_mut(|data| data.remove::<Typing>(id));
                 if escaped {
                     value = self.put_back(ui, &typing, value);
-                } else if let Some(taken) = self.take(ui, id, &typing) {
-                    value = taken;
+                    tell(ui.ctx(), crate::history::cancel);
+                } else {
+                    if let Some(taken) = self.take(ui, id, &typing) {
+                        value = taken;
+                    }
+                    tell(ui.ctx(), crate::history::commit);
                 }
             }
             response
@@ -774,6 +800,8 @@ impl egui::Widget for Number<'_> {
                 ui.data_mut(|data| data.remove::<Typing>(id));
                 ui.memory_mut(|memory| memory.request_focus(id));
             } else if response.dragged() {
+                // a step once it is let go of
+                tell(ui.ctx(), crate::history::underway);
                 ui.set_cursor_icon(cursor);
                 let delta = response.drag_delta();
                 // Increase when dragging right or up.
@@ -791,6 +819,8 @@ impl egui::Widget for Number<'_> {
                     self.set(value);
                     ui.data_mut(|data| data.insert_temp(id, precise));
                 }
+            } else if response.drag_stopped() {
+                tell(ui.ctx(), crate::history::commit);
             }
             response
         };
@@ -971,6 +1001,13 @@ pub(crate) fn stepper(
     if put_off {
         // Record that a deferred user action fired on this pass.
         ui.data_mut(|data| data.insert_temp(egui::Id::new(ACTED), pass));
+    }
+    // Held, its steps are one edit, done with as it is let go of; a click
+    // by the keyboard or a screen reader, or one put off, is a step alone.
+    if held {
+        tell(ui.ctx(), crate::history::underway);
+    } else if since.is_some() || stepped {
+        tell(ui.ctx(), crate::history::commit);
     }
     if held {
         let from = since.map_or(now, |(from, _)| from);

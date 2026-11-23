@@ -1473,6 +1473,34 @@ mod tests {
         assert_eq!(width_of(&harness, 0), crop);
     }
 
+    #[test]
+    fn puts_back_a_scale_stepped_in_its_field_and_given_up_on_with_its_crop() {
+        if !has_ffmpeg() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        for label in [fl!("format-image"), fl!("scaling-integer"), fl!("scale-fixed")] {
+            harness.get_by_label(&label).click_accesskit();
+            harness.run_steps(2);
+            finish(&mut harness);
+        }
+        let set = selected(&harness).choices.webm.integer_scale;
+        // stepped up by its keys, which keeps the crop smaller, then Escape
+        scale_field(&harness).focus();
+        harness.run_steps(2);
+        for _ in 0..2 {
+            keys(&mut harness, Modifiers::NONE, egui::Key::ArrowUp);
+        }
+        assert_ne!(selected(&harness).choices.webm.integer_scale, set);
+        assert!(width_of(&harness, 0).is_some());
+        keys(&mut harness, Modifiers::NONE, egui::Key::Escape);
+        harness.run_steps(2);
+        // all as it was, and no step
+        assert_eq!(selected(&harness).choices.webm.integer_scale, set);
+        assert_eq!((width_of(&harness, 0), steps(&harness)), (None, 3));
+    }
+
     /// The field of the integer scale, which holds `×` and a number.
     fn scale_field<'a>(harness: &'a Harness<'_, App>) -> egui_kittest::Node<'a> {
         let scale = egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton);

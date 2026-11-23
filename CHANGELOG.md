@@ -34,6 +34,7 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 - The Inspect and About dialogs now scroll inside short windows or at high UI scales, keeping the Close button visible.
 - Screen readers now announce labels for GUI number fields and report what progress bars represent and their current progress.
 - Holding an arrow key on the GUI crop now keeps moving it, instead of moving it a pixel or two and then taking the keyboard focus elsewhere.
+- Pressing Escape in a GUI number field after stepping it with the arrow keys or the wheel now also puts back what the step changed elsewhere, such as the crop an integer scale holds, and leaves nothing to undo.
 
 ## [2.1.1] - 2026-11-18
 
