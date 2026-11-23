@@ -31,6 +31,9 @@ pub(crate) enum Ask {
     Manage,
 }
 
+/// Where a preset dialog asked for waits, an [`Ask`]: written by the
+/// controls that ask, from where `App` isn't at hand, and taken by
+/// [`App::preset_dialogs`] as it is drawn, once.
 fn ask_id() -> egui::Id {
     egui::Id::new("preset dialog asked for")
 }
@@ -38,6 +41,15 @@ fn ask_id() -> egui::Id {
 /// Requests that a preset dialog be opened on the next frame.
 pub(crate) fn ask(ctx: &egui::Context, ask: Ask) {
     ctx.data_mut(|data| data.insert_temp(ask_id(), ask));
+}
+
+/// What [`ask`] asked for, once.
+fn asked(ctx: &egui::Context) -> Option<Ask> {
+    ctx.data_mut(|data| {
+        let asked = data.get_temp::<Ask>(ask_id());
+        data.remove::<Ask>(ask_id());
+        asked
+    })
 }
 
 /// Active preset dialog state.
@@ -166,12 +178,7 @@ fn name_problem(name: &str) -> Option<String> {
 impl App {
     /// Opens any requested preset dialog and draws the currently open one.
     pub(crate) fn preset_dialogs(&mut self, ctx: &egui::Context) {
-        let asked = ctx.data_mut(|data| {
-            let asked = data.get_temp::<Ask>(ask_id());
-            data.remove::<Ask>(ask_id());
-            asked
-        });
-        if let Some(asked) = asked {
+        if let Some(asked) = asked(ctx) {
             self.dialogs.presets = Some(match asked {
                 Ask::Save(item) => Dialog::Save(Saving {
                     item,

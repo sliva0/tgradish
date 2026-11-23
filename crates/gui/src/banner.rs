@@ -55,6 +55,9 @@ pub(crate) enum Action {
     UndoReset,
 }
 
+/// Where an action asked for waits, an `Option<Action>`: written by
+/// [`ask`] from controls drawn where `App` isn't at hand, and taken by
+/// `App` with [`asked`] once the banner is drawn, in the same frame.
 fn asked_id() -> egui::Id {
     egui::Id::new("asked action")
 }
