@@ -743,6 +743,12 @@ impl App {
     fn follow_edits(&mut self, ctx: &egui::Context) {
         let frame = self.edit_frames.end(ctx, self.drawn);
         let selected = self.drawn;
+        // what the settings drawn make of the crop, as an integer scale
+        // holds it, as part of the change that brought it about in this
+        // frame, wherever that was drawn
+        if let Some(item) = self.items.iter_mut().find(|item| Some(item.id) == selected) {
+            crate::file_settings::keep_crop(item, &self.presets, &self.config);
+        }
         // only the file whose settings were drawn is changed by hand
         let other = crate::history::Frame { input: false, ..frame };
         let items = self.items.iter_mut().map(|item| match Some(item.id) == selected {

@@ -1536,6 +1536,35 @@ mod tests {
         assert_eq!((width_of(&harness, 0), steps(&harness)), (None, 3));
     }
 
+    #[test]
+    fn joins_what_an_integer_scale_makes_of_the_crop_to_the_scale_typed_and_clicked_off() {
+        if !has_ffmpeg() {
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let mut harness = opened(dir.path(), &["wide.png"]);
+        for label in [fl!("format-image"), fl!("scaling-integer"), fl!("scale-fixed")] {
+            harness.get_by_label(&label).click_accesskit();
+            harness.run_steps(2);
+            finish(&mut harness);
+        }
+        let set = selected(&harness).choices.webm.integer_scale;
+        // ×20 typed, and taken by a click beside it, on nothing
+        let beside = scale_field(&harness).rect().right_center() + vec2(400.0, 0.0);
+        scale_field(&harness).focus();
+        harness.run_steps(2);
+        harness.event(egui::Event::Text("20".into()));
+        harness.run_steps(2);
+        pointer_click(&mut harness, beside);
+        assert_eq!(width_of(&harness, 0), Some(25));
+        // one step, which puts back both: what the scale makes of the crop
+        // is no step of its own, which undone would only be made again
+        assert_eq!(steps(&harness), 4);
+        undo(&mut harness);
+        assert_eq!(selected(&harness).choices.webm.integer_scale, set);
+        assert_eq!((width_of(&harness, 0), steps(&harness)), (None, 3));
+    }
+
     /// The field of the integer scale, which holds `×` and a number.
     fn scale_field<'a>(harness: &'a Harness<'_, App>) -> egui_kittest::Node<'a> {
         let scale = egui_kittest::kittest::by().role(egui::accesskit::Role::SpinButton);

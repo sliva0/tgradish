@@ -184,19 +184,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
     let (presets, config) = (context.presets, context.config);
     let basis = Basis::of(item, context);
     let Basis { size, ref effective, exact, .. } = basis;
-    // an integer scale holds the crop to the size it takes: this is where a
-    // crop is kept to it, as the scale or the crop change, and the small
-    // picture of the result counts on that from the next frame
-    // not a crop outside the picture, which is left to be put right
-    let outside = |size: (u32, u32)| item.choices.crop.is_some_and(|c| !c.fits(size.0, size.1));
-    if let (Some(exact), Some(size)) = (exact, size.filter(|&size| !outside(size))) {
-        let full = Crop::whole(size);
-        let ratio = ratio(item.view.aspect, size);
-        let start = (Keep::Start, Keep::Start);
-        if let Some(fitted) = exact.fit(item.choices.crop.unwrap_or(full), start, ratio, size) {
-            item.choices.crop = (fitted != full).then_some(fitted);
-        }
-    }
+    keep_exact(item, exact);
     // how a .tgs becomes square, its preset's or else the default, which
     // keeps the crop's shape square while it is "Off", as the GUI keeps
     // it for every file, shown or not
@@ -590,6 +578,34 @@ const SQUARE: Aspect = Aspect::Ratio(1.0, 1.0);
 /// its settings are shown or not) locks its aspect ratio to 1:1 and squares its
 /// crop once the input size is known. Called every frame for all items and when
 /// queuing conversions.
+/// Keeps `item`'s crop to the size an integer scale holds it to, `exact`:
+/// this is where a crop is kept to it, as the scale or the crop change,
+/// and the small picture of the result counts on that from the next
+/// frame. Not a crop outside the picture, which is left to be put right.
+fn keep_exact(item: &mut Item, exact: Option<Exact>) {
+    let size = item.input_size();
+    let outside = |size: (u32, u32)| item.choices.crop.is_some_and(|c| !c.fits(size.0, size.1));
+    if let (Some(exact), Some(size)) = (exact, size.filter(|&size| !outside(size))) {
+        let full = Crop::whole(size);
+        let ratio = ratio(item.view.aspect, size);
+        let start = (Keep::Start, Keep::Start);
+        if let Some(fitted) = exact.fit(item.choices.crop.unwrap_or(full), start, ratio, size) {
+            item.choices.crop = (fitted != full).then_some(fitted);
+        }
+    }
+}
+
+/// Keeps `item`'s crop as its settings hold it, to an integer scale and
+/// square where a `.tgs` keeps it so, as [`picture`] does as it is drawn.
+/// Done again as each frame ends, so that what a change made late in the
+/// frame brings about is part of that change, not one of the next frame.
+pub(crate) fn keep_crop(item: &mut Item, presets: &Presets, config: &Config) {
+    let recipe = item.choices.recipe(Format::Webm, presets, config);
+    let options = recipe.map_or_else(|_| item.choices.webm.clone(), Recipe::into_webm);
+    keep_exact(item, exact_of(&options).filter(|_| item.format != Format::Tgs));
+    keep_square(item, presets, config);
+}
+
 pub(crate) fn keep_square(item: &mut Item, presets: &Presets, config: &Config) {
     if item.format != Format::Tgs {
         return;
