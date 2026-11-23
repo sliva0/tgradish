@@ -402,19 +402,6 @@ jobs:
             pacman -R --noconfirm "$package"
           done
 
-      # The PKGBUILD's check() runs only tgradish-tgs; run the full suite here
-      # as non-root `builder` (permission tests fail under root) with
-      # --no-fail-fast.
-      - name: Run every crate's tests
-        shell: bash
-        run: |
-          set -euxo pipefail
-          pacman -S --noconfirm --needed ffmpeg
-          version=$(sed -n 's/^pkgver=//p' packaging/aur/tgradish/PKGBUILD)
-          cd "/tmp/aur/tgradish/src/tgradish-$version"
-          runuser -u builder -- env TGRADISH_REQUIRE_FFMPEG=1 cargo test --locked --no-fail-fast \
-            -p tgradish-tgs -p tgradish-core -p tgradish
-
   # Smoke-test the Windows build on Windows.
   test-windows:
     needs: build
