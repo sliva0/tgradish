@@ -1,23 +1,19 @@
 name: CI
 
 # Skip pure Markdown changes, except files validated by CI (CHANGELOG.md,
-# README.md links, and licence files). The last matching pattern wins.
+# README.md links, and licence files). The last matching pattern wins. Pull
+# requests take the same list through a YAML alias.
 on:
   push:
     branches: [main]
-    paths:
+    paths: &paths
       - "**"
       - "!**.md"
       - README.md
       - CHANGELOG.md
       - crates/core/licenses/**
   pull_request:
-    paths:
-      - "**"
-      - "!**.md"
-      - README.md
-      - CHANGELOG.md
-      - crates/core/licenses/**
+    paths: *paths
 
 # Cancel superseded runs on the same branch or pull request.
 concurrency:

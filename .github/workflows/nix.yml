@@ -5,8 +5,9 @@ name: nix
 on:
   push:
     branches: [main]
-    paths:
-      # Matches the source fileset in packaging/nix/package.nix.
+    # Matches the source fileset in packaging/nix/package.nix. Pull requests
+    # take the same list through a YAML alias.
+    paths: &paths
       - flake.nix
       - flake.lock
       - packaging/nix/**
@@ -18,18 +19,7 @@ on:
       - "!crates/tgs-lab/**"
       - "!**.md"
   pull_request:
-    paths:
-      # Matches the source fileset in packaging/nix/package.nix.
-      - flake.nix
-      - flake.lock
-      - packaging/nix/**
-      - Cargo.toml
-      - Cargo.lock
-      - crates/**
-      - xtask/**
-      - .github/workflows/nix.yml
-      - "!crates/tgs-lab/**"
-      - "!**.md"
+    paths: *paths
   workflow_dispatch:
 
 # Cancel superseded runs on the same branch or pull request.
