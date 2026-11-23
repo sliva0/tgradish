@@ -57,12 +57,13 @@ pub(crate) use fl;
 /// would not fit.
 const VARIABLE: &str = "TGRADISH_LANG";
 
-/// The languages there are translations for, English first, each with
-/// what it calls itself.
+/// The languages there are translations for, each with what it calls
+/// itself, in the order of those names.
 pub(crate) fn languages() -> &'static [(LanguageIdentifier, String)] {
     static LANGUAGES: LazyLock<Vec<(LanguageIdentifier, String)>> = LazyLock::new(|| {
-        let languages = LOADER.available_languages(&Files).unwrap_or_default();
-        languages
+        let mut languages: Vec<_> = LOADER
+            .available_languages(&Files)
+            .unwrap_or_default()
             .into_iter()
             .map(|language| {
                 // its own file alone, as `LOADER` loads only those shown
@@ -73,25 +74,91 @@ pub(crate) fn languages() -> &'static [(LanguageIdentifier, String)] {
                 };
                 (language, name)
             })
-            .collect()
+            .collect();
+        // by name, as those who read each know it; Latin letters before
+        // Cyrillic ones, as Unicode has them
+        languages.sort_by_cached_key(|(_, name)| name.to_lowercase());
+        languages
     });
     &LANGUAGES
 }
 
+/// What `TGRADISH_LANG` asks for, if it is set.
+pub(crate) fn variable() -> Option<String> {
+    std::env::var(VARIABLE).ok().filter(|tag| !tag.is_empty())
+}
+
+/// The language the system's settings pick of those there are
+/// translations for, if they pick one.
+pub(crate) fn system() -> Option<LanguageIdentifier> {
+    let asked: Vec<LanguageIdentifier> =
+        sys_locale::get_locales().filter_map(|tag| tag.parse().ok()).collect();
+    let available: Vec<_> = languages().iter().map(|(language, _)| language.clone()).collect();
+    pick(&asked, &available, LOADER.fallback_language())
+}
+
+/// Regions where English is spelt as in the United States: the country
+/// itself, its territories, and the Philippines. Elsewhere, as in Canada,
+/// Australia or India, British spelling is nearer the custom.
+const AMERICAN: [&str; 8] = ["US", "AS", "GU", "MP", "PR", "UM", "VI", "PH"];
+
+/// Which of `available` to show for `asked`, the languages asked for in
+/// the order they are preferred: the first asked for that there is a
+/// translation into. Of a language's several, as English's, the one of
+/// the region asked for, else for English the British or American as the
+/// region spells it, else the one `fallback` is, else the first. A script
+/// asked for, as Cyrillic Uzbek's, rules out another script's.
+fn pick(
+    asked: &[LanguageIdentifier],
+    available: &[LanguageIdentifier],
+    fallback: &LanguageIdentifier,
+) -> Option<LanguageIdentifier> {
+    for asked in asked {
+        let of_language: Vec<&LanguageIdentifier> = available
+            .iter()
+            .filter(|had| had.language == asked.language)
+            .filter(|had| {
+                asked.script.is_none() || had.script.is_none_or(|s| asked.script == Some(s))
+            })
+            .collect();
+        let of_region = |region: &str| {
+            of_language
+                .iter()
+                .find(|had| had.region.as_ref().is_some_and(|had| had.as_str() == region))
+        };
+        let english = asked.language.as_str() == "en";
+        let region = asked.region.as_ref().map(|region| region.as_str());
+        let found = region
+            .and_then(of_region)
+            .or_else(|| {
+                let american = region.is_some_and(|region| AMERICAN.contains(&region));
+                english.then(|| of_region(if american { "US" } else { "GB" })).flatten()
+            })
+            .or_else(|| of_language.iter().find(|had| **had == fallback))
+            .or_else(|| of_language.first());
+        if let Some(found) = found {
+            return Some((*found).clone());
+        }
+    }
+    None
+}
+
 /// Shows the GUI in `language`, as a tag, or in the system's when
-/// `None`, as far as there are translations. `TGRADISH_LANG` comes first.
+/// `None`, as far as there are translations, else in English.
+/// `TGRADISH_LANG` comes first.
 pub(crate) fn choose(language: Option<&str>) {
-    let variable = std::env::var(VARIABLE).ok().filter(|tag| !tag.is_empty());
+    let variable = variable();
     let pseudo = variable.as_deref() == Some("pseudo");
-    let asked: Vec<LanguageIdentifier> = match variable.as_deref().filter(|_| !pseudo).or(language)
-    {
-        Some(tag) => tag.parse().into_iter().collect(),
-        None => sys_locale::get_locales().filter_map(|tag| tag.parse().ok()).collect(),
+    let available: Vec<_> = languages().iter().map(|(language, _)| language.clone()).collect();
+    let fallback = LOADER.fallback_language().clone();
+    let picked = match variable.as_deref().filter(|_| !pseudo).or(language) {
+        _ if pseudo => None,
+        Some(tag) => tag.parse().ok().and_then(|tag| pick(&[tag], &available, &fallback)),
+        None => system(),
     };
-    if pseudo || asked.is_empty() {
-        let english = LOADER.fallback_language().clone();
-        let _ = LOADER.load_languages(&Files, &[english]);
-    } else if i18n_embed::select(&*LOADER, &Files, &asked).is_err() {
+    // English stands in for what a translation lacks
+    let language = picked.unwrap_or(fallback);
+    if LOADER.load_languages(&Files, &[language]).is_err() {
         let _ = LOADER.load_fallback_language(&Files);
     }
     settle(&LOADER, pseudo);
@@ -424,6 +491,13 @@ mod tests {
             });
         let patterns = patterns(&resource);
         let had: BTreeSet<&str> = patterns.iter().map(|(id, _)| id.as_str()).collect();
+        // what its messages put in, which it must give itself
+        let mut put_in = BTreeSet::new();
+        for (_, pattern) in &patterns {
+            let mut found = Parts::default();
+            parts(pattern, &mut found);
+            put_in.extend(found.references);
+        }
         // English stands in for what a variant of it lacks
         let variant = language.language == fallback.language && language != *fallback;
         let forms = plural_forms(&language);
@@ -446,9 +520,11 @@ mod tests {
                     arguments(&mut found.arguments.difference(known)),
                     arguments(&mut known.iter()),
                 )),
-                Some((_, english)) if variant && english == *pattern => problems.push(format!(
-                    "{id} says just what en-GB does: leave it out, as en-GB stands in for it"
-                )),
+                Some((_, english)) if variant && english == *pattern && !put_in.contains(id) => {
+                    problems.push(format!(
+                        "{id} says just what en-GB does: leave it out, as en-GB stands in for it"
+                    ));
+                }
                 Some(_) => {}
             }
             for reference in &found.references {
@@ -816,6 +892,72 @@ mod tests {
             }
         }
         assert!(lacking.is_empty(), "characters no font draws:\n{}", lacking.join("\n"));
+    }
+
+    #[test]
+    fn picks_the_language_asked_for_and_the_english_its_region_spells() {
+        let tags = |tags: &[&str]| -> Vec<LanguageIdentifier> {
+            tags.iter().map(|tag| tag.parse().unwrap()).collect()
+        };
+        let available = tags(&["en-GB", "en-US", "pt-BR", "ru", "uk", "uz"]);
+        let fallback = &available[0];
+        let picked = |asked: &[&str]| pick(&tags(asked), &available, fallback);
+        let cases: [(&[&str], Option<&str>); 17] = [
+            (&["en-US"], Some("en-US")),
+            (&["en-PR"], Some("en-US")),
+            (&["en-PH"], Some("en-US")),
+            (&["en-GB"], Some("en-GB")),
+            (&["en-CA"], Some("en-GB")),
+            (&["en-AU"], Some("en-GB")),
+            (&["en-IN"], Some("en-GB")),
+            (&["en"], Some("en-GB")),
+            (&["uk-UA"], Some("uk")),
+            (&["ru-RU"], Some("ru")),
+            (&["pt-PT"], Some("pt-BR")),
+            (&["pt"], Some("pt-BR")),
+            (&["uz-Latn-UZ"], Some("uz")),
+            (&["de-DE", "ru-RU", "en-US"], Some("ru")),
+            (&["de-DE", "en-US"], Some("en-US")),
+            (&["de-DE"], None),
+            (&[], None),
+        ];
+        for (asked, expected) in cases {
+            let expected = expected.map(|tag| tag.parse().unwrap());
+            assert_eq!(picked(asked), expected, "{asked:?}");
+        }
+    }
+
+    /// American English says what differs, and British English the rest:
+    /// a value where American gives only an attribute, and the reverse.
+    #[test]
+    fn american_english_falls_back_on_british_for_the_rest() {
+        let american: LanguageIdentifier = "en-US".parse().unwrap();
+        let loader = FluentLanguageLoader::new(LOADER.domain(), LOADER.fallback_language().clone());
+        loader.load_languages(&Files, &[american]).unwrap();
+        assert_eq!(loader.get("accent"), "Accent color");
+        assert_eq!(loader.get("accent-grey"), "Gray");
+        assert_eq!(loader.get("fitting"), "Getting under the limit");
+        assert!(loader.get_attr("fitting", "lossless").contains("unchecks"));
+        assert_eq!(loader.get("accent-system"), "As the system");
+        assert!(loader.get_attr("accent-system", "hint").contains("accent color"));
+        assert_eq!(
+            loader.get_attr("accent", "hint"),
+            "What marks the chosen, the hovered, and the focused"
+        );
+        assert_eq!(loader.get("close"), "Close");
+    }
+
+    #[test]
+    fn names_each_language_as_it_calls_itself() {
+        let names: Vec<&str> = languages().iter().map(|(_, name)| name.as_str()).collect();
+        for name in ["English (UK)", "English (US)", "Русский", "Українська"] {
+            assert!(names.contains(&name), "{names:?}");
+        }
+        // in order, and none named alike
+        let mut sorted = names.clone();
+        sorted.sort_by_key(|name| name.to_lowercase());
+        sorted.dedup();
+        assert_eq!(names, sorted);
     }
 
     #[test]

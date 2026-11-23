@@ -14,7 +14,7 @@
 ### term, which is only put in others.
 
 # The language's name for itself, as the Settings dialog lists it.
-language-name = English
+language-name = English (UK)
 
 
 ## Shared by many places
