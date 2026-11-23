@@ -118,7 +118,7 @@ mod tests {
 
     #[test]
     fn reads_back_what_converting_drew() {
-        use crate::options::{Crop, Effort, Resize};
+        use crate::options::{Crop, Effort, Resize, Selection};
         use crate::tgs::{Options, Request, convert};
         let dir = tempfile::tempdir().unwrap();
         let mut read = 0;
@@ -128,16 +128,20 @@ mod tests {
             let (width, height) = file.sprite.size();
             // whole, square three ways, and cut through art pixels
             let cut = Crop { x: 1, y: 2, width: width - 2, height: height - 3 };
+            let resize = |resize| Options { resize: Some(resize), ..Options::default() };
+            let whole = Selection::default();
+            let cropped = Selection { crop: Some(cut), ..Selection::default() };
             let options = [
-                Options::default(),
-                Options { resize: Some(Resize::Crop), ..Options::default() },
-                Options { resize: Some(Resize::Stretch), ..Options::default() },
-                Options { crop: Some(cut), ..Options::default() },
-                Options { crop: Some(cut), resize: Some(Resize::Crop), ..Options::default() },
+                (whole.clone(), Options::default()),
+                (whole.clone(), resize(Resize::Crop)),
+                (whole, resize(Resize::Stretch)),
+                (cropped.clone(), Options::default()),
+                (cropped, resize(Resize::Crop)),
             ];
-            for (index, options) in options.into_iter().enumerate() {
+            for (index, (selection, options)) in options.into_iter().enumerate() {
                 let request = Request {
                     output: Some(dir.path().join(format!("{}.{index}.tgs", file.name))),
+                    selection,
                     options: Options { effort: Some(Effort::Fast), ..options },
                     overwrite: true,
                     ..Request::new(crate::input::Input::File(input.clone()))

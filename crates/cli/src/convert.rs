@@ -11,6 +11,7 @@ use tgradish_core::config::Config;
 use tgradish_core::convert::{self, needs_backend};
 use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
+use tgradish_core::options::Settings;
 use tgradish_core::presets::{Format, FormatOptions, Presets};
 use tgradish_core::resolve::{Origin, ResolveError, SetAside, resolve};
 use tgradish_core::webp;
@@ -58,8 +59,9 @@ impl Verdict {
 pub struct Converter<'a> {
     ctx: &'a Context,
     args: &'a ConversionArgs,
-    /// Resolved format options: preset, then `--options-json`, then CLI flags.
-    options: FormatOptions,
+    /// Resolved settings: the preset's options, then `--options-json`'s,
+    /// then the flags', and what of one file's own they choose.
+    settings: Settings<FormatOptions>,
     /// Warnings of the values set aside, given with each input as it starts.
     set_aside: Vec<String>,
     /// Cached ffmpeg backend. Resolved up front for WebM and WebP (which always
@@ -76,18 +78,13 @@ pub struct Converter<'a> {
     fps_unused_said: std::cell::Cell<bool>,
 }
 
-/// `--options-json`'s options, as `format` takes them.
-fn json_options(
+/// `--options-json`'s settings, as `format` takes them.
+fn json_settings(
     json: &serde_json::Map<String, serde_json::Value>,
     format: Format,
-) -> Result<FormatOptions> {
+) -> Result<Settings<FormatOptions>> {
     let json = serde_json::Value::Object(json.clone());
-    let read = match format {
-        Format::Webm => serde_json::from_value(json).map(FormatOptions::Webm),
-        Format::Webp => serde_json::from_value(json).map(FormatOptions::Webp),
-        Format::Tgs => serde_json::from_value(json).map(FormatOptions::Tgs),
-    };
-    read.map_err(|err| {
+    Settings::from_json(format, json).map_err(|err| {
         crate::usage(format!("invalid --options-json for {} output: {err}", format.name()))
     })
 }
@@ -131,7 +128,7 @@ fn check_output(output: &Path, format: Format) -> Result<()> {
     }
 }
 
-/// What the options for `format` come to: the preset's (named by
+/// What the settings for `format` come to: the preset's options (named by
 /// `--preset`, or else by the config), then `--options-json`'s, then the
 /// flags', each over the last, checked before any input is read. Also
 /// returns the warnings each input gets of the values set aside.
@@ -142,18 +139,18 @@ fn layer_options(
     args: &ConversionArgs,
     json: Option<&serde_json::Map<String, serde_json::Value>>,
     format: Format,
-) -> Result<(FormatOptions, Vec<String>)> {
+) -> Result<(Settings<FormatOptions>, Vec<String>)> {
     let mut layers = Vec::new();
     if let Some(json) = json {
-        layers.push(json_options(json, format)?);
+        layers.push(json_settings(json, format)?);
     }
     let flags = layers.len();
-    let flagged = match format {
+    let options = match format {
         Format::Webm => FormatOptions::Webm(args.options.to_options()),
         Format::Webp => FormatOptions::Webp(webp::Options::from(&args.options.to_options())),
         Format::Tgs => FormatOptions::Tgs(args.options.to_tgs_options()),
     };
-    layers.push(args.options.to_selection().for_format(format).into_options(flagged));
+    layers.push(Settings { selection: args.options.to_selection(), options });
     let name = args.preset.as_deref().unwrap_or_else(|| config.preset_for(format));
     let refused = |err| match err {
         ResolveError::UnknownPreset { known, named, .. } => {
@@ -202,7 +199,7 @@ fn layer_options(
             _ => warnings.push(format!("{option} is ignored because {why}")),
         }
     }
-    Ok((resolved.options, warnings))
+    Ok((resolved.settings, warnings))
 }
 
 impl<'a> Converter<'a> {
@@ -240,7 +237,7 @@ impl<'a> Converter<'a> {
         }
         let presets = Presets::load_user()?;
         let config_file = ctx.config_file.as_ref();
-        let (options, set_aside) =
+        let (settings, set_aside) =
             layer_options(&presets, &ctx.config, config_file, args, json.as_ref(), format)?;
         let backend = match format {
             Format::Webm | Format::Webp => Some(ctx.backend().map_err(|err| ctx.explain(err))?),
@@ -263,7 +260,7 @@ impl<'a> Converter<'a> {
         Ok(Self {
             ctx,
             args,
-            options,
+            settings,
             set_aside,
             backend,
             written: Default::default(),
@@ -276,7 +273,7 @@ impl<'a> Converter<'a> {
     /// `--output-dir` when set (preserving any relative subdirectories under
     /// `base`).
     pub fn output_for(&self, input: &Input, base: Option<&Path>) -> PathBuf {
-        let output = input.default_output(self.options.format(), self.options.target());
+        let output = input.default_output(self.settings.format(), self.settings.target());
         let (Some(dir), Some(name)) = (&self.args.output_dir, output.file_name()) else {
             return output;
         };
@@ -321,8 +318,8 @@ impl<'a> Converter<'a> {
         let cancel = &self.ctx.cancel;
         let json = self.ctx.global.json;
         let (input, output) = (input.clone(), Some(output));
-        let exact =
-            matches!(&self.options, FormatOptions::Tgs(options) if options.exact_or_default());
+        let exact = matches!(&self.settings.options,
+            FormatOptions::Tgs(options) if options.exact_or_default());
         let mut printer = Printer::new(self.ctx, exact);
         let mut on_event = |event: Event| {
             let started = matches!(event, Event::Started(_));
@@ -341,15 +338,15 @@ impl<'a> Converter<'a> {
         let request = convert::Request {
             input,
             output,
-            options: self.options.clone(),
+            settings: self.settings.clone(),
             overwrite,
             keep_temp: self.args.keep_temp,
             threads: self.args.threads.unwrap_or(self.ctx.config.threads),
         };
         // a frame rate is how fast pictures that have none play
-        if let FormatOptions::Tgs(options) = &self.options
+        if self.settings.format() == Format::Tgs
             && matches!(request.input, Input::File(_))
-            && options.sheet.is_none()
+            && self.settings.selection.sheet.is_none()
             && self.fps_given
             && !self.fps_unused_said.replace(true)
         {
@@ -883,7 +880,7 @@ mod tests {
     // on purpose.
 
     use clap::Parser;
-    use tgradish_core::options::{Effort, Fit, IntegerScale, Resize, Scaling, Spoof};
+    use tgradish_core::options::{Effort, Fit, IntegerScale, Resize, Scaling, Selection, Spoof};
     use tgradish_core::tgs;
     use tgradish_core::webm::Options;
 
@@ -915,7 +912,7 @@ mod tests {
         format: Format,
         flags: &[&str],
         json: Option<serde_json::Value>,
-    ) -> Result<(FormatOptions, Vec<String>)> {
+    ) -> Result<(Settings<FormatOptions>, Vec<String>)> {
         let json = json.map(|json| json.as_object().expect("an object").clone());
         layer_options(presets, config, None, &args(flags), json.as_ref(), format)
     }
@@ -927,7 +924,7 @@ mod tests {
         format: Format,
         flags: &[&str],
         json: Option<serde_json::Value>,
-    ) -> Result<FormatOptions> {
+    ) -> Result<Settings<FormatOptions>> {
         layered_warned(presets, config, format, flags, json).map(|(options, _)| options)
     }
 
@@ -938,12 +935,17 @@ mod tests {
         (err.downcast_ref::<crate::Usage>().is_some(), err.to_string())
     }
 
-    fn webm(options: Options) -> FormatOptions {
-        FormatOptions::Webm(options)
+    /// The settings of `options` alone, none of the file's own chosen.
+    fn webm(options: Options) -> Settings<FormatOptions> {
+        Settings { selection: default(), options: FormatOptions::Webm(options) }
     }
 
-    fn webp(options: webp::Options) -> FormatOptions {
-        FormatOptions::Webp(options)
+    fn webp(options: webp::Options) -> Settings<FormatOptions> {
+        Settings { selection: default(), options: FormatOptions::Webp(options) }
+    }
+
+    fn tgs_of(options: tgs::Options) -> Settings<FormatOptions> {
+        Settings { selection: default(), options: FormatOptions::Tgs(options) }
     }
 
     #[test]
@@ -962,7 +964,7 @@ mod tests {
             (webm(fitted), vec!["crf is ignored because fit is crf".into()])
         );
         let tgs = tgs::Options { effort: Some(Effort::Fast), exact: Some(false), ..default() };
-        assert_eq!(layered(Format::Tgs), FormatOptions::Tgs(tgs));
+        assert_eq!(layered(Format::Tgs), tgs_of(tgs));
         // a picture's only, and only those checked
         assert_eq!(layered(Format::Webp), webp(default()));
     }
@@ -985,7 +987,7 @@ mod tests {
         let picture_off = webp::Options { watermark: Some(false), ..default() };
         assert_eq!(layered(Format::Webp), webp(picture_off));
         let tgs = tgs::Options { keep_canvas: Some(false), watermark: Some(false), ..default() };
-        assert_eq!(layered(Format::Tgs), FormatOptions::Tgs(tgs));
+        assert_eq!(layered(Format::Tgs), tgs_of(tgs));
     }
 
     #[test]
@@ -1137,7 +1139,7 @@ mod tests {
             |format, flags: &[&str], json| layered(&presets, &config, format, flags, json);
         assert_eq!(layered(Format::Webm, &preset, None).unwrap(), webm(scaled(Effort::Best, "3")));
         let tgs = tgs::Options { effort: Some(Effort::Fast), ..default() };
-        assert_eq!(layered(Format::Tgs, &preset, None).unwrap(), FormatOptions::Tgs(tgs));
+        assert_eq!(layered(Format::Tgs, &preset, None).unwrap(), tgs_of(tgs));
         let json = serde_json::json!({
             "speed": "fast",
             "scaling": "pixel-perfect",
@@ -1170,8 +1172,9 @@ mod tests {
         // a picture's only
         let flags = ["-p", "picture", "--start", "1.5"];
         let picture = layered(&presets, &config, Format::Webp, &flags, None);
-        let sharp = webp::Options { scaling: Some(Scaling::Sharp), start: Some(1.5), ..default() };
-        assert_eq!(picture.unwrap(), webp(sharp));
+        let sharp = webp::Options { scaling: Some(Scaling::Sharp), ..default() };
+        let start = Selection { start: Some(1.5), ..default() };
+        assert_eq!(picture.unwrap(), Settings { selection: start, ..webp(sharp) });
         // and only those checked, so a value a picture doesn't use doesn't
         // stop one being made, as in the GUI
         let tempo = layered(&presets, &config, Format::Webp, &["-p", "fast tempo"], None);
@@ -1216,7 +1219,7 @@ mod tests {
         assert_eq!(refused(layered(&[], json)), (true, said.into()));
         // with one, from either
         let json = Some(serde_json::json!({ "sheet-frames": 3 }));
-        let Ok(FormatOptions::Tgs(sheet)) = layered(&["--sheet", "4x1"], json) else { panic!() };
+        let sheet = layered(&["--sheet", "4x1"], json).unwrap().selection;
         assert_eq!((sheet.sheet, sheet.sheet_frames), ("4x1".parse().ok(), Some(3)));
     }
 
@@ -1234,10 +1237,10 @@ mod tests {
         // of which a picture takes none
         assert_eq!(layered(Format::Webp, &[]).unwrap(), webp(default()));
         let balanced = tgs::Options { effort: Some(Effort::Balanced), ..default() };
-        assert_eq!(layered(Format::Tgs, &[]).unwrap(), FormatOptions::Tgs(balanced));
+        assert_eq!(layered(Format::Tgs, &[]).unwrap(), tgs_of(balanced));
         // unless one is named
         let best = tgs::Options { effort: Some(Effort::Best), ..default() };
-        assert_eq!(layered(Format::Tgs, &["-p", "best"]).unwrap(), FormatOptions::Tgs(best));
+        assert_eq!(layered(Format::Tgs, &["-p", "best"]).unwrap(), tgs_of(best));
         // and one there isn't, said as where it was named
         let none = Config { preset: Some("nope".into()), ..Config::default() };
         let available = "available: balanced, best, fast";
@@ -1350,7 +1353,7 @@ mod tests {
             let layered = layered(&presets, &config, format, &["-p", "none"], Some(given.clone()));
             layered.unwrap_or_else(|err| panic!("{format:?}: {err}"));
             // as read, before what has no say is set aside
-            let read = json_options(given.as_object().unwrap(), format).unwrap();
+            let read = json_settings(given.as_object().unwrap(), format).unwrap();
             assert_eq!(&serde_json::to_value(&read).unwrap(), written, "{format:?}");
         }
     }

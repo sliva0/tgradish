@@ -7,7 +7,7 @@ use crate::config::Config;
 use eframe::egui;
 use serde::{Deserialize, Serialize};
 use tgradish_core::input::{self, FileKind, Input};
-use tgradish_core::options::{Crop, IntegerScale, Resize, Scaling, Selection, Sheet};
+use tgradish_core::options::{Crop, IntegerScale, Resize, Scaling, Selection, Settings, Sheet};
 use tgradish_core::picture;
 use tgradish_core::presets::{Format, FormatOptions, Presets};
 use tgradish_core::resolve::{Resolved, resolve};
@@ -120,7 +120,7 @@ pub(crate) struct SavedChoices {
     length: Option<f64>,
     frame: Option<f64>,
     webm: Options,
-    tgs: tgs::Options,
+    tgs: Settings<tgs::Options>,
 }
 
 impl From<SavedChoices> for Choices {
@@ -128,7 +128,7 @@ impl From<SavedChoices> for Choices {
         let SavedChoices { webm, tgs, .. } = saved;
         // one title, which version 1 kept for each format, though it set
         // neither
-        let title = webm.title.clone().or(tgs.title.clone());
+        let title = webm.title.clone().or(tgs.selection.title);
         // the file's own the GUI never wrote there are read and left out:
         // its own are the item's
         let webm = Options {
@@ -153,22 +153,10 @@ impl From<SavedChoices> for Choices {
             length: saved.length,
             frame: saved.frame,
             title,
-            sheet: tgs.sheet,
-            sheet_frames: tgs.sheet_frames,
+            sheet: tgs.selection.sheet,
+            sheet_frames: tgs.selection.sheet_frames,
             webm,
-            tgs: tgs::Options {
-                target: None,
-                start: None,
-                length: None,
-                crop: None,
-                tag: None,
-                show_layers: None,
-                hide_layers: None,
-                sheet: None,
-                sheet_frames: None,
-                title: None,
-                ..tgs
-            },
+            tgs: tgs.options,
         }
     }
 }
@@ -188,11 +176,14 @@ impl From<Choices> for SavedChoices {
             frame: choices.frame,
             // to both, as either format reads it
             webm: Options { title: title.clone(), ..choices.webm },
-            tgs: tgs::Options {
-                title,
-                sheet: choices.sheet,
-                sheet_frames: choices.sheet_frames,
-                ..choices.tgs
+            tgs: Settings {
+                selection: Selection {
+                    title,
+                    sheet: choices.sheet,
+                    sheet_frames: choices.sheet_frames,
+                    ..Selection::default()
+                },
+                options: choices.tgs,
             },
         }
     }
@@ -263,13 +254,13 @@ impl Choices {
         format: Format,
         presets: &Presets,
         config: &Config,
-    ) -> FormatOptions {
+    ) -> Settings<FormatOptions> {
         let options = match format {
             Format::Webm => FormatOptions::Webm(self.webm_layer(presets, config)),
             Format::Webp => FormatOptions::Webp((&self.webm_layer(presets, config)).into()),
             Format::Tgs => FormatOptions::Tgs(self.tgs.clone()),
         };
-        self.selection(format).into_options(options)
+        Settings { selection: self.selection(format), options }
     }
 
     /// The item's options for WebM, as [`Choices::layer`] says, which a
@@ -312,23 +303,25 @@ impl Choices {
         presets: &Presets,
         config: &Config,
     ) -> Result<Recipe, String> {
-        Ok(self.resolved(format, presets, config)?.options.into())
+        Ok(self.resolved(format, presets, config)?.settings.into())
     }
 
     /// The options that change what pixel art is read as: the item's
     /// tag, layers and sheet, which are of its file alone, and the rate
     /// its frames play at, the preset's included.
-    pub(crate) fn reading(&self, presets: &Presets, config: &Config) -> tgs::Options {
+    pub(crate) fn reading(&self, presets: &Presets, config: &Config) -> Settings<tgs::Options> {
         // a broken preset still leaves the item's own
         let fps = self.tgs.fps.or_else(|| self.tgs_base(presets, config).ok()?.fps);
-        tgs::Options {
-            tag: self.tag.clone(),
-            show_layers: self.show_layers.clone(),
-            hide_layers: self.hide_layers.clone(),
-            sheet: self.sheet,
-            sheet_frames: self.sheet_frames,
-            fps,
-            ..tgs::Options::default()
+        Settings {
+            selection: Selection {
+                tag: self.tag.clone(),
+                show_layers: self.show_layers.clone(),
+                hide_layers: self.hide_layers.clone(),
+                sheet: self.sheet,
+                sheet_frames: self.sheet_frames,
+                ..Selection::default()
+            },
+            options: tgs::Options { fps, ..tgs::Options::default() },
         }
     }
 
@@ -356,7 +349,7 @@ impl Choices {
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Recipe {
     Webm(Options),
-    Tgs(tgs::Options),
+    Tgs(Settings<tgs::Options>),
     Webp(webp::Options),
 }
 
@@ -373,7 +366,7 @@ impl Recipe {
     pub(crate) fn target(&self) -> Target {
         match self {
             Recipe::Webm(options) => options.target,
-            Recipe::Tgs(options) => options.target,
+            Recipe::Tgs(settings) => settings.selection.target,
             Recipe::Webp(options) => options.target,
         }
         .unwrap_or_default()
@@ -389,21 +382,36 @@ impl Recipe {
         }
     }
 
-    /// Its options as `.tgs`'s; none of another format's.
-    pub(crate) fn into_tgs(self) -> tgs::Options {
+    /// Its settings as `.tgs`'s; none of another format's.
+    pub(crate) fn into_tgs(self) -> Settings<tgs::Options> {
         match self {
-            Recipe::Tgs(options) => options,
-            _ => tgs::Options::default(),
+            Recipe::Tgs(settings) => settings,
+            _ => Settings::default(),
         }
     }
 }
 
-impl From<FormatOptions> for Recipe {
-    fn from(options: FormatOptions) -> Recipe {
+impl From<Settings<FormatOptions>> for Recipe {
+    fn from(settings: Settings<FormatOptions>) -> Recipe {
+        let Settings { selection, options } = settings;
         match options {
-            FormatOptions::Webm(options) => Recipe::Webm(options),
-            FormatOptions::Tgs(options) => Recipe::Tgs(options),
-            FormatOptions::Webp(options) => Recipe::Webp(options),
+            FormatOptions::Tgs(options) => Recipe::Tgs(Settings { selection, options }),
+            options => match selection.into_options(options) {
+                FormatOptions::Webm(options) => Recipe::Webm(options),
+                FormatOptions::Webp(options) => Recipe::Webp(options),
+                FormatOptions::Tgs(_) => unreachable!("of another format"),
+            },
+        }
+    }
+}
+
+/// What converting with it takes.
+impl From<Recipe> for Settings<FormatOptions> {
+    fn from(recipe: Recipe) -> Settings<FormatOptions> {
+        match recipe {
+            Recipe::Webm(options) => Settings::default().map(|()| FormatOptions::Webm(options)),
+            Recipe::Tgs(settings) => settings.map(FormatOptions::Tgs),
+            Recipe::Webp(options) => Settings::default().map(|()| FormatOptions::Webp(options)),
         }
     }
 }
@@ -605,7 +613,7 @@ impl Facts {
         let (art, unsplit) = match item.format {
             Format::Tgs => {
                 let art = item.art.ready()?;
-                let sheet = item.art_reading.sheet.is_some();
+                let sheet = item.art_reading.selection.sheet.is_some();
                 (true, sheet && !art.as_chosen && art.sheet_refused.is_none())
             }
             Format::Webm | Format::Webp => (false, false),
@@ -737,7 +745,7 @@ pub(crate) struct Item {
     pub(crate) still: Option<(f64, Load<Clip>)>,
     /// The input read as pixel art, for `.tgs`, with what it was read with.
     pub(crate) art: Load<Art>,
-    pub(crate) art_reading: tgs::Options,
+    pub(crate) art_reading: Settings<tgs::Options>,
     /// An Aseprite file's tags and layers as last read, shown while it is
     /// read again, so nothing under them moves.
     pub(crate) aseprite_seen: Option<std::rc::Rc<AsepriteSeen>>,
@@ -789,7 +797,7 @@ impl Item {
             part: None,
             still: None,
             art: Load::Idle,
-            art_reading: tgs::Options::default(),
+            art_reading: Settings::default(),
             aseprite_seen: None,
             input_thumb: None,
             job: None,
@@ -939,7 +947,8 @@ impl Item {
             }
             Format::Tgs => {
                 let used = self.range().map(|(start, end)| end - start);
-                recipe(Format::Tgs).map(Recipe::into_tgs).unwrap_or_default().tempo_or_default(used)
+                let tgs = recipe(Format::Tgs).map(Recipe::into_tgs).unwrap_or_default();
+                tgs.options.tempo_or_default(used)
             }
             Format::Webp => 1.0,
         }
@@ -1279,7 +1288,8 @@ mod tests {
         choices.preset = Some("slow".into());
         choices.sheet = "4x1".parse().ok();
         let reading = choices.reading(&presets, &Config::default());
-        assert_eq!((reading.sheet, reading.fps), ("4x1".parse().ok(), Some(2.0)));
+        let sheet = reading.selection.sheet;
+        assert_eq!((sheet, reading.options.fps), ("4x1".parse().ok(), Some(2.0)));
     }
 
     #[test]
@@ -1331,7 +1341,8 @@ mod tests {
         let options = choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm();
         assert_eq!((options.fit, options.lossless), (Some(Fit::Bitrate), None));
         let tgs = choices.recipe(Format::Tgs, &presets, &config).unwrap().into_tgs();
-        assert_eq!((tgs.target, tgs.start), (Some(Target::Emoji), Some(1.0)));
+        let chosen = (tgs.selection.target, tgs.selection.start);
+        assert_eq!(chosen, (Some(Target::Emoji), Some(1.0)));
     }
 
     // What the GUI makes of each scenario the command line's tests in
@@ -1361,8 +1372,9 @@ mod tests {
         Options { target: Some(Target::Sticker), ..options }
     }
 
-    fn tgs_sticker(options: tgs::Options) -> tgs::Options {
-        tgs::Options { target: Some(Target::Sticker), ..options }
+    fn tgs_sticker(options: tgs::Options) -> Settings<tgs::Options> {
+        let selection = Selection { target: Some(Target::Sticker), ..default() };
+        Settings { selection, options }
     }
 
     fn picture_sticker(options: webp::Options) -> webp::Options {

@@ -11,24 +11,15 @@ use tgradish_tgs::reduce::{Compromise, Kind};
 use tgradish_tgs::sticker::{self, Fit};
 
 use crate::error::{Error, Result};
-use crate::options::{Crop, Effort, Resize, TEMPOS};
-use crate::telegram::{self, Target};
+use crate::options::{Effort, Resize, Selection, TEMPOS};
+use crate::telegram;
 
-/// Options for `.tgs` output. Like [`crate::webm::Options`], every field is
-/// optional so presets and flags can be layered.
+/// Options for `.tgs` output, as a preset's `[tgs]` table holds them; what is
+/// one file's own is its [`Selection`]. Like [`crate::webm::Options`], every
+/// field is optional so presets and flags can be layered.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {
-    /// Target type: sticker or emoji (both are 512×512). Default: sticker.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<Target>,
-    /// Start offset in seconds.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub start: Option<f64>,
-    /// Maximum duration in seconds to read from `start`. Default: full
-    /// remaining duration.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub length: Option<f64>,
     /// Playback speed multiplier (0.1 to 10); anything still over 3 seconds is
     /// trimmed. Default: sped up to fit within 3 seconds.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,9 +41,6 @@ pub struct Options {
     /// visible change). Default: auto.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub compromise: Option<Compromise>,
-    /// Region of the input to keep, in source pixels. Default: full frame.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub crop: Option<Crop>,
     /// How non-square art fills the square TGS canvas: `pad` (transparent
     /// margins), `crop` (centre crop), `stretch` (non-square pixels), or
     /// `contain` (requires the input or crop to already be square). Default:
@@ -67,55 +55,24 @@ pub struct Options {
     /// this grid. Default: auto-detected.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pixel_scale: Option<u32>,
-    /// Aseprite tag to export. Default: all frames.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-    /// Aseprite layers to show by name (including hidden layers). Default:
-    /// layers visible in the file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub show_layers: Option<Vec<String>>,
-    /// Aseprite layers to hide by name; hiding a group hides its children.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hide_layers: Option<Vec<String>>,
-    /// Treat the input as a sprite sheet of `COLUMNSxROWS` equal cells, read
-    /// row by row (for example, `4x2`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sheet: Option<crate::options::Sheet>,
-    /// Number of frames to read from a sprite sheet. Default: all cells except
-    /// trailing empty ones.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sheet_frames: Option<u32>,
     /// Playback frame rate for sprite sheets and image sequences. Default: 12.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fps: Option<f64>,
-    /// Lottie name stored in the sticker.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
     /// Include tgradish in the sticker's Lottie name. Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
 }
 
 crate::options::layered!(Options {
-    target,
-    start,
-    length,
     tempo,
     effort,
     exact,
     reductions,
     compromise,
-    crop,
     resize,
     keep_canvas,
     pixel_scale,
-    tag,
-    show_layers,
-    hide_layers,
-    sheet,
-    sheet_frames,
     fps,
-    title,
     watermark,
 });
 
@@ -159,13 +116,14 @@ impl Options {
         self.overlaid(overlay)
     }
 
-    pub(super) fn sheet_layout(&self) -> Result<Option<Sheet>> {
-        let Some(sheet) = self.sheet else { return Ok(None) };
+    /// The sprite sheet `selection` chooses, read at this frame rate.
+    pub(super) fn sheet_layout(&self, selection: &Selection) -> Result<Option<Sheet>> {
+        let Some(sheet) = selection.sheet else { return Ok(None) };
         if sheet.columns == 0 || sheet.rows == 0 {
             return Err(Error::invalid("sheet", format!("{sheet} has no cells")));
         }
         Ok(Some(Sheet {
-            frames: self.sheet_frames,
+            frames: selection.sheet_frames,
             frame_duration: self.frame_duration()?,
             ..Sheet::new(sheet.columns, sheet.rows)
         }))
@@ -184,10 +142,11 @@ impl Options {
             .transpose()
     }
 
-    /// The settings for the tgs crate.
-    pub fn sticker_options(&self) -> Result<sticker::Options> {
+    /// The settings for the tgs crate, for the part and title `selection`
+    /// chooses.
+    pub fn sticker_options(&self, selection: &Selection) -> Result<sticker::Options> {
         let watermark = self.watermark.unwrap_or(true);
-        let name = match (watermark, &self.title) {
+        let name = match (watermark, &selection.title) {
             (true, Some(title)) => Some(format!("{title}{}", crate::TITLED)),
             (true, None) => Some(format!("{}{}", crate::UNTITLED, crate::TOOL_ID)),
             (false, title) => title.clone(),
@@ -195,15 +154,15 @@ impl Options {
         Ok(sticker::Options {
             normalise: normalise::Options {
                 keep_canvas: self.keep_canvas_or_default(),
-                crop: self.crop.map(|crop| normalise::Rect {
+                crop: selection.crop.map(|crop| normalise::Rect {
                     x: crop.x,
                     y: crop.y,
                     width: crop.width,
                     height: crop.height,
                 }),
                 pixel_scale: self.pixel_scale,
-                start: Self::seconds(self.start, "start")?.unwrap_or_default(),
-                length: Self::seconds(self.length, "length")?,
+                start: Self::seconds(selection.start, "start")?.unwrap_or_default(),
+                length: Self::seconds(selection.length, "length")?,
                 tempo: match self.tempo {
                     Some(tempo) if !TEMPOS.contains(&tempo) => {
                         let (low, high) = (TEMPOS.start(), TEMPOS.end());
@@ -242,7 +201,8 @@ mod tests {
 
     #[test]
     fn keeps_the_art_unless_asked() {
-        let fit = |exact| Options { exact, ..Options::default() }.sticker_options();
+        let fit =
+            |exact| Options { exact, ..Options::default() }.sticker_options(&Selection::default());
         assert_eq!(fit(None).unwrap().fit, Fit::Exact);
         assert_eq!(fit(Some(false)).unwrap().fit, Fit::Auto);
     }
@@ -255,7 +215,7 @@ mod tests {
             (Resize::Pad, Effort::Best)
         );
         assert!(unset.exact_or_default() && !unset.keep_canvas_or_default());
-        let settings = unset.sticker_options().unwrap();
+        let settings = unset.sticker_options(&Selection::default()).unwrap();
         assert_eq!((settings.effort, settings.fit), (encode::Effort::Best, Fit::Exact));
         // a long part plays as fast as fits it into 3 s, a short one as it is
         assert_eq!(
@@ -270,7 +230,9 @@ mod tests {
 
     #[test]
     fn marks_only_a_watermarked_sticker() {
-        let mark = |watermark| Options { watermark, ..Options::default() }.sticker_options();
+        let mark = |watermark| {
+            Options { watermark, ..Options::default() }.sticker_options(&Selection::default())
+        };
         let current = crate::mark::Mark::current().to_bytes().to_vec();
         assert_eq!(mark(None).unwrap().mark, Some(current.clone()));
         assert_eq!(mark(Some(true)).unwrap().mark, Some(current));
@@ -292,17 +254,17 @@ mod tests {
             (merged.effort, merged.fps, merged.exact),
             (Some(Effort::Fast), Some(12.0), Some(true))
         );
-        let settings = merged.sticker_options().unwrap();
+        let settings = merged.sticker_options(&Selection::default()).unwrap();
         assert_eq!((settings.effort, settings.fit), (encode::Effort::Fast, Fit::Exact));
-        let sheet = Options { sheet: "4x2".parse().ok(), ..Default::default() };
-        let layout = sheet.sheet_layout().unwrap().unwrap();
+        let sheet = Selection { sheet: "4x2".parse().ok(), ..Default::default() };
+        let layout = Options::default().sheet_layout(&sheet).unwrap().unwrap();
         assert_eq!(
             (layout.columns, layout.rows, layout.frame_duration),
             (4, 2, Duration::from_secs_f64(1.0 / DEFAULT_FPS))
         );
         // made in code, which reading refuses
         let none = crate::options::Sheet { columns: 0, rows: 2 };
-        let bad = Options { sheet: Some(none), ..Default::default() };
-        assert!(bad.sheet_layout().is_err());
+        let bad = Selection { sheet: Some(none), ..Default::default() };
+        assert!(Options::default().sheet_layout(&bad).is_err());
     }
 }

@@ -113,15 +113,16 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
         }
         Format::Tgs => {
             let recipe = item.choices.recipe(Format::Tgs, presets, config);
-            let Ok(options) = recipe.map(Recipe::into_tgs) else { return steps };
+            let Ok(settings) = recipe.map(Recipe::into_tgs) else { return steps };
+            let chosen = &settings.selection;
             let used = Used {
-                tag: options.tag.as_deref(),
-                crop: options.crop,
-                start: options.start,
-                length: options.length,
+                tag: chosen.tag.as_deref(),
+                crop: chosen.crop,
+                start: chosen.start,
+                length: chosen.length,
             };
             read(item, &used, &mut steps);
-            art(&options, &mut steps);
+            art(&settings.options, &mut steps);
             // cut at 3 seconds, as a .tgs can't say it is shorter
             let tempo = item.tempo(presets, config);
             time(item, &used, tempo, Spoof::Never, &mut steps);

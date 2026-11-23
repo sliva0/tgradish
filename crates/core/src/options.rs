@@ -528,18 +528,8 @@ impl Selection {
     // until the options lose those fields, which then are this alone's
     #[doc(hidden)]
     pub fn into_options(self, options: FormatOptions) -> FormatOptions {
-        let Selection {
-            target,
-            tag,
-            show_layers,
-            hide_layers,
-            crop,
-            start,
-            length,
-            title,
-            sheet,
-            sheet_frames,
-        } = self;
+        let Selection { target, tag, show_layers, hide_layers, crop, start, length, title, .. } =
+            self;
         // as overlaid, which merging isn't: that clears a scale of none
         match options {
             FormatOptions::Webm(options) => FormatOptions::Webm(webm::Options {
@@ -563,20 +553,62 @@ impl Selection {
                 title: title.or(options.title),
                 ..options
             }),
-            FormatOptions::Tgs(options) => FormatOptions::Tgs(tgs::Options {
-                target: target.or(options.target),
-                tag: tag.or(options.tag),
-                show_layers: show_layers.or(options.show_layers),
-                hide_layers: hide_layers.or(options.hide_layers),
-                crop: crop.or(options.crop),
-                start: start.or(options.start),
-                length: length.or(options.length),
-                title: title.or(options.title),
-                sheet: sheet.or(options.sheet),
-                sheet_frames: sheet_frames.or(options.sheet_frames),
-                ..options
-            }),
+            // which holds none of them
+            FormatOptions::Tgs(options) => FormatOptions::Tgs(options),
         }
+    }
+}
+
+/// Everything a conversion of one file gets: what is the file's own, and the
+/// options of a format, which presets hold too. Written and read as one flat
+/// object, as `--options-json`, `--json` and the GUI's session have it:
+/// `{"crop": …, "crf": 30}`.
+// serde calls flatten with deny_unknown_fields unsupported, though it
+// refuses what neither part takes; tests pin that, and the old names too
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Settings<O> {
+    /// What is the file's own.
+    #[serde(flatten)]
+    pub selection: Selection,
+    /// The format's options.
+    #[serde(flatten)]
+    pub options: O,
+}
+
+impl<O> Settings<O> {
+    /// The same selection, with `options` made of these ones by `f`.
+    pub fn map<P>(self, f: impl FnOnce(O) -> P) -> Settings<P> {
+        Settings { selection: self.selection, options: f(self.options) }
+    }
+}
+
+impl Settings<FormatOptions> {
+    /// The format the options are for.
+    pub fn format(&self) -> Format {
+        self.options.format()
+    }
+
+    /// The target chosen, or the default, [`Target::Sticker`].
+    pub fn target(&self) -> Target {
+        self.selection.target.unwrap_or_default()
+    }
+
+    /// Reads `value`, a JSON object as `--options-json` takes it, as
+    /// `format`'s settings: its options and what of the file's own
+    /// `format` takes.
+    pub fn from_json(format: Format, value: serde_json::Value) -> serde_json::Result<Self> {
+        Ok(match format {
+            Format::Webm => {
+                serde_json::from_value::<Settings<webm::Options>>(value)?.map(FormatOptions::Webm)
+            }
+            Format::Webp => {
+                serde_json::from_value::<Settings<webp::Options>>(value)?.map(FormatOptions::Webp)
+            }
+            Format::Tgs => {
+                serde_json::from_value::<Settings<tgs::Options>>(value)?.map(FormatOptions::Tgs)
+            }
+        })
     }
 }
 
@@ -743,13 +775,46 @@ impl Checked for crate::webp::Options {
 
 impl Checked for crate::tgs::Options {
     fn numbers(&self) -> Vec<(&'static str, f64)> {
-        let numbers = [
-            ("start", self.start),
-            ("length", self.length),
-            ("tempo", self.tempo),
-            ("fps", self.fps),
-        ];
+        let numbers = [("tempo", self.tempo), ("fps", self.fps)];
         numbers.into_iter().filter_map(|(key, value)| Some((key, value?))).collect()
+    }
+}
+
+impl Checked for Selection {
+    fn numbers(&self) -> Vec<(&'static str, f64)> {
+        let numbers = [("start", self.start), ("length", self.length)];
+        numbers.into_iter().filter_map(|(key, value)| Some((key, value?))).collect()
+    }
+}
+
+impl Checked for FormatOptions {
+    fn numbers(&self) -> Vec<(&'static str, f64)> {
+        match self {
+            FormatOptions::Webm(options) => options.numbers(),
+            FormatOptions::Tgs(options) => options.numbers(),
+            FormatOptions::Webp(options) => options.numbers(),
+        }
+    }
+
+    fn fit_range(&self) -> Option<Range> {
+        match self {
+            FormatOptions::Webm(options) => options.fit_range(),
+            FormatOptions::Tgs(options) => options.fit_range(),
+            FormatOptions::Webp(options) => options.fit_range(),
+        }
+    }
+}
+
+/// The file's own first, as its times come first among the options.
+impl<O: Checked> Checked for Settings<O> {
+    fn numbers(&self) -> Vec<(&'static str, f64)> {
+        let mut numbers = self.selection.numbers();
+        numbers.extend(self.options.numbers());
+        numbers
+    }
+
+    fn fit_range(&self) -> Option<Range> {
+        self.options.fit_range()
     }
 }
 
@@ -828,11 +893,11 @@ mod tests {
             ("fit-range", |options, n| options.fit_range = Some(Range { min: n, max: 400.0 })),
             ("fit-range", |options, n| options.fit_range = Some(Range { min: 100.0, max: n })),
         ];
-        let tgs: [(&str, Set<crate::tgs::Options>); 4] = [
-            ("start", |options, n| options.start = Some(n)),
-            ("length", |options, n| options.length = Some(n)),
-            ("tempo", |options, n| options.tempo = Some(n)),
-            ("fps", |options, n| options.fps = Some(n)),
+        let tgs: [(&str, Set<Settings<crate::tgs::Options>>); 4] = [
+            ("start", |settings, n| settings.selection.start = Some(n)),
+            ("length", |settings, n| settings.selection.length = Some(n)),
+            ("tempo", |settings, n| settings.options.tempo = Some(n)),
+            ("fps", |settings, n| settings.options.fps = Some(n)),
         ];
         for n in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             for (key, set) in webm {
@@ -841,7 +906,7 @@ mod tests {
                 assert_eq!(wrong_option(&options), key, "{key} {n}");
             }
             for (key, set) in tgs {
-                let mut options = crate::tgs::Options::default();
+                let mut options = Settings::default();
                 set(&mut options, n);
                 assert_eq!(wrong_option(&options), key, "{key} {n}");
             }
@@ -1074,25 +1139,15 @@ mod tests {
     fn every_tgs_option() -> crate::tgs::Options {
         use tgradish_tgs::reduce::{Compromise, Kind};
         crate::tgs::Options {
-            target: Some(Target::Emoji),
-            start: Some(0.5),
-            length: Some(1.5),
             tempo: Some(0.5),
             effort: Some(Effort::Fast),
             exact: Some(false),
             reductions: Some(vec![Kind::MergeColours, Kind::DropFrames]),
             compromise: Some(Compromise::Detail),
-            crop: Some(Crop { x: 0, y: 0, width: 8, height: 8 }),
             resize: Some(Resize::Stretch),
             keep_canvas: Some(true),
             pixel_scale: Some(2),
-            tag: Some("run".into()),
-            show_layers: Some(vec!["Outline".into()]),
-            hide_layers: Some(vec!["Sketch".into()]),
-            sheet: Some(Sheet { columns: 4, rows: 2 }),
-            sheet_frames: Some(7),
             fps: Some(12.5),
-            title: Some("pig".into()),
             watermark: Some(true),
         }
     }
@@ -1157,21 +1212,17 @@ tune-content = \"screen\"
         assert_eq!(toml::to_string(&webm).unwrap(), toml);
         assert_eq!(toml::from_str::<Options>(toml).unwrap(), webm);
 
+        // as a preset's table holds them, without one file's own
         let tgs = every_tgs_option();
         let json = concat!(
-            r#"{"target":"emoji","start":0.5,"length":1.5,"tempo":0.5,"effort":"fast","#,
-            r#""exact":false,"reductions":["merge-colours","drop-frames"],"#,
-            r#""compromise":"detail","crop":{"x":0,"y":0,"width":8,"height":8},"#,
-            r#""resize":"stretch","keep-canvas":true,"pixel-scale":2,"tag":"run","#,
-            r#""show-layers":["Outline"],"hide-layers":["Sketch"],"sheet":"4x2","#,
-            r#""sheet-frames":7,"fps":12.5,"title":"pig","watermark":true}"#,
+            r#"{"tempo":0.5,"effort":"fast","exact":false,"#,
+            r#""reductions":["merge-colours","drop-frames"],"compromise":"detail","#,
+            r#""resize":"stretch","keep-canvas":true,"pixel-scale":2,"fps":12.5,"#,
+            r#""watermark":true}"#,
         );
         assert_eq!(serde_json::to_string(&tgs).unwrap(), json);
         assert_eq!(serde_json::from_str::<crate::tgs::Options>(json).unwrap(), tgs);
         let toml = "\
-target = \"emoji\"
-start = 0.5
-length = 1.5
 tempo = 0.5
 effort = \"fast\"
 exact = false
@@ -1180,23 +1231,60 @@ compromise = \"detail\"
 resize = \"stretch\"
 keep-canvas = true
 pixel-scale = 2
-tag = \"run\"
-show-layers = [\"Outline\"]
-hide-layers = [\"Sketch\"]
-sheet = \"4x2\"
-sheet-frames = 7
 fps = 12.5
-title = \"pig\"
 watermark = true
-
-[crop]
-x = 0
-y = 0
-width = 8
-height = 8
 ";
         assert_eq!(toml::to_string(&tgs).unwrap(), toml);
         assert_eq!(toml::from_str::<crate::tgs::Options>(toml).unwrap(), tgs);
+    }
+
+    /// Everything a `.tgs` gets as JSON spells and orders it, flat, the
+    /// file's own first: as `--options-json` and the GUI's session have
+    /// it. A change here is one to those files.
+    #[test]
+    fn writes_every_tgs_setting_as_files_hold_it() {
+        let tgs = Settings { selection: every_selection(), options: every_tgs_option() };
+        let json = concat!(
+            r#"{"target":"emoji","tag":"idle","show-layers":["Hat"],"#,
+            r#""hide-layers":["Sketch","Guides"],"#,
+            r#""crop":{"x":1,"y":2,"width":30,"height":40},"start":1.25,"length":2.0,"#,
+            r#""title":"pig","sheet":"4x2","sheet-frames":7,"#,
+            r#""tempo":0.5,"effort":"fast","exact":false,"#,
+            r#""reductions":["merge-colours","drop-frames"],"compromise":"detail","#,
+            r#""resize":"stretch","keep-canvas":true,"pixel-scale":2,"fps":12.5,"#,
+            r#""watermark":true}"#,
+        );
+        assert_eq!(serde_json::to_string(&tgs).unwrap(), json);
+        assert_eq!(serde_json::from_str::<Settings<crate::tgs::Options>>(json).unwrap(), tgs);
+        let any = Settings::from_json(Format::Tgs, serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(any, tgs.clone().map(FormatOptions::Tgs));
+        assert_eq!(serde_json::to_string(&any).unwrap(), json);
+    }
+
+    /// Flattening the two parts into one object is what serde calls
+    /// unsupported beside `deny_unknown_fields`, so this pins what it
+    /// does: a key neither part takes is refused, and the old names read.
+    #[test]
+    fn reads_settings_as_one_object_and_nothing_else() {
+        use serde_json::json;
+        let read = |value: serde_json::Value| {
+            serde_json::from_value::<Settings<crate::tgs::Options>>(value)
+        };
+        let settings = read(json!({ "speed": "fast", "sheet": "2x1", "crop": null })).unwrap();
+        assert_eq!(settings.options.effort, Some(Effort::Fast));
+        assert_eq!(settings.selection.sheet, Some(Sheet { columns: 2, rows: 1 }));
+        for unknown in [json!({ "made-up": 1 }), json!({ "sheet": "2x1", "crf": 30 })] {
+            let err = read(unknown.clone()).unwrap_err().to_string();
+            assert!(err.starts_with("unknown field"), "{unknown}: {err}");
+        }
+        // a value wrong for its key is refused too
+        assert!(read(json!({ "sheet": "two" })).is_err());
+        assert!(read(json!({ "fps": "fast" })).is_err());
+        // and each key serde reads is one the format uses
+        for key in Selection::keys_for(Format::Tgs).chain(crate::tgs::Options::keys()) {
+            assert!(read(json!({ &key: null })).is_ok(), "{key}");
+            assert!(Format::Tgs.uses(&key), "{key}");
+        }
     }
 
     /// One file's options, every one set.

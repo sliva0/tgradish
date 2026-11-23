@@ -11,6 +11,7 @@ use tgradish_core::backend::Backend;
 use tgradish_core::convert;
 use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::input::Input;
+use tgradish_core::options::Settings;
 use tgradish_core::presets::Format;
 use tgradish_core::presets::FormatOptions;
 use tgradish_core::tgradish_tgs::check::Severity;
@@ -28,7 +29,7 @@ use crate::widgets;
 /// and ffmpeg, which WebM and static stickers need, and `.tgs` only to
 /// read videos.
 pub(crate) struct Setup {
-    pub(crate) options: FormatOptions,
+    pub(crate) settings: Settings<FormatOptions>,
     pub(crate) backend: Option<Backend>,
     /// How many threads it uses, as Settings says.
     pub(crate) threads: tgradish_core::config::Threads,
@@ -423,7 +424,7 @@ impl Job {
         self.messages = Some(receiver);
         self.status = Status::Running;
         self.progress = Progress::default();
-        self.settles = matches!(&setup.options, FormatOptions::Webm(options)
+        self.settles = matches!(&setup.settings.options, FormatOptions::Webm(options)
             if options.fit_or_default() != tgradish_core::options::Fit::Off);
         let output = self.output.clone();
         let cancel = self.cancel.clone();
@@ -535,14 +536,16 @@ fn run(
             error,
         })?;
     }
-    let Setup { mut options, backend, threads } = setup;
-    if let FormatOptions::Tgs(options) = &mut options {
+    let Setup { mut settings, backend, threads } = setup;
+    if let FormatOptions::Tgs(options) = &settings.options {
         let exact = options.exact_or_default();
         // a sheet of a file of frames of its own, which converting
         // refuses: read as it is, and said so, as the GUI shows it
-        if let Some((_, frames)) = crate::media::animated(backend.as_ref(), &input, options, cancel)
+        let reading = Settings { selection: settings.selection.clone(), options: options.clone() };
+        if let Some((_, frames)) =
+            crate::media::animated(backend.as_ref(), &input, &reading, cancel)
         {
-            (options.sheet, options.sheet_frames) = (None, None);
+            (settings.selection.sheet, settings.selection.sheet_frames) = (None, None);
             let said = fl!("sheet-refused", "converted", frames = frames);
             update(Box::new(move |progress| progress.warnings.push(said)));
         }
@@ -552,7 +555,7 @@ fn run(
         }));
     }
     let (output, keep_temp) = (Some(output), false);
-    let request = convert::Request { input, output, options, overwrite, keep_temp, threads };
+    let request = convert::Request { input, output, settings, overwrite, keep_temp, threads };
     let outcome =
         convert::convert(backend.as_ref(), &request, cancel, &mut |event| follow(event, update))?;
     Ok(Done::of(outcome))

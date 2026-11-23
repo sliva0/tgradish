@@ -914,7 +914,12 @@ mod tests {
         let again = Session::of(&items, restored.selected, &written).with_window(window);
         // the one title written for either format, as both read it
         let titled = text.replacen(r#""tgs":{}}"#, r#""tgs":{"title":"pig"}}"#, 1);
-        assert_eq!(again.to_json().unwrap(), titled);
+        // and what of a .tgs is the file's own before its options
+        let options = r#""effort":"fast","exact":false,"keep-canvas":true,"pixel-scale":2,"#;
+        let sheet = r#""sheet":"4x2","sheet-frames":7,"#;
+        let sheet_first =
+            titled.replace(&format!("{options}{sheet}"), &format!("{sheet}{options}"));
+        assert_eq!(again.to_json().unwrap(), sheet_first);
     }
 
     #[test]

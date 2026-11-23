@@ -6,6 +6,7 @@
 use crate::config::ResultPreview;
 use eframe::egui::{self, Color32, Rect, RichText, pos2, vec2};
 use tgradish_core::backend::Backend;
+use tgradish_core::options::Settings;
 use tgradish_core::options::{Crop, Resize, Scaling};
 use tgradish_core::picture;
 use tgradish_core::presets::Format;
@@ -219,7 +220,10 @@ fn under_settings(ui: &mut egui::Ui, item: &mut Item, context: &file_settings::C
 
 /// Returns `item`'s effective playback tempo and merged WebM and `.tgs`
 /// options.
-fn made_with(item: &Item, context: &file_settings::Context) -> (f64, Options, tgs::Options) {
+fn made_with(
+    item: &Item,
+    context: &file_settings::Context,
+) -> (f64, Options, Settings<tgs::Options>) {
     let (presets, config) = (context.presets, context.config);
     let recipe = |format| item.choices.recipe(format, presets, config);
     let tgs = recipe(Format::Tgs).map(Recipe::into_tgs).unwrap_or_default();
@@ -234,7 +238,7 @@ fn preview(
     (screen, inset): (&mut Screen, &mut Inset),
     item: &mut Item,
     (tempo, in_frames): (f64, &mut bool),
-    (webm, tgs): (&Options, &tgs::Options),
+    (webm, tgs): (&Options, &Settings<tgs::Options>),
     (look, smooth): (&mut ResultPreview, bool),
 ) {
     let has_result = item.result_clip.ready().is_some();
@@ -458,7 +462,7 @@ fn preview(
                 // For `.tgs` with Crop resize, shade the region outside the
                 // central square of the content bounds.
                 let kept = match item.format {
-                    Format::Tgs if tgs.resize == Some(Resize::Crop) => {
+                    Format::Tgs if tgs.options.resize == Some(Resize::Crop) => {
                         let where_ =
                             predict::Part::of(item.choices.crop, size, (clip.width, clip.height));
                         let [x0, y0, x1, y1] =
@@ -520,7 +524,7 @@ fn preview(
                             }
                         }
                         Format::Tgs => {
-                            let resize = tgs.resize_or_default();
+                            let resize = tgs.options.resize_or_default();
                             let bounds = tgs_bounds(inset, clip, where_, tgs);
                             let key = inset_key((clip.id, frame, bounds, resize));
                             let label = label.as_deref();
@@ -599,7 +603,7 @@ fn timeline_row(
     item: &mut Item,
     shown: Show,
     (tempo, in_frames): (f64, &mut bool),
-    (webm, tgs): (&Options, &tgs::Options),
+    (webm, tgs): (&Options, &Settings<tgs::Options>),
 ) {
     let length = item.input_length();
     let result_length =
@@ -625,7 +629,7 @@ fn timeline_row(
                         playing: &mut item.view.playing,
                         // Convert Telegram's 3 s output limit into input seconds at `tempo`.
                         limit: telegram::MAX_SECONDS * tempo,
-                        past: timeline::PastLimit::of(item.format, webm, tgs),
+                        past: timeline::PastLimit::of(item.format, webm, &tgs.options),
                         frames: frames.as_deref(),
                         in_frames,
                     },
@@ -690,13 +694,13 @@ fn tgs_bounds(
     inset: &mut Inset,
     clip: &Clip,
     part: predict::Part,
-    tgs: &tgs::Options,
+    tgs: &Settings<tgs::Options>,
 ) -> [usize; 4] {
-    let keep = tgs.keep_canvas_or_default();
+    let keep = tgs.options.keep_canvas_or_default();
     // Include every frame overlapping the trimmed [start, end) range, matching
     // normalisation.
-    let start = tgs.start.unwrap_or(0.0);
-    let end = tgs.length.map_or(f64::INFINITY, |length| start + length);
+    let start = tgs.selection.start.unwrap_or(0.0);
+    let end = tgs.selection.length.map_or(f64::INFINITY, |length| start + length);
     let spans = clip.times.windows(2).take(clip.frames.len());
     let first = spans.clone().position(|span| span[1] > start).unwrap_or(0);
     let after = spans.filter(|span| span[0] < end).count().max(first + 1);

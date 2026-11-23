@@ -13,6 +13,7 @@ use tgradish_core::config::Threads;
 use tgradish_core::drawn::{self, Readable};
 use tgradish_core::ffmpeg::Probe;
 use tgradish_core::input::Input;
+use tgradish_core::options::Settings;
 use tgradish_core::preview::Preview;
 use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 use tgradish_core::tgs;
@@ -488,27 +489,27 @@ pub(crate) struct Art {
 }
 
 impl Art {
-    /// `options` choose what is read: an Aseprite tag and layers, a sprite
-    /// sheet's layout and the frame rate of sheets and sequences. Videos
-    /// are read through `backend`.
+    /// `reading` chooses what is read: an Aseprite tag and layers, a
+    /// sprite sheet's layout and the frame rate of sheets and sequences.
+    /// Videos are read through `backend`.
     pub(crate) fn load(
         ctx: &egui::Context,
         input: Input,
-        options: tgs::Options,
+        reading: Settings<tgs::Options>,
         backend: Option<Backend>,
     ) -> Task<Art> {
         Task::spawn(ctx, move |cancel| {
             // a sheet of a file of frames of its own, as a session may
             // keep: read as it is, and said so, rather than not at all
             let (art, sheet_refused, as_chosen) =
-                match tgs::read_art(backend.as_ref(), &input, &options, cancel) {
+                match read_art(backend.as_ref(), &input, &reading, cancel) {
                     Ok(art) => (art, None, true),
-                    Err(err) => match animated(backend.as_ref(), &input, &options, cancel) {
+                    Err(err) => match animated(backend.as_ref(), &input, &reading, cancel) {
                         Some((art, frames)) => (art, Some(frames), true),
                         // a tag, layers or a sheet the file hasn't, or that
                         // doesn't split: all of it, as the file has it, so
                         // what it has shows, for the item to say what it lacks
-                        None => match as_it_is(backend.as_ref(), &input, &options, cancel) {
+                        None => match as_it_is(backend.as_ref(), &input, &reading, cancel) {
                             Some(art) => (art, None, false),
                             None => return Err(failure(&err)),
                         },
@@ -537,8 +538,8 @@ impl Art {
     /// read as it is, or as it has where it was refused as a sheet; one,
     /// as a sheet, which is one picture. `reading` is what it was read
     /// with.
-    pub(crate) fn file_frames(&self, reading: &tgs::Options) -> usize {
-        match (self.sheet_refused, reading.sheet) {
+    pub(crate) fn file_frames(&self, reading: &Settings<tgs::Options>) -> usize {
+        match (self.sheet_refused, reading.selection.sheet) {
             (Some(frames), _) => frames,
             (None, Some(_)) => 1,
             // all of an Aseprite file's, whichever its tag uses
@@ -547,45 +548,51 @@ impl Art {
     }
 }
 
-/// `input` read as it is, with the rest of `options`, as its tag, where
-/// reading it as the sprite sheet they ask for can't be, as the file has
-/// frames of its own, and how many: `None` where they ask for no sheet, or
-/// it has one frame. An Aseprite file's are all of its frames, whichever
-/// its tag, which may have only one, uses.
+/// `input` read as `reading` says, as [`tgs::read_art`] reads it.
+fn read_art(
+    backend: Option<&Backend>,
+    input: &Input,
+    reading: &Settings<tgs::Options>,
+    cancel: &CancelToken,
+) -> tgradish_core::Result<tgs::Art> {
+    tgs::read_art(backend, input, &reading.selection, &reading.options, cancel)
+}
+
+/// `input` read as it is, with the rest of `reading`, as its tag, where
+/// reading it as the sprite sheet it asks for can't be, as the file has
+/// frames of its own, and how many: `None` where it asks for no sheet, or
+/// the file has one frame. An Aseprite file's are all of its frames,
+/// whichever its tag, which may have only one, uses.
 pub(crate) fn animated(
     backend: Option<&Backend>,
     input: &Input,
-    options: &tgs::Options,
+    reading: &Settings<tgs::Options>,
     cancel: &CancelToken,
 ) -> Option<(tgs::Art, usize)> {
-    options.sheet?;
-    let whole = tgs::Options { sheet: None, sheet_frames: None, ..options.clone() };
-    let art = tgs::read_art(backend, input, &whole, cancel).ok()?;
+    reading.selection.sheet?;
+    let mut whole = reading.clone();
+    (whole.selection.sheet, whole.selection.sheet_frames) = (None, None);
+    let art = read_art(backend, input, &whole, cancel).ok()?;
     let frames = art.frames.len().max(art.durations.len());
     (frames > 1).then_some((art, frames))
 }
 
 /// `input` read as the file has it, without the tag, layers or sheet of
-/// `options`, where they choose any; `None` where it can't be either.
+/// `reading`, where it chooses any; `None` where it can't be either.
 fn as_it_is(
     backend: Option<&Backend>,
     input: &Input,
-    options: &tgs::Options,
+    reading: &Settings<tgs::Options>,
     cancel: &CancelToken,
 ) -> Option<tgs::Art> {
-    let choosing = chooses_art(&options.tag, &options.show_layers, &options.hide_layers);
-    if !choosing && options.sheet.is_none() {
+    let chosen = &reading.selection;
+    let choosing = chooses_art(&chosen.tag, &chosen.show_layers, &chosen.hide_layers);
+    if !choosing && chosen.sheet.is_none() {
         return None;
     }
-    let plain = tgs::Options {
-        tag: None,
-        show_layers: None,
-        hide_layers: None,
-        sheet: None,
-        sheet_frames: None,
-        ..options.clone()
-    };
-    tgs::read_art(backend, input, &plain, cancel).ok()
+    // what reads it apart from them: its frame rate
+    let plain = Settings { options: reading.options.clone(), ..Settings::default() };
+    read_art(backend, input, &plain, cancel).ok()
 }
 
 /// A finished WebM sticker, decoded.
@@ -603,6 +610,7 @@ pub(crate) fn load_result(ctx: &egui::Context, backend: Backend, path: &Path) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tgradish_core::options::Selection;
 
     fn clip(times: Vec<f64>) -> Clip {
         let frames = vec![vec![0; 4]; times.len() - 1];
@@ -636,18 +644,20 @@ mod tests {
         let path = dir.path().join("walker.aseprite");
         std::fs::write(&path, tgradish_corpus::encode::aseprite_with(&walker, &tags, &[])).unwrap();
         let input = Input::File(path);
-        let options = tgs::Options {
+        let selection = Selection {
             sheet: "2x1".parse().ok(),
             tag: Some("still".into()),
-            ..tgs::Options::default()
+            ..Selection::default()
         };
+        let reading = Settings { selection, ..Settings::default() };
         let cancel = CancelToken::new();
-        assert!(tgs::read_art(None, &input, &options, &cancel).is_err());
+        assert!(read_art(None, &input, &reading, &cancel).is_err());
         // read as it is, its tag kept: one frame, of a file of eight
-        let (art, frames) = animated(None, &input, &options, &cancel).expect("read as it is");
+        let (art, frames) = animated(None, &input, &reading, &cancel).expect("read as it is");
         assert_eq!((art.frames.len(), frames), (1, walker.frames.len()));
         // and no sheet asked for, nothing to read again
-        let plain = tgs::Options { sheet: None, ..options };
+        let mut plain = reading;
+        plain.selection.sheet = None;
         assert!(animated(None, &input, &plain, &cancel).is_none());
     }
 }

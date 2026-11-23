@@ -235,7 +235,7 @@ pub(super) fn picture(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             // what the last conversion found, if it looked for it: neither
             // the item nor its preset said
             let looked = |made: &&crate::item::Conversion| match &made.recipe {
-                Some(Recipe::Tgs(options)) => options.pixel_scale.is_none(),
+                Some(Recipe::Tgs(settings)) => settings.options.pixel_scale.is_none(),
                 _ => false,
             };
             let detected = item

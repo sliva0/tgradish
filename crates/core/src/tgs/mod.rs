@@ -28,7 +28,7 @@ use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::input::Input;
-use crate::options::Resize;
+use crate::options::{Resize, Selection};
 use crate::presets::Format;
 use crate::telegram;
 
@@ -47,6 +47,8 @@ pub struct Request {
     /// Destination path; defaults to [`Input::default_output`] (see
     /// [`Request::output`]).
     pub output: Option<PathBuf>,
+    /// What of the input is read, and the target and title.
+    pub selection: Selection,
     /// `.tgs` conversion options.
     pub options: Options,
     /// Replace an existing output file if present.
@@ -60,12 +62,13 @@ impl Request {
     /// overwriting existing files.
     pub fn new(input: Input) -> Self {
         let threads = Threads::Auto;
-        Self { input, output: None, options: Options::default(), overwrite: false, threads }
+        let (selection, options) = (Selection::default(), Options::default());
+        Self { input, output: None, selection, options, overwrite: false, threads }
     }
 
     /// Returns the explicit output path, or the default path beside the input.
     pub fn output(&self) -> PathBuf {
-        let target = self.options.target.unwrap_or_default();
+        let target = self.selection.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Tgs, target))
     }
 }
@@ -81,11 +84,12 @@ pub fn convert(
 ) -> Result<Outcome> {
     let output = request.output();
     request.input.check_output(&output, request.overwrite)?;
-    let mut settings = request.options.sticker_options()?;
+    let (selection, options) = (&request.selection, &request.options);
+    let mut settings = options.sticker_options(selection)?;
     settings.threads = request.threads.limit().and_then(|threads| threads.try_into().ok());
-    let loaded = load(backend, &request.input, &request.options, request.threads, cancel)?;
+    let loaded = load(backend, &request.input, selection, options, request.threads, cancel)?;
     // kept as it is, the part used must already be square
-    if request.options.resize_or_default() == Resize::Contain {
+    if options.resize_or_default() == Resize::Contain {
         let animation = &loaded.animation;
         let (width, height) = match settings.normalise.crop {
             Some(crop) => (crop.width, crop.height),
@@ -105,7 +109,7 @@ pub fn convert(
         settings.normalise.length = part.length;
     }
     let input = request.input.first().to_path_buf();
-    let target = request.options.target.unwrap_or_default();
+    let target = selection.target.unwrap_or_default();
     let sticker = sticker::make(
         loaded.animation,
         &settings,
@@ -259,11 +263,10 @@ mod tests {
         let made = make(Resize::Contain).unwrap().preview().unwrap();
         assert_eq!(made.width, padded.width);
         let crop = crate::options::Crop { x: 0, y: 0, width, height: height - 2 };
-        let options =
-            Options { resize: Some(Resize::Contain), crop: Some(crop), ..Options::default() };
         let request = Request {
             output: Some(dir.path().join("contained.tgs")),
-            options,
+            selection: Selection { crop: Some(crop), ..Selection::default() },
+            options: Options { resize: Some(Resize::Contain), ..Options::default() },
             overwrite: true,
             ..Request::new(Input::File(input.clone()))
         };

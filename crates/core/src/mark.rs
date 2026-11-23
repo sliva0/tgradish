@@ -336,9 +336,9 @@ mod tests {
         }
         // as stickers are named
         let named = |title: Option<&str>| {
-            let options =
-                crate::tgs::Options { title: title.map(Into::into), ..Default::default() };
-            options.sticker_options().unwrap().name.unwrap()
+            let selection =
+                crate::options::Selection { title: title.map(Into::into), ..Default::default() };
+            crate::tgs::Options::default().sticker_options(&selection).unwrap().name.unwrap()
         };
         assert!(tgradish_name(&named(None)) && tgradish_name(&named(Some("dance"))));
         // and how inspecting finds the signature in WebM padding

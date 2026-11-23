@@ -26,7 +26,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, FileAction, Result};
-use crate::options::{Effort, Fit};
+use crate::options::{Effort, Fit, Selection};
 use crate::telegram::Target;
 use crate::webm::Options;
 use crate::{tgs, webp};
@@ -104,14 +104,16 @@ impl Format {
 
     /// Returns true if this format supports option `key` (or its legacy alias):
     /// all of [`Options`] for WebM, all of [`tgs::Options`] for `.tgs`, and
-    /// all of [`webp::Options`] for WebP.
+    /// all of [`webp::Options`] for WebP, and what of one file's own
+    /// [`Selection::keys_for`] says it takes.
     pub fn uses(self, key: &str) -> bool {
         let key = crate::options::current_key(key);
-        match self {
+        let option = match self {
             Format::Webm => Options::keys().any(|known| known == key),
             Format::Tgs => tgs::Options::keys().any(|known| known == key),
             Format::Webp => webp::Options::keys().any(|known| known == key),
-        }
+        };
+        option || Selection::keys_for(self).any(|known| known == key)
     }
 
     /// Returns the deduplicated keys from `keys` that this format does not use,
@@ -157,16 +159,6 @@ impl FormatOptions {
             FormatOptions::Tgs(_) => Format::Tgs,
             FormatOptions::Webp(_) => Format::Webp,
         }
-    }
-
-    /// Returns the configured [`Target`], defaulting to [`Target::Sticker`].
-    pub fn target(&self) -> Target {
-        match self {
-            FormatOptions::Webm(options) => options.target,
-            FormatOptions::Tgs(options) => options.target,
-            FormatOptions::Webp(options) => options.target,
-        }
-        .unwrap_or_default()
     }
 }
 
@@ -785,8 +777,6 @@ mod tests {
             effort: Some(Effort::Fast),
             exact: Some(false),
             pixel_scale: Some(2),
-            // one file's: left out
-            sheet: "4x2".parse().ok(),
             ..tgs::Options::default()
         };
         let path = save(dir.path(), "my small", "Small ones", (&webm, &tgs), false).unwrap();
@@ -798,7 +788,7 @@ mod tests {
         // none of one file's options are kept
         let preset = presets.get("my small").unwrap();
         assert_eq!((preset.webm.crop, preset.webm.title.as_deref()), (None, None));
-        assert_eq!((preset.tgs.sheet.as_ref(), preset.webm.crf), (None, Some(28)));
+        assert_eq!(preset.webm.crf, Some(28));
         assert_eq!(presets.tgs("my small").unwrap().pixel_scale, Some(2));
         // there already, replaced only when asked
         let again = save(dir.path(), "my small", "", (&webm, &tgs), false);

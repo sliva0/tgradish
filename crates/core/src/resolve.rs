@@ -6,15 +6,15 @@
 //! ```
 //! # use tgradish_core::{config::Config, presets::{Format, FormatOptions, Presets}};
 //! # use tgradish_core::resolve::{Origin, resolve};
-//! use tgradish_core::options::Fit;
+//! use tgradish_core::options::{Fit, Settings};
 //! use tgradish_core::webm::Options;
 //!
 //! // the built-in fast preset fits a bitrate, which a quality has no say in
 //! let mine = Options { crf: Some(20), ..Options::default() };
-//! let layers = [FormatOptions::Webm(mine)];
+//! let layers = [Settings { options: mine, ..Settings::default() }.map(FormatOptions::Webm)];
 //! let resolved =
 //!     resolve(&Presets::builtin(), &Config::default(), Format::Webm, Some("fast"), &layers)?;
-//! let FormatOptions::Webm(options) = &resolved.options else { unreachable!() };
+//! let FormatOptions::Webm(options) = &resolved.settings.options else { unreachable!() };
 //! assert_eq!((options.fit, options.crf), (Some(Fit::Bitrate), None));
 //! // set aside, and said why and by whom
 //! let aside = &resolved.set_aside[0];
@@ -25,7 +25,7 @@
 
 use crate::config::Config;
 use crate::error::Error;
-use crate::options::first_wrong;
+use crate::options::{Selection, Settings, first_wrong};
 use crate::presets::{Format, FormatOptions, PresetError, Presets};
 use crate::{tgs, webm, webp};
 
@@ -55,7 +55,7 @@ pub struct Resolved {
     /// The preset's name, as given or as the config chose it.
     pub preset: String,
     /// Everything the conversion gets.
-    pub options: FormatOptions,
+    pub settings: Settings<FormatOptions>,
     /// The values left out, in the order [`webm::set_aside`] gives them.
     pub set_aside: Vec<SetAside>,
 }
@@ -122,10 +122,11 @@ fn invalid(preset: &str, option: &str, reason: &str, set_by: Origin) -> String {
     }
 }
 
-/// Resolves the options of a conversion to `format`: those of `preset`, or
-/// else of the one `config` chooses for `format`, with what it extends;
-/// then each of `layers` over them, the last over all; checked; and, for
-/// WebM, without the values [`webm::set_aside`] finds have no say.
+/// Resolves the settings of a conversion to `format`: the options of
+/// `preset`, or else of the one `config` chooses for `format`, with what it
+/// extends; then each of `layers` over them, the last over all, without
+/// what of the file's own `format` doesn't take; checked; and, for WebM,
+/// without the values [`webm::set_aside`] finds have no say.
 ///
 /// A lossless off is left out of [`Resolved::set_aside`] where it is set
 /// aside, as that changes nothing.
@@ -134,7 +135,7 @@ pub fn resolve(
     config: &Config,
     format: Format,
     preset: Option<&str>,
-    layers: &[FormatOptions],
+    layers: &[Settings<FormatOptions>],
 ) -> Result<Resolved, ResolveError> {
     let name = preset.unwrap_or_else(|| config.preset_for(format));
     let base = presets.options(name, format).map_err(|err| match err {
@@ -150,9 +151,16 @@ pub fn resolve(
     // worked out only for what is wrong or set aside, as the GUI resolves
     // every item's options each frame
     let set_by = |option: &str| {
-        layers.iter().rposition(|layer| sets(layer, option)).map_or(Origin::Preset, Origin::Layer)
+        let sets = |layer: &Settings<FormatOptions>| {
+            layer.selection.sets(option) || sets(&layer.options, option)
+        };
+        layers.iter().rposition(sets).map_or(Origin::Preset, Origin::Layer)
     };
-    let merged = match base {
+    let selection = layers
+        .iter()
+        .fold(Selection::default(), |selection, layer| selection.merged(&layer.selection))
+        .for_format(format);
+    let options = match base {
         FormatOptions::Webm(base) => {
             FormatOptions::Webm(layers.iter().filter_map(webm_of).fold(base, webm::Options::merged))
         }
@@ -163,24 +171,19 @@ pub fn resolve(
             FormatOptions::Webp(layers.iter().filter_map(webp_of).fold(base, webp::Options::merged))
         }
     };
-    let wrong = match &merged {
-        FormatOptions::Webm(options) => first_wrong(options),
-        FormatOptions::Tgs(options) => first_wrong(options),
-        FormatOptions::Webp(options) => first_wrong(options),
-    };
+    let merged = Settings { selection, options };
+    let wrong = first_wrong(&merged);
     if let Some((option, reason)) = wrong {
         let preset = name.to_owned();
         return Err(ResolveError::Invalid { preset, option, reason, set_by: set_by(option) });
     }
     // how a sheet is read, of a sheet that isn't one
-    if let FormatOptions::Tgs(options) = &merged
-        && options.sheet_frames.is_some()
-        && options.sheet.is_none()
-    {
+    if merged.selection.sheet_frames.is_some() && merged.selection.sheet.is_none() {
         let (option, requires) = ("sheet-frames", "sheet");
         return Err(ResolveError::Requires { option, requires, set_by: set_by(option) });
     }
-    let (options, set_aside) = match merged {
+    let Settings { selection, options } = merged;
+    let (options, set_aside) = match options {
         FormatOptions::Webm(options) => {
             let aside = webm::set_aside(&options, &options);
             let set_aside = aside
@@ -197,7 +200,8 @@ pub fn resolve(
         }
         options => (options, Vec::new()),
     };
-    Ok(Resolved { preset: name.to_owned(), options, set_aside })
+    let settings = Settings { selection, options };
+    Ok(Resolved { preset: name.to_owned(), settings, set_aside })
 }
 
 /// Whether `options` set the option `key`.
@@ -209,22 +213,22 @@ fn sets(options: &FormatOptions, key: &str) -> bool {
     }
 }
 
-fn webm_of(options: &FormatOptions) -> Option<&webm::Options> {
-    match options {
+fn webm_of(layer: &Settings<FormatOptions>) -> Option<&webm::Options> {
+    match &layer.options {
         FormatOptions::Webm(options) => Some(options),
         _ => None,
     }
 }
 
-fn tgs_of(options: &FormatOptions) -> Option<&tgs::Options> {
-    match options {
+fn tgs_of(layer: &Settings<FormatOptions>) -> Option<&tgs::Options> {
+    match &layer.options {
         FormatOptions::Tgs(options) => Some(options),
         _ => None,
     }
 }
 
-fn webp_of(options: &FormatOptions) -> Option<&webp::Options> {
-    match options {
+fn webp_of(layer: &Settings<FormatOptions>) -> Option<&webp::Options> {
+    match &layer.options {
         FormatOptions::Webp(options) => Some(options),
         _ => None,
     }
@@ -244,12 +248,22 @@ mod tests {
         Presets::load(Some(dir.path())).unwrap()
     }
 
-    fn webm(options: webm::Options) -> FormatOptions {
-        FormatOptions::Webm(options)
+    /// A layer of `options` alone.
+    fn webm(options: webm::Options) -> Settings<FormatOptions> {
+        Settings { selection: default(), options: FormatOptions::Webm(options) }
     }
 
-    fn tgs(options: tgs::Options) -> FormatOptions {
-        FormatOptions::Tgs(options)
+    fn tgs(options: tgs::Options) -> Settings<FormatOptions> {
+        Settings { selection: default(), options: FormatOptions::Tgs(options) }
+    }
+
+    fn picture(options: webp::Options) -> Settings<FormatOptions> {
+        Settings { selection: default(), options: FormatOptions::Webp(options) }
+    }
+
+    /// A layer of what `selection` chooses of the file, for `options`.
+    fn chosen(selection: Selection, options: FormatOptions) -> Settings<FormatOptions> {
+        Settings { selection, options }
     }
 
     fn default<T: Default>() -> T {
@@ -263,15 +277,15 @@ mod tests {
         let resolved = |format, preset| resolve(&presets, &config, format, preset, &[]).unwrap();
         let balanced = resolved(Format::Webm, None);
         assert_eq!(balanced.preset, "balanced");
-        assert_eq!(balanced.options, webm(presets.webm("balanced").unwrap()));
+        assert_eq!(balanced.settings, webm(presets.webm("balanced").unwrap()));
         let fast = resolved(Format::Tgs, None);
         assert_eq!(
-            (fast.preset.as_str(), fast.options),
+            (fast.preset.as_str(), fast.settings),
             ("fast", tgs(presets.tgs("fast").unwrap()))
         );
         assert_eq!(resolved(Format::Tgs, Some("best")).preset, "best");
         // a picture has none of the presets' options
-        assert_eq!(resolved(Format::Webp, None).options, FormatOptions::Webp(default()));
+        assert_eq!(resolved(Format::Webp, None).settings, picture(default()));
         // and one there isn't, said as where it was named
         let none = Config { preset: Some("nope".into()), ..Config::default() };
         let unknown =
@@ -312,7 +326,7 @@ mod tests {
             fps: Some(12.0),
             ..default()
         };
-        assert_eq!(resolved.options, webm(expected));
+        assert_eq!(resolved.settings, webm(expected));
         // as each merges: a range of qualities is none of bitrates, and
         // a scale of nothing clears the preset's
         let other = [webm(webm::Options {
@@ -321,7 +335,7 @@ mod tests {
             ..default()
         })];
         let resolved = resolve(&presets, &config, Format::Webm, Some("mine"), &other).unwrap();
-        assert_eq!(resolved.options, webm(webm::Options { fit: Some(Fit::Bitrate), ..default() }));
+        assert_eq!(resolved.settings, webm(webm::Options { fit: Some(Fit::Bitrate), ..default() }));
         // only of the format resolved
         let err = resolve(&presets, &config, Format::Tgs, None, &[tgs(default()), webm(default())]);
         let wanted = Format::Tgs;
@@ -332,7 +346,7 @@ mod tests {
     fn blames_the_last_to_set_a_wrong_value() {
         let presets = presets_with("[webm]\ntempo = 50.0\n[tgs]\ntempo = 50.0\n");
         let config = Config::default();
-        let invalid = |format, layers: &[FormatOptions]| match resolve(
+        let invalid = |format, layers: &[Settings<FormatOptions>]| match resolve(
             &presets,
             &config,
             format,
@@ -353,7 +367,7 @@ mod tests {
         let fine = webm(webm::Options { tempo: Some(2.0), ..default() });
         assert!(resolve(&presets, &config, Format::Webm, Some("mine"), &[fine]).is_ok());
         // said as whose it is
-        let said = |layers: &[FormatOptions]| {
+        let said = |layers: &[Settings<FormatOptions>]| {
             let err = resolve(&presets, &config, Format::Webm, Some("mine"), layers).unwrap_err();
             err.to_string()
         };
@@ -372,8 +386,9 @@ mod tests {
         let config = Config::default();
         let resolved = resolve(&presets, &config, Format::Webp, Some("mine"), &[]).unwrap();
         let sharp = webp::Options { scaling: Some(crate::options::Scaling::Sharp), ..default() };
-        assert_eq!(resolved.options, FormatOptions::Webp(sharp));
-        let early = FormatOptions::Webp(webp::Options { start: Some(-1.0), ..default() });
+        assert_eq!(resolved.settings, picture(sharp));
+        let start = Selection { start: Some(-1.0), ..default() };
+        let early = chosen(start, FormatOptions::Webp(default()));
         let err = resolve(&presets, &config, Format::Webp, Some("mine"), &[early]).unwrap_err();
         assert!(matches!(err, ResolveError::Invalid { option: "start", .. }), "{err}");
     }
@@ -382,14 +397,46 @@ mod tests {
     fn reads_a_sheets_frames_only_of_a_sheet() {
         let presets = Presets::builtin();
         let config = Config::default();
-        let frames = tgs(tgs::Options { sheet_frames: Some(3), ..default() });
+        let frames =
+            chosen(Selection { sheet_frames: Some(3), ..default() }, tgs(default()).options);
         let layers = [frames.clone(), tgs(default())];
         let err = resolve(&presets, &config, Format::Tgs, None, &layers).unwrap_err();
         let (option, requires) = ("sheet-frames", "sheet");
         assert_eq!(err, ResolveError::Requires { option, requires, set_by: Origin::Layer(0) });
         assert_eq!(err.to_string(), "sheet-frames requires sheet");
-        let sheet = tgs(tgs::Options { sheet: "4x1".parse().ok(), ..default() });
+        let sheet =
+            chosen(Selection { sheet: "4x1".parse().ok(), ..default() }, tgs(default()).options);
         assert!(resolve(&presets, &config, Format::Tgs, None, &[frames, sheet]).is_ok());
+    }
+
+    /// What is the file's own is layered as options are, and only what the
+    /// format takes of it kept.
+    #[test]
+    fn takes_of_the_files_own_what_the_format_does() {
+        let presets = Presets::builtin();
+        let config = Config::default();
+        let given = Selection {
+            start: Some(1.0),
+            length: Some(2.0),
+            sheet: "4x1".parse().ok(),
+            ..default()
+        };
+        let later = Selection { start: Some(1.5), ..default() };
+        let kept = |format, options: FormatOptions| {
+            let layers = [chosen(given.clone(), options.clone()), chosen(later.clone(), options)];
+            resolve(&presets, &config, format, None, &layers).unwrap().settings.selection
+        };
+        let all = Selection { start: Some(1.5), ..given.clone() };
+        assert_eq!(kept(Format::Tgs, tgs(default()).options), all);
+        let unsheeted = Selection { sheet: None, ..all.clone() };
+        assert_eq!(kept(Format::Webm, webm(default()).options), unsheeted);
+        let picture = Selection { length: None, ..unsheeted };
+        assert_eq!(kept(Format::Webp, FormatOptions::Webp(default())), picture);
+        // and checked, blaming the last to set it
+        let late = chosen(Selection { length: Some(0.0), ..default() }, webm(default()).options);
+        let err = resolve(&presets, &config, Format::Webm, None, &[late, webm(default())]);
+        let Err(ResolveError::Invalid { option, set_by, .. }) = err else { panic!("{err:?}") };
+        assert_eq!((option, set_by), ("length", Origin::Layer(0)));
     }
 
     #[test]
@@ -404,7 +451,7 @@ mod tests {
         let resolved = resolve(&presets, &config, Format::Webm, Some("mine"), &[layer]).unwrap();
         let expected =
             webm::Options { fit: Some(Fit::Bitrate), spoof: Some(Spoof::Never), ..default() };
-        assert_eq!(resolved.options, webm(expected));
+        assert_eq!(resolved.settings, webm(expected));
         let aside = |option, why: &str, set_by| SetAside { option, why: why.into(), set_by };
         assert_eq!(
             resolved.set_aside,
@@ -418,7 +465,7 @@ mod tests {
         // changes nothing
         let off = webm(webm::Options { lossless: Some(false), ..default() });
         let resolved = resolve(&presets, &config, Format::Webm, Some("mine"), &[off]).unwrap();
-        let FormatOptions::Webm(options) = &resolved.options else { panic!() };
+        let FormatOptions::Webm(options) = &resolved.settings.options else { panic!() };
         assert_eq!(options.lossless, None);
         assert_eq!(resolved.set_aside, [aside("crf", "fit is bitrate", Origin::Preset)]);
     }

@@ -664,7 +664,6 @@ impl OptionArgs {
             pixel_scale: self.pixel_scale,
             fps: self.fps,
             watermark: switch(self.watermark, self.no_watermark),
-            ..tgs::Options::default()
         }
     }
 
@@ -1252,7 +1251,6 @@ mod tests {
             pixel_scale: Some(2),
             fps: Some(12.5),
             watermark: Some(true),
-            ..tgs::Options::default()
         };
         let read = parsed([options::flags(&selection), options::flags(&tgs)].concat());
         assert_eq!((read.to_selection(), read.to_tgs_options()), (selection, tgs));

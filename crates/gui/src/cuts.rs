@@ -257,8 +257,9 @@ mod tests {
         (start, length): (Option<f64>, Option<f64>),
         exactly: Option<(usize, usize)>,
     ) -> (Vec<(u8, u32)>, usize, usize) {
-        let options = tgradish_core::tgs::Options { start, length, ..Default::default() };
-        let mut normalise = options.sticker_options().unwrap().normalise;
+        let part = tgradish_core::options::Selection { start, length, ..Default::default() };
+        let options = tgradish_core::tgs::Options::default();
+        let mut normalise = options.sticker_options(&part).unwrap().normalise;
         if let Some((first, after)) = exactly {
             let time = |index: usize| -> Duration {
                 animation.frames()[..index].iter().map(|frame| frame.duration).sum()
@@ -293,7 +294,7 @@ mod tests {
                     frames.set_part((first, after), &mut start, &mut length);
                     assert_eq!(frames.part(total, start, length), (first, after));
                     // as the command line shows them and reads them back
-                    let shown = tgradish_core::options::flags(&tgradish_core::tgs::Options {
+                    let shown = tgradish_core::options::flags(&tgradish_core::options::Selection {
                         start,
                         length,
                         ..Default::default()

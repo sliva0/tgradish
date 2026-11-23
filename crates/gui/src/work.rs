@@ -7,7 +7,8 @@
 
 use eframe::egui;
 use tgradish_core::backend::Backend;
-use tgradish_core::presets::{Format, FormatOptions};
+use tgradish_core::options::Settings;
+use tgradish_core::presets::Format;
 use tgradish_core::webm::Options;
 use tgradish_core::{tgs, webp};
 
@@ -31,16 +32,12 @@ impl App {
         recipe: Recipe,
         backend: &Result<Backend, String>,
     ) -> Result<Setup, String> {
-        let options = match recipe {
-            Recipe::Webm(options) => FormatOptions::Webm(options),
-            Recipe::Tgs(options) => FormatOptions::Tgs(options),
-            Recipe::Webp(options) => FormatOptions::Webp(options),
-        };
+        let settings = Settings::from(recipe);
         let threads = self.config.threads;
         match backend {
-            Ok(backend) => Ok(Setup { options, backend: Some(backend.clone()), threads }),
-            Err(_) if options.format() == Format::Tgs => {
-                Ok(Setup { options, backend: None, threads })
+            Ok(backend) => Ok(Setup { settings, backend: Some(backend.clone()), threads }),
+            Err(_) if settings.format() == Format::Tgs => {
+                Ok(Setup { settings, backend: None, threads })
             }
             Err(why) => Err(why.clone()),
         }

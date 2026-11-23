@@ -415,7 +415,9 @@ mod tests {
         let (animation, _) = readable.take_drawn().unwrap();
         // which frames a .tgs normalised from `start` for `length` keeps
         let normalised = |start: Duration, length: Option<Duration>| {
-            let mut normalise = tgradish_core::tgs::Options::default().sticker_options().unwrap();
+            let whole = tgradish_core::options::Selection::default();
+            let options = tgradish_core::tgs::Options::default();
+            let mut normalise = options.sticker_options(&whole).unwrap();
             (normalise.normalise.start, normalise.normalise.length) = (start, length);
             let normalise = normalise.normalise;
             let (kept, report) =
@@ -444,7 +446,7 @@ mod tests {
                 let start_ms: u32 = delays[..from].iter().sum();
                 let length_ms: u32 = delays[from..after].iter().sum();
                 // the flags of the command line, read back as it reads them
-                let shown = flags(&tgradish_core::tgs::Options {
+                let shown = flags(&tgradish_core::options::Selection {
                     start: choices.start.or(choices.frame),
                     length: choices.length,
                     ..Default::default()

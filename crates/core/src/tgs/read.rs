@@ -13,6 +13,7 @@ use crate::backend::{Backend, FramesRequest};
 use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::input::{Input, sniff, sniff_readable};
+use crate::options::Selection;
 use crate::telegram;
 
 /// Decoded frames and metadata loaded for [`convert`](super::convert).
@@ -24,13 +25,13 @@ pub(super) struct Loaded {
     /// Frame durations (in seconds) of all frames in an Aseprite input.
     pub(super) durations: Vec<f64>,
     /// Present when decoded from a video via ffmpeg starting at
-    /// `options.start`.
+    /// `selection.start`.
     pub(super) video: Option<VideoPart>,
     /// Non-fatal warnings produced during decoding.
     pub(super) warnings: Vec<String>,
 }
 
-/// Portion of a video read via ffmpeg starting at `options.start`.
+/// Portion of a video read via ffmpeg starting at `selection.start`.
 pub(super) struct VideoPart {
     /// Duration of the used clip (`min(requested, available)`), when known;
     /// decoded frames may extend to the end of the last frame or past playback.
@@ -62,6 +63,7 @@ fn limits() -> Limits {
 pub(super) fn load(
     backend: Option<&Backend>,
     input: &Input,
+    selection: &Selection,
     options: &Options,
     threads: Threads,
     cancel: &CancelToken,
@@ -79,15 +81,15 @@ pub(super) fn load(
         let backend = backend.ok_or_else(|| {
             Error::FfmpegNotFound(crate::error::FfmpegMissing::ForVideo(input.clone()))
         })?;
-        return read_video(backend, input, options, threads, cancel);
+        return read_video(backend, input, selection, options, threads, cancel);
     }
     let bytes = art::read(input, art::most_bytes(&limits))?;
     cancel.check()?;
-    let sheet = options.sheet_layout()?;
+    let sheet = options.sheet_layout(selection)?;
     // a sheet is one picture, whatever tag is asked for
-    let tag = options.tag.clone().filter(|_| sheet.is_none());
+    let tag = selection.tag.clone().filter(|_| sheet.is_none());
     let chosen =
-        crate::drawn::layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
+        crate::drawn::layers(selection.show_layers.as_deref(), selection.hide_layers.as_deref());
     let stop = || cancel.is_cancelled();
     let decode = DecodeOptions { tag, layers: chosen, cancelled: Some(&stop) };
     let decoded = match frames::Format::detect(&bytes) {
@@ -126,23 +128,24 @@ const STICKER_FPS: f64 = tgradish_tgs::limits::telegram::FPS as f64;
 fn read_video(
     backend: &Backend,
     input: &Path,
+    selection: &Selection,
     options: &Options,
     threads: Threads,
     cancel: &CancelToken,
 ) -> Result<Loaded> {
     let chosen =
-        crate::drawn::layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
-    if let Some(err) = crate::drawn::not_aseprite(options.tag.as_deref(), &chosen) {
+        crate::drawn::layers(selection.show_layers.as_deref(), selection.hide_layers.as_deref());
+    if let Some(err) = crate::drawn::not_aseprite(selection.tag.as_deref(), &chosen) {
         return Err(err);
     }
-    if options.sheet.is_some() {
+    if selection.sheet.is_some() {
         return Err(Error::invalid("sheet", "only applies to images, not videos"));
     }
-    let start = options.start.unwrap_or(0.0);
+    let start = selection.start.unwrap_or(0.0);
     if start.is_nan() || start < 0.0 {
         return Err(Error::invalid("start", format!("{start} is not a valid start time")));
     }
-    if let Some(length) = options.length.filter(|length| length.is_nan() || *length <= 0.0) {
+    if let Some(length) = selection.length.filter(|length| length.is_nan() || *length <= 0.0) {
         return Err(Error::invalid("length", format!("{length} must be greater than 0")));
     }
     let probe = backend.probe(input, cancel)?;
@@ -166,7 +169,7 @@ fn read_video(
         return Err(Error::invalid("start", reason));
     }
     // what is used: as long as asked, as far as the video goes
-    let used = match (options.length, available) {
+    let used = match (selection.length, available) {
         (Some(length), Some(available)) => Some(length.min(available)),
         (length, available) => length.or(available),
     };
@@ -236,16 +239,18 @@ pub struct Art {
     pub durations: Vec<f64>,
 }
 
-/// Decodes an input using the same read options as [`convert`](super::convert)
-/// (`tag`, layer filters, `sheet`, `sheet_frames`, `fps`), or decodes a video
-/// through `backend`. Checks `cancel` between files.
+/// Decodes an input as [`convert`](super::convert) reads it (the
+/// selection's `tag`, layers, `sheet` and `sheet-frames`, at the options'
+/// `fps`), or decodes a video through `backend`. Checks `cancel` between
+/// files.
 pub fn read_art(
     backend: Option<&Backend>,
     input: &Input,
+    selection: &Selection,
     options: &Options,
     cancel: &CancelToken,
 ) -> Result<Art> {
-    let loaded = load(backend, input, options, Threads::Auto, cancel)?;
+    let loaded = load(backend, input, selection, options, Threads::Auto, cancel)?;
     let (width, height) = (loaded.animation.width(), loaded.animation.height());
     let frames = loaded
         .animation
@@ -268,46 +273,49 @@ mod tests {
         let ase = ase.unwrap();
         let path = dir.path().join(&ase.name);
         std::fs::write(&path, &ase.bytes).unwrap();
-        let read = |options: Options| {
+        let read = |selection: Selection| {
             let loaded = load(
                 None,
                 &Input::File(path.clone()),
-                &options,
+                &selection,
+                &Options::default(),
                 Threads::Auto,
                 &CancelToken::new(),
             );
             let loaded = loaded.unwrap();
             (loaded.animation.width(), loaded.animation.frames().len(), loaded.tags)
         };
-        let (width, frames, tags) = read(Options::default());
+        let (width, frames, tags) = read(Selection::default());
         let names: Vec<_> = tags.iter().map(|tag| tag.name.as_str()).collect();
         assert_eq!((names, frames), (vec!["idle"], ase.sprite.frames.len()));
-        let idle = Options { tag: Some("idle".into()), ..Options::default() };
+        let idle = Selection { tag: Some("idle".into()), ..Selection::default() };
         assert_eq!(read(idle).1, 2);
         // a sheet is one picture, which an animation isn't, whatever the
         // tag
-        let sheet = Options {
+        let sheet = Selection {
             tag: Some("idle".into()),
             sheet: Some(crate::options::Sheet { columns: 2, rows: 1 }),
-            ..Options::default()
+            ..Selection::default()
+        };
+        let load = |input: &Input, sheet: &Selection, cancel: &CancelToken| {
+            load(None, input, sheet, &Options::default(), Threads::Auto, cancel)
         };
         let input = Input::File(path.clone());
-        let refused = load(None, &input, &sheet, Threads::Auto, &CancelToken::new()).err().unwrap();
+        let refused = load(&input, &sheet, &CancelToken::new()).err().unwrap();
         assert!(refused.to_string().contains("must be a single image"), "{refused}");
         let gif = dir.path().join("walker.gif");
         std::fs::write(&gif, tgradish_corpus::encode::gif(&ase.sprite)).unwrap();
-        assert!(load(None, &Input::File(gif), &sheet, Threads::Auto, &CancelToken::new()).is_err());
+        assert!(load(&Input::File(gif), &sheet, &CancelToken::new()).is_err());
         let png = dir.path().join("walker.png");
         std::fs::write(&png, tgradish_corpus::encode::sheet(&ase.sprite, 2)).unwrap();
-        let loaded =
-            load(None, &Input::File(png), &sheet, Threads::Auto, &CancelToken::new()).unwrap();
+        let loaded = load(&Input::File(png), &sheet, &CancelToken::new()).unwrap();
         assert_eq!(loaded.animation.width(), width);
 
         // stopped between the files of a sequence
         let cancel = CancelToken::new();
         cancel.cancel();
         let both = Input::Sequence(vec![path.clone(), path.clone()]);
-        let stopped = load(None, &both, &Options::default(), Threads::Auto, &cancel);
+        let stopped = load(&both, &Selection::default(), &cancel);
         assert!(matches!(stopped, Err(Error::Cancelled)));
     }
 
@@ -335,9 +343,9 @@ mod tests {
         let path = dir.path().join("large.ase");
         std::fs::write(&path, &ase).unwrap();
         let input = Input::File(path);
-        let refused = load(None, &input, &Options::default(), Threads::Auto, &CancelToken::new())
-            .err()
-            .unwrap();
+        let none = (&Selection::default(), &Options::default());
+        let refused =
+            load(None, &input, none.0, none.1, Threads::Auto, &CancelToken::new()).err().unwrap();
         let half = (Limits::default().max_bytes / 2).to_string();
         assert!(refused.to_string().contains(&half), "{refused}");
     }
