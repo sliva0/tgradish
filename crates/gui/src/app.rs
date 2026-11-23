@@ -1,6 +1,7 @@
-//! Application state and top-level frame: open files, conversion queue,
-//! dialogs, and theme. Other modules extend `App`; this module holds shared
-//! state and drives the frame loop.
+//! Application state and top-level frame: the open files and the settings,
+//! which nearly every concern reads, and a part for each concern, kept in
+//! the module that owns it. Other modules extend `App` where they need
+//! more than their own part; this module drives the frame loop.
 
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
@@ -43,6 +44,10 @@ pub(crate) fn session_path() -> Option<PathBuf> {
     paths::state_dir().map(|dir| dir.join("session.json"))
 }
 
+/// The GUI. Its own fields are what nearly every concern reads and
+/// changes: the settings and presets, the files open and the one picked,
+/// and what is said; the rest is each concern's part, which its module
+/// owns, and which a method that touches no other takes alone.
 pub(crate) struct App {
     pub(crate) config_path: Option<PathBuf>,
     pub(crate) config: Config,
