@@ -653,7 +653,7 @@ mod tests {
         let item = &harness.state().items[0];
         assert_eq!((item.view.show, item.shown()), (Show::Result, Show::Result));
         let clip = item.result_clip.ready().map(|clip| clip.id);
-        assert_eq!(harness.state().screen.showing(), clip);
+        assert_eq!(harness.state().preview.screen.showing(), clip);
     }
 
     #[test]
@@ -949,7 +949,7 @@ mod tests {
             };
             if let Some(id) = ready(&harness.state().items[0]) {
                 harness.run_steps(2);
-                assert_eq!(harness.state().screen.showing(), Some(id));
+                assert_eq!(harness.state().preview.screen.showing(), Some(id));
                 break;
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -992,7 +992,7 @@ mod tests {
         harness.run_steps(2);
         let (_, still) = harness.state().items[0].still.as_ref().expect("asked for");
         let clip = still.ready().expect("read");
-        assert_eq!((clip.width, harness.state().screen.showing()), (1280, Some(clip.id)));
+        assert_eq!((clip.width, harness.state().preview.screen.showing()), (1280, Some(clip.id)));
     }
 
     #[test]

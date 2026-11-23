@@ -52,6 +52,22 @@ const UNDER_PANEL: f32 = 2.0 + HANDLE / 2.0;
 pub(crate) const LEAST_SHARE: f32 = 0.2;
 pub(crate) const MOST_SHARE: f32 = 0.85;
 
+/// What the preview keeps from one frame to the next, whichever file it
+/// shows: what is on its screen, the inset over it, and how tall it is.
+pub(crate) struct Preview {
+    pub(crate) screen: Screen,
+    pub(crate) inset: Inset,
+    /// Share of the main panel's height the preview takes.
+    pub(crate) share: f32,
+}
+
+impl Default for Preview {
+    fn default() -> Preview {
+        let share = crate::app::PREVIEW_SHARE;
+        Preview { screen: Screen::default(), inset: Inset::default(), share }
+    }
+}
+
 impl App {
     pub(crate) fn main_panel(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
@@ -101,7 +117,7 @@ impl App {
         };
         let height = ui.available_height();
         let preview_height =
-            (height * self.preview_share).clamp(240.0, (height - 140.0).max(240.0));
+            (height * self.preview.share).clamp(240.0, (height - 140.0).max(240.0));
         let item = self.items.iter_mut().find(|item| item.id == id).expect("selected");
         // Omit the built-in panel separator; the custom drag handle draws the line below.
         let panel = egui::Panel::top("preview").exact_size(preview_height);
@@ -118,7 +134,7 @@ impl App {
                         let (tempo, webm, tgs) = made_with(item, &context);
                         preview(
                             ui,
-                            (&mut self.screen, &mut self.inset),
+                            (&mut self.preview.screen, &mut self.preview.inset),
                             item,
                             (tempo, &mut in_frames),
                             (&webm, &tgs),
@@ -155,11 +171,11 @@ impl App {
         });
         // Clamp between LEAST_SHARE and MOST_SHARE; double-click resets to default.
         if response.dragged() {
-            self.preview_share = ((preview_height + response.drag_delta().y) / height)
+            self.preview.share = ((preview_height + response.drag_delta().y) / height)
                 .clamp(LEAST_SHARE, MOST_SHARE);
         }
         if response.double_clicked() {
-            self.preview_share = crate::app::PREVIEW_SHARE;
+            self.preview.share = crate::app::PREVIEW_SHARE;
         }
         // Highlight and thicken the line on hover or drag.
         let line_width = if response.hovered() || response.dragged() { 2.0 } else { 1.0 };
@@ -794,7 +810,7 @@ mod tests {
             // what shows it, the clip read or the still at its full size,
             // no larger than the renderer takes
             let most = harness.ctx.input(|input| input.max_texture_side);
-            let texture = harness.state().screen.texture_size().unwrap();
+            let texture = harness.state().preview.screen.texture_size().unwrap();
             assert!(texture[0] <= most && texture[1] <= most, "{:?}: {texture:?}", item.name());
             assert_eq!(texture[0], most, "{:?}", item.name());
         }
@@ -1328,7 +1344,7 @@ mod tests {
             .build_eframe(|_| App::with(Config::default(), None, Presets::builtin()));
         harness.state_mut().add(vec![a]);
         finish(&mut harness);
-        harness.state_mut().preview_share = 0.4;
+        harness.state_mut().preview.share = 0.4;
         harness.run_steps(2);
         let line = || fl!("preview-divider");
         let at = harness.get_by_label(&line()).rect().center();
@@ -1342,7 +1358,7 @@ mod tests {
             }
         }
         harness.run_steps(2);
-        assert_eq!(harness.state().preview_share, crate::app::PREVIEW_SHARE);
+        assert_eq!(harness.state().preview.share, crate::app::PREVIEW_SHARE);
         // where it was, then, on the line, which stays where it was
         let moved = harness.get_by_label(&line()).rect();
         assert!(moved.center().y > at.y, "{moved:?}");

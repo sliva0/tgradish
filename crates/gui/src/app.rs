@@ -16,16 +16,15 @@ use tgradish_core::presets::Presets;
 use crate::Launch;
 use crate::about::about;
 use crate::banner::{Action, Banner, Message, Subject};
-use crate::canvas::Screen;
 use crate::ffmpeg::Ffmpeg;
 use crate::files::Picker;
 use crate::fonts::fonts;
-use crate::inset::Inset;
 use crate::item::{Conversion, Item};
 use crate::jobs::{Job, failure};
 use crate::keys::direct_scrolling;
 use crate::l10n::fl;
 use crate::outputs::Outputs;
+use crate::preview::Preview;
 #[cfg(all(unix, not(target_os = "macos")))]
 use crate::toplevel_icon;
 use crate::work::{Work, release};
@@ -62,8 +61,8 @@ pub(crate) struct App {
     pub(crate) outputs: Outputs,
     /// The ffmpeg the command line gave, and the one found.
     pub(crate) ffmpeg: Ffmpeg,
-    pub(crate) screen: Screen,
-    pub(crate) inset: Inset,
+    /// What the preview shows, and how tall it is.
+    pub(crate) preview: Preview,
     /// The system's file dialogs, one open at a time.
     pub(crate) picker: Picker,
     /// The GUI's own dialogs, and what is typed in them.
@@ -94,8 +93,6 @@ pub(crate) struct App {
     /// The window's icon on Wayland, kept while the window shows it.
     #[cfg(all(unix, not(target_os = "macos")))]
     pub(crate) _toplevel_icon: Option<toplevel_icon::ToplevelIcon>,
-    /// Share of the main panel's height the preview takes.
-    pub(crate) preview_share: f32,
     /// How the list's rows change, as they fade in and close up.
     pub(crate) rows: crate::files::Rows,
 }
@@ -154,7 +151,7 @@ impl App {
     pub(crate) fn resume(&mut self, mut store: session::Store) {
         // laid out as last time, whether or not its files are opened again
         if let Some(window) = session::window(store.path()) {
-            self.preview_share = window.preview;
+            self.preview.share = window.preview;
             self.keeping.window = Some(window);
         }
         // with the setting off, the first save empties what is there
@@ -268,8 +265,7 @@ impl App {
             work: Work::default(),
             outputs: Outputs::default(),
             ffmpeg: Ffmpeg::default(),
-            screen: Screen::default(),
-            inset: Inset::default(),
+            preview: Preview::default(),
             picker: Picker::default(),
             dialogs: Dialogs::default(),
             look: theme::Look::default(),
@@ -285,7 +281,6 @@ impl App {
             reveal_selected: false,
             #[cfg(all(unix, not(target_os = "macos")))]
             _toplevel_icon: None,
-            preview_share: PREVIEW_SHARE,
             rows: crate::files::Rows::default(),
         }
     }
@@ -371,7 +366,7 @@ impl App {
         if let Some(list) = list {
             window.list = list.round();
         }
-        window.preview = self.preview_share;
+        window.preview = self.preview.share;
     }
 
     /// Which ffmpeg to use and where, as the settings and the command line
@@ -1546,7 +1541,7 @@ mod tests {
         let state = dir.path().join("state").join("session.json");
         let mut first = harness(Config::default());
         first.state_mut().reopen(state.clone());
-        first.state_mut().preview_share = 0.4;
+        first.state_mut().preview.share = 0.4;
         // the list, which shows with files
         let art = dir.path().join("art.png");
         crate::testing::square(&art, [255, 0, 0, 255]);
@@ -1584,7 +1579,7 @@ mod tests {
                 app
             });
         second.run_steps(2);
-        assert_eq!(second.state().preview_share, 0.4);
+        assert_eq!(second.state().preview.share, 0.4);
         assert_eq!(second.state().keeping.window.unwrap().list, window.list);
         assert_eq!(session::window(&state).map(|window| window.list), Some(window.list));
     }
