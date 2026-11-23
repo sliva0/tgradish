@@ -450,7 +450,7 @@ pub(crate) fn show(
     }
     // the crop takes the keyboard's focus as it is pressed on, or drawn
     let crop_id = response.id.with("crop");
-    ui.data_mut(|data| data.insert_temp(egui::Id::new(CROP), crop_id));
+    ui.data_mut(|data| data.insert_temp(crop_key(), crop_id));
     let pressed_on =
         |point: Option<Pos2>| point.and_then(grab).filter(|drag| !matches!(drag, Drag::New(_)));
     let focus = (dragging && drag.is_some())
@@ -459,14 +459,14 @@ pub(crate) fn show(
     // the focus to it, as Tab does, till the canvas is pressed again or
     // the focus goes elsewhere: a press takes the focus too, and the
     // crop's own frame is enough to see it by then
-    let keyed_id = crop_id.with(KEYED);
+    let keyed_id = keyed_id(crop_id);
     let focused = ui.memory(|memory| memory.has_focus(crop_id));
     if response.is_pointer_button_down_on() || !focused {
         ui.data_mut(|data| data.remove::<bool>(keyed_id));
     }
     // come since the last frame ended, by no press of the canvas, which
     // asks for it as it is drawn
-    let had = crop_id.with(HAD_FOCUS);
+    let had = had_focus_id(crop_id);
     let came = focused && ui.data(|data| data.get_temp::<bool>(had)) != Some(true);
     if came && !response.is_pointer_button_down_on() {
         ui.data_mut(|data| data.insert_temp(keyed_id, true));
@@ -649,34 +649,50 @@ pub(crate) fn show(
         }
     }
     let focused = ui.memory(|memory| memory.has_focus(crop_id));
-    ui.data_mut(|data| data.insert_temp(crop_id.with(HAD_FOCUS), focused));
+    ui.data_mut(|data| data.insert_temp(had_focus_id(crop_id), focused));
 }
 
 /// The id under the crop's own of whether it had the focus as the last
-/// frame drew it, to tell when the keyboard brings it there.
-const HAD_FOCUS: &str = "had focus";
+/// frame drew it, a `bool`, to tell when the keyboard brings it there:
+/// the canvas's alone.
+fn had_focus_id(crop: egui::Id) -> egui::Id {
+    crop.with("had focus")
+}
 
-/// The id under which the crop's own is kept, for [`crop_focused`].
-const CROP: &str = "crop";
+/// Where the crop's own id is kept, an `egui::Id`, for [`crop_focused`]
+/// and [`crop_ringed`], which keys and the focus ring ask anywhere in the
+/// frame: written as the canvas draws the crop, and kept as long as the
+/// GUI runs, as the crop's id stays the same.
+fn crop_key() -> egui::Id {
+    egui::Id::new("crop")
+}
+
+/// The crop's own id, as the canvas last drew it.
+fn crop_id(ctx: &egui::Context) -> Option<egui::Id> {
+    ctx.data(|data| data.get_temp::<egui::Id>(crop_key()))
+}
 
 /// Whether the crop has the keyboard's focus, which takes only the arrows
 /// that move it: the GUI's other shortcuts are kept as they are.
 pub(crate) fn crop_focused(ctx: &egui::Context) -> bool {
-    let crop = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(CROP)));
+    let crop = crop_id(ctx);
     crop.is_some() && ctx.memory(|memory| memory.focused()) == crop
 }
 
-/// The id under the crop's own of whether the arrows moved it, for
-/// [`crop_ringed`].
-const KEYED: &str = "keyed";
+/// The id under the crop's own of whether the arrows moved it, or the
+/// keyboard brought the focus to it, a `bool`: set and cleared as the
+/// canvas draws it, read by [`crop_ringed`].
+fn keyed_id(crop: egui::Id) -> egui::Id {
+    crop.with("keyed")
+}
 
 /// Whether the crop shows the ring of the keyboard's focus: only once the
 /// arrows moved it or the keyboard brought the focus to it, as it takes
 /// the focus with each press on it too, and only till the canvas is
 /// pressed again.
 pub(crate) fn crop_ringed(ctx: &egui::Context) -> bool {
-    let crop = ctx.data(|data| data.get_temp::<egui::Id>(egui::Id::new(CROP)));
-    let keyed = |crop: egui::Id| ctx.data(|data| data.get_temp::<bool>(crop.with(KEYED)));
+    let crop = crop_id(ctx);
+    let keyed = |crop: egui::Id| ctx.data(|data| data.get_temp::<bool>(keyed_id(crop)));
     crop_focused(ctx) && crop.and_then(keyed).is_some()
 }
 
