@@ -213,8 +213,17 @@ impl Options {
 /// Returns `options` with any fields that have no effect under `effective`
 /// cleared, as [`set_aside`] lists them, so planning neither warns about them
 /// nor refuses lossless where it has no effect.
-pub fn in_effect(mut options: Options, effective: &Options) -> Options {
-    for (key, _) in set_aside(&options, effective) {
+pub fn in_effect(options: Options, effective: &Options) -> Options {
+    let aside = set_aside(&options, effective);
+    without(options, aside.iter().map(|(key, _)| *key))
+}
+
+/// `options` without the values of `keys`, each one [`set_aside`] gives.
+pub(crate) fn without<'k>(
+    mut options: Options,
+    keys: impl IntoIterator<Item = &'k str>,
+) -> Options {
+    for key in keys {
         match key {
             "attempts" => options.attempts = None,
             "fit-range" => options.fit_range = None,

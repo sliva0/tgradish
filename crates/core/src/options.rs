@@ -410,6 +410,16 @@ macro_rules! layered {
                 [$(stringify!($field)),*].into_iter().map(|field| field.replace('_', "-"))
             }
 
+            /// Whether the option `key`, as [`Self::keys`] names it, is
+            /// set.
+            pub(crate) fn sets(&self, key: &str) -> bool {
+                let field = key.replace('-', "_");
+                $(if field == stringify!($field) {
+                    return self.$field.is_some();
+                })*
+                false
+            }
+
             /// Copies every `Some` field from `overlay` onto `self`.
             fn overlaid(mut self, overlay: &$options) -> $options {
                 let $options { $($field: _),* } = overlay;
@@ -578,6 +588,12 @@ impl Checked for crate::webm::Options {
     }
 }
 
+impl Checked for crate::webp::Options {
+    fn numbers(&self) -> Vec<(&'static str, f64)> {
+        self.start.map(|start| ("start", start)).into_iter().collect()
+    }
+}
+
 impl Checked for crate::tgs::Options {
     fn numbers(&self) -> Vec<(&'static str, f64)> {
         let numbers = [
@@ -594,24 +610,27 @@ impl Checked for crate::tgs::Options {
 /// finiteness, and `fit-range` ordering). Input-dependent checks happen during
 /// conversion.
 pub fn check(options: &impl Checked) -> crate::Result<()> {
+    match first_wrong(options) {
+        Some((option, reason)) => Err(crate::Error::invalid(option, reason)),
+        None => Ok(()),
+    }
+}
+
+/// The first value [`check`] finds wrong in `options`, by its key, and why.
+pub(crate) fn first_wrong(options: &impl Checked) -> Option<(&'static str, String)> {
     for (key, value) in options.numbers() {
         if let Some(reason) = wrong_value(key, value) {
-            return Err(crate::Error::invalid(key, reason));
+            return Some((key, reason));
         }
     }
-    if let Some(range) = options.fit_range() {
-        if !(range.min.is_finite() && range.max.is_finite()) {
-            return Err(crate::Error::invalid(
-                "fit-range",
-                format!("{range} must have finite ends"),
-            ));
-        }
-        if range.min > range.max {
-            let reason = format!("{range} must have MIN <= MAX");
-            return Err(crate::Error::invalid("fit-range", reason));
-        }
+    let range = options.fit_range()?;
+    if !(range.min.is_finite() && range.max.is_finite()) {
+        return Some(("fit-range", format!("{range} must have finite ends")));
     }
-    Ok(())
+    if range.min > range.max {
+        return Some(("fit-range", format!("{range} must have MIN <= MAX")));
+    }
+    None
 }
 
 #[cfg(test)]

@@ -25,7 +25,8 @@
 //!   processes or linked libraries (behind the `linked` feature). [`drawn`]
 //!   renders formats ffmpeg cannot read (such as Aseprite and image sequences).
 //! - [`options`], [`presets`], [`config`]: Shared option types, option
-//!   layering, CLI flag conversion, presets and user config.
+//!   layering, CLI flag conversion, presets and user config. [`resolve`]
+//!   layers a preset's options and a front end's into a conversion's.
 //! - [`inspect`], [`telegram`], [`preview`]: Inspects media against Telegram's
 //!   limits ([`telegram::Issue`]) and decodes finished stickers for preview.
 //! - [`wire`]: How `--json` output is shaped, and the types only it uses.
@@ -64,6 +65,7 @@ pub mod paths;
 pub mod picture;
 pub mod presets;
 pub mod preview;
+pub mod resolve;
 pub mod telegram;
 pub mod tgs;
 pub mod webm;

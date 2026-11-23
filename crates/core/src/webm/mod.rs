@@ -27,6 +27,7 @@ mod plan;
 
 pub use events::{Decision, Params, Rate};
 pub use fit::first_params;
+pub(crate) use options::without;
 pub use options::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, DEFAULT_FAKE_DURATION, HIGHEST_BITRATE, MAX_ATTEMPTS,
     Options, in_effect, set_aside,
