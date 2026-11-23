@@ -1,6 +1,7 @@
 //! Shared option value types, option layering, validation, and CLI flag
-//! formatting used by [`webm::Options`](crate::webm::Options) (for WebM and
-//! WebP) and [`tgs::Options`](crate::tgs::Options).
+//! formatting used by [`webm::Options`](crate::webm::Options),
+//! [`webp::Options`](crate::webp::Options) and
+//! [`tgs::Options`](crate::tgs::Options).
 //!
 //! Every option field is `Option<T>` so options can be layered in order:
 //! built-in defaults, then a preset, then command-line flags. Unset fields

@@ -1,4 +1,5 @@
-//! Conversion options for WebM (and the picture subset used by static WebP).
+//! Conversion options for WebM. Static WebP takes those a picture has, as
+//! [`crate::webp::Options`].
 
 use std::collections::BTreeMap;
 
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use crate::options::{Crop, Effort, Fit, IntegerScale, Range, Resize, Scaling, Spoof, layered};
 use crate::telegram::Target;
 
-/// Settings for one WebM (or WebP) conversion. `None` uses the default.
+/// Settings for one WebM conversion. `None` uses the default.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {

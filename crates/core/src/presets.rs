@@ -28,8 +28,8 @@ use serde::{Deserialize, Serialize};
 use crate::error::{Error, FileAction, Result};
 use crate::options::{Effort, Fit};
 use crate::telegram::Target;
-use crate::tgs;
 use crate::webm::Options;
+use crate::{tgs, webp};
 
 /// The built-in presets' names, fastest first.
 pub const BUILTIN: [&str; 3] = ["fast", "balanced", "best"];
@@ -104,13 +104,13 @@ impl Format {
 
     /// Returns true if this format supports option `key` (or its legacy alias):
     /// all of [`Options`] for WebM, all of [`tgs::Options`] for `.tgs`, and
-    /// [`crate::webp::PICTURE_OPTIONS`] for WebP.
+    /// all of [`webp::Options`] for WebP.
     pub fn uses(self, key: &str) -> bool {
         let key = crate::options::current_key(key);
         match self {
             Format::Webm => Options::keys().any(|known| known == key),
             Format::Tgs => tgs::Options::keys().any(|known| known == key),
-            Format::Webp => crate::webp::PICTURE_OPTIONS.contains(&key),
+            Format::Webp => webp::Options::keys().any(|known| known == key),
         }
     }
 
@@ -146,7 +146,7 @@ pub enum FormatOptions {
     /// Options for `.tgs` output.
     Tgs(tgs::Options),
     /// Options for static WebP output.
-    Webp(Options),
+    Webp(webp::Options),
 }
 
 impl FormatOptions {
@@ -162,8 +162,9 @@ impl FormatOptions {
     /// Returns the configured [`Target`], defaulting to [`Target::Sticker`].
     pub fn target(&self) -> Target {
         match self {
-            FormatOptions::Webm(options) | FormatOptions::Webp(options) => options.target,
+            FormatOptions::Webm(options) => options.target,
             FormatOptions::Tgs(options) => options.target,
+            FormatOptions::Webp(options) => options.target,
         }
         .unwrap_or_default()
     }
@@ -504,12 +505,12 @@ impl Presets {
     }
 
     /// Options of `name` for `format`, with everything it extends applied
-    /// first.
+    /// first. WebP's are those of its `[webm]` table a picture has.
     pub fn resolve(&self, name: &str, format: Format) -> Result<FormatOptions> {
         Ok(match format {
             Format::Webm => FormatOptions::Webm(self.webm(name)?),
             Format::Tgs => FormatOptions::Tgs(self.tgs(name)?),
-            Format::Webp => FormatOptions::Webp(self.webm(name)?),
+            Format::Webp => FormatOptions::Webp((&self.webm(name)?).into()),
         })
     }
 
@@ -850,8 +851,8 @@ mod tests {
             ["crf", "exact", "lossless", "keep-canvas", "spoof", "nope"]
         );
         // every option a picture has is WebM's
-        for key in crate::webp::PICTURE_OPTIONS {
-            assert!(Format::Webm.uses(key), "{key}");
+        for key in webp::Options::keys() {
+            assert!(Format::Webm.uses(&key), "{key}");
         }
         // the keys named are the ones serde reads, as it refuses others
         for key in Options::keys() {
@@ -862,12 +863,17 @@ mod tests {
             let read = serde_json::from_value::<tgs::Options>(serde_json::json!({ &key: null }));
             assert!(read.is_ok(), "{key}: {read:?}");
         }
-        let all = Options {
-            crf: Some(30),
-            crop: Some(crate::options::Crop::whole((8, 8))),
-            ..Default::default()
-        };
-        assert_eq!(crate::options::set_keys(&crate::webp::picture_options(&all)), ["crop"]);
+        for key in webp::Options::keys() {
+            let read = serde_json::from_value::<webp::Options>(serde_json::json!({ &key: null }));
+            assert!(read.is_ok(), "{key}: {read:?}");
+        }
+        // a picture's are taken from a preset's WebM options
+        let dir = tempfile::tempdir().unwrap();
+        write(dir.path(), "picture", "[webm]\ncrf = 30\nscaling = 'sharp'\n");
+        let presets = Presets::load(Some(dir.path())).unwrap();
+        let scaling = Some(crate::options::Scaling::Sharp);
+        let sharp = webp::Options { scaling, ..Default::default() };
+        assert_eq!(presets.resolve("picture", Format::Webp).unwrap(), FormatOptions::Webp(sharp));
     }
 
     /// One file's options are refused in either table, as such, even one

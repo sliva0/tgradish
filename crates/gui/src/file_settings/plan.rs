@@ -94,7 +94,7 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
     match item.format {
         Format::Webm | Format::Webp => {
             let options = match item.format {
-                Format::Webp => item.choices.image_options(presets, config),
+                Format::Webp => item.choices.image_options(presets, config).map(Options::from),
                 _ => item.choices.webm_options(presets, config),
             };
             let Ok(options) = options else { return steps };

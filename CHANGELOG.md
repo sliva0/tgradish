@@ -8,6 +8,10 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 
 - `tgradish config init` writes the example config where tgradish reads it, creating its directory, and never overwrites an existing config.
 
+### Changed
+
+- In the `tgradish-core` library, `webp::Options` is now its own type holding only the options static WebP uses, instead of WebM's `webm::Options`. `webp::Request` and `FormatOptions::Webp` take it; `webp::PICTURE_OPTIONS` and `webp::picture_options` are removed (use `webp::Options::from(&webm_options)`).
+
 ### Removed
 
 - `tgradish describe`, which printed JSON Schemas of options and events. `--json` output is unchanged.

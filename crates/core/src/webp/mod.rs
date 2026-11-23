@@ -3,21 +3,20 @@
 //! losslessly when it fits Telegram's 512 KiB limit, or lossy at the highest
 //! quality that fits.
 //!
-//! Uses the still-image subset ([`PICTURE_OPTIONS`]) of
-//! [`crate::webm::Options`]
+//! Takes [`Options`], those of [`crate::webm::Options`] a still picture has
 //! (target, crop, resize, scaling, integer scale, start timestamp, Aseprite
-//! tag/layers, title and watermark).
+//! tag/layers, title and watermark), and plans as WebM does.
 
 mod encode;
 mod inspect;
+mod options;
 
-/// WebP reuses [`crate::webm::Options`], honouring [`PICTURE_OPTIONS`].
-pub use crate::webm::Options;
 pub use encode::Encoding;
 #[cfg(test)]
 pub(crate) use encode::encode;
 use encode::{fit, with_xmp, xmp};
 pub use inspect::{Info, creator_tool, inspect_file, preview};
+pub use options::Options;
 
 use std::path::PathBuf;
 
@@ -40,7 +39,7 @@ pub struct Request {
     /// Destination path; defaults to [`Input::default_output`] (see
     /// [`Request::output`]).
     pub output: Option<PathBuf>,
-    /// Conversion options (subset [`PICTURE_OPTIONS`] applies).
+    /// Conversion options.
     pub options: Options,
     /// Replace an existing output file if present.
     pub overwrite: bool,
@@ -62,30 +61,6 @@ impl Request {
         let target = self.options.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Webp, target))
     }
-}
-
-/// Keys of [`Options`] that a still picture has (what to make, what is read
-/// and where, how it is fitted and scaled, and metadata); the rest concern
-/// time and video encoding.
-pub const PICTURE_OPTIONS: [&str; 11] = [
-    "target",
-    "tag",
-    "show-layers",
-    "hide-layers",
-    "crop",
-    "resize",
-    "scaling",
-    "integer-scale",
-    "start",
-    "title",
-    "watermark",
-];
-
-/// Returns a copy of `options` keeping only [`PICTURE_OPTIONS`].
-pub fn picture_options(options: &Options) -> Options {
-    let mut table = toml::Table::try_from(options).expect("options serialise to a table");
-    table.retain(|key, _| PICTURE_OPTIONS.contains(&key));
-    table.try_into().expect("options read back with fewer set")
 }
 
 /// Computes the seek timestamp for the frame displayed at `time` (snapping to
@@ -117,7 +92,7 @@ pub fn plan(
     source: crate::ffmpeg::Probe,
     starts: &[f64],
 ) -> Result<(Plan, Vec<String>)> {
-    let mut options = picture_options(&request.options);
+    let mut options = webm::Options::from(request.options.clone());
     // Resolve the seek timestamp for the frame displayed at `start` (matching
     // preview); out-of-range timestamps are rejected later by `webm::plan_for`.
     if let (Some(start), Some(fps)) = (options.start, source.fps.filter(|_| !source.still_image))
@@ -151,7 +126,7 @@ pub fn convert(
     // Render pixel-art inputs for ffmpeg using picture-only options (keeping
     // default frame timing for sequences because frame selection is
     // time-based).
-    let drawing = picture_options(&request.options);
+    let drawing = webm::Options::from(request.options.clone());
     let mut readable = crate::drawn::readable(&request.input, &drawing, cancel)?;
     // Drop the in-memory raster frames since ffmpeg reads from disk.
     drop(readable.take_drawn());
@@ -179,7 +154,7 @@ pub fn convert(
         on_event(Event::Warning { message });
     }
     plan.input = input.to_path_buf();
-    picture::choose_auto_scaling(backend, &mut plan, &request.options, cancel)?;
+    picture::choose_auto_scaling(backend, &mut plan, &drawing, cancel)?;
     let rgba = backend.still(&plan, cancel)?;
     cancel.check()?;
     let alpha = rgba.as_chunks::<4>().0.iter().any(|pixel| pixel[3] < 255);

@@ -45,7 +45,7 @@ fn still(
     let request = webp::Request {
         input: request.input.clone(),
         output: request.output.clone(),
-        options: request.options.clone(),
+        options: webp::Options::from(&request.options),
         overwrite: request.overwrite,
         threads: request.threads,
     };

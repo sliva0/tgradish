@@ -169,7 +169,7 @@ fn layer_options(
         check_options(&options, args, json, name)?;
         Ok(options)
     };
-    let resolved = presets.resolve(name, format).map_err(|err| match err {
+    let unknown = |err| match err {
         tgradish_core::Error::Preset(PresetError::Unknown { known, .. }) => {
             let known = known.join(", ");
             if args.preset.is_some() {
@@ -182,11 +182,17 @@ fn layer_options(
             anyhow::anyhow!("unknown {key} {name:?} in config{place}; available: {known}")
         }
         err => err.into(),
-    })?;
-    Ok(match resolved {
-        FormatOptions::Webm(options) => FormatOptions::Webm(webm(options)?),
-        FormatOptions::Webp(options) => FormatOptions::Webp(webm(options)?),
-        FormatOptions::Tgs(mut options) => {
+    };
+    Ok(match format {
+        Format::Webm => FormatOptions::Webm(webm(presets.webm(name).map_err(unknown)?)?),
+        // checked as all of WebM's are, the preset's too, and only then cut
+        // down to what a picture has
+        Format::Webp => {
+            let options = webm(presets.webm(name).map_err(unknown)?)?;
+            FormatOptions::Webp(webp::Options::from(&options))
+        }
+        Format::Tgs => {
+            let mut options = presets.tgs(name).map_err(unknown)?;
             if let Some(json) = json {
                 options = options.merged(&overlay(json, format)?);
             }
@@ -920,7 +926,7 @@ mod tests {
         FormatOptions::Webm(options)
     }
 
-    fn webp(options: Options) -> FormatOptions {
+    fn webp(options: webp::Options) -> FormatOptions {
         FormatOptions::Webp(options)
     }
 
@@ -934,12 +940,11 @@ mod tests {
         // (divergence 7); the target is left to its default
         let fitted =
             Options { fit: Some(Fit::Crf), crf: Some(20), effort: Some(Effort::Fast), ..default() };
-        assert_eq!(layered(Format::Webm), webm(fitted.clone()));
+        assert_eq!(layered(Format::Webm), webm(fitted));
         let tgs = tgs::Options { effort: Some(Effort::Fast), exact: Some(false), ..default() };
         assert_eq!(layered(Format::Tgs), FormatOptions::Tgs(tgs));
-        // a picture is handed all of WebM's, of which core keeps a
-        // picture's (divergence 5)
-        assert_eq!(layered(Format::Webp), webp(fitted));
+        // a picture's only, all of WebM's checked first (divergence 5)
+        assert_eq!(layered(Format::Webp), webp(default()));
     }
 
     #[test]
@@ -956,8 +961,9 @@ mod tests {
             watermark: Some(false),
             ..default()
         };
-        assert_eq!(layered(Format::Webm), webm(webm_off.clone()));
-        assert_eq!(layered(Format::Webp), webp(webm_off));
+        assert_eq!(layered(Format::Webm), webm(webm_off));
+        let picture_off = webp::Options { watermark: Some(false), ..default() };
+        assert_eq!(layered(Format::Webp), webp(picture_off));
         let tgs = tgs::Options { keep_canvas: Some(false), watermark: Some(false), ..default() };
         assert_eq!(layered(Format::Tgs), FormatOptions::Tgs(tgs));
     }
@@ -1029,11 +1035,9 @@ mod tests {
         let config = Config::default();
         let two = "2".parse::<IntegerScale>().ok();
         // kept, as core scales by it whatever the scaling (divergence 2)
-        for format in [Format::Webm, Format::Webp] {
-            let scaled = layered(&presets, &config, format, &["-p", "scaled"], None).unwrap();
-            let kept = Options { integer_scale: two, ..default() };
-            assert_eq!(scaled, if format == Format::Webm { webm(kept) } else { webp(kept) });
-        }
+        let scaled = |format| layered(&presets, &config, format, &["-p", "scaled"], None).unwrap();
+        assert_eq!(scaled(Format::Webm), webm(Options { integer_scale: two, ..default() }));
+        assert_eq!(scaled(Format::Webp), webp(webp::Options { integer_scale: two, ..default() }));
         // and the crop it can't go with, for planning to refuse
         // (divergence 3)
         let cropped = layered(&presets, &config, Format::Webm, &["-p", "cropped"], None);
@@ -1099,11 +1103,15 @@ mod tests {
             ["-p", "renamed", "--speed=balanced", "--scaling=pixel-perfect", "--exact-scale=1/2"];
         let from_flags = layered(Format::Webm, &flags, None);
         assert_eq!(from_flags.unwrap(), webm(scaled(Effort::Balanced, "1/2")));
-        // a picture's is read by its old name too, the preset's effort with
-        // it (divergence 5)
+        // a picture's is read by its old name too
         let json = serde_json::json!({ "exact-scale": "2" });
         let picture = layered(Format::Webp, &preset, Some(json));
-        assert_eq!(picture.unwrap(), webp(scaled(Effort::Best, "2")));
+        let scaled = webp::Options {
+            scaling: Some(Scaling::Integer),
+            integer_scale: "2".parse().ok(),
+            ..default()
+        };
+        assert_eq!(picture.unwrap(), webp(scaled));
     }
 
     #[test]
@@ -1113,18 +1121,13 @@ mod tests {
             ("fast tempo", "[webm]\ntempo = 50.0\n"),
         ]);
         let config = Config::default();
-        // all of WebM's, of which core keeps a picture's (divergence 5)
+        // a picture's only
         let flags = ["-p", "picture", "--start", "1.5"];
         let picture = layered(&presets, &config, Format::Webp, &flags, None);
-        let all = Options {
-            scaling: Some(Scaling::Sharp),
-            fit: Some(Fit::Off),
-            start: Some(1.5),
-            crf: Some(20),
-            ..default()
-        };
-        assert_eq!(picture.unwrap(), webp(all));
-        // so a value a picture doesn't use is checked too (divergence 5)
+        let sharp = webp::Options { scaling: Some(Scaling::Sharp), start: Some(1.5), ..default() };
+        assert_eq!(picture.unwrap(), webp(sharp));
+        // though all of WebM's are checked first, so a value a picture
+        // doesn't use is too (divergence 5)
         let tempo = layered(&presets, &config, Format::Webp, &["-p", "fast tempo"], None);
         let said = "preset \"fast tempo\" sets tempo, which must be from 0.1 to 10";
         assert_eq!(refused(tempo), (false, said.into()));
@@ -1182,8 +1185,9 @@ mod tests {
         };
         let layered = |format, flags: &[&str]| layered(&presets, &config, format, flags, None);
         let fast = Options { fit: Some(Fit::Bitrate), effort: Some(Effort::Fast), ..default() };
-        assert_eq!(layered(Format::Webm, &[]).unwrap(), webm(fast.clone()));
-        assert_eq!(layered(Format::Webp, &[]).unwrap(), webp(fast));
+        assert_eq!(layered(Format::Webm, &[]).unwrap(), webm(fast));
+        // of which a picture takes none
+        assert_eq!(layered(Format::Webp, &[]).unwrap(), webp(default()));
         let balanced = tgs::Options { effort: Some(Effort::Balanced), ..default() };
         assert_eq!(layered(Format::Tgs, &[]).unwrap(), FormatOptions::Tgs(balanced));
         // unless one is named

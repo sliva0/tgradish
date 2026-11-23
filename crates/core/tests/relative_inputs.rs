@@ -47,7 +47,7 @@ fn reads_names_that_look_like_urls_and_options() {
             let made = made.unwrap_or_else(|err| panic!("{label}: {err}"));
             assert_eq!(made.output, input.with_extension("sticker.webm"), "{label}");
             assert!(made.output.exists(), "{label}");
-            let options = Options { start: Some(0.1), ..Options::default() };
+            let options = webp::Options { start: Some(0.1), ..webp::Options::default() };
             let request = webp::Request {
                 options,
                 overwrite: true,

@@ -11,8 +11,8 @@ use tgradish_core::options::{Crop, Resize, Scaling, Sheet};
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
 use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
-use tgradish_core::tgs;
 use tgradish_core::webm::Options;
+use tgradish_core::{tgs, webp};
 
 use crate::cuts::{self, Frames};
 use crate::jobs::{Done, Job};
@@ -186,9 +186,9 @@ impl Choices {
         &self,
         presets: &Presets,
         config: &Config,
-    ) -> Result<Options, String> {
+    ) -> Result<webp::Options, String> {
         let options = self.webm_options(presets, config)?;
-        Ok(Options { start: self.frame, ..tgradish_core::webp::picture_options(&options) })
+        Ok(webp::Options { start: self.frame, ..webp::Options::from(&options) })
     }
 
     /// Everything a `.tgs` conversion gets.
@@ -256,7 +256,7 @@ impl Choices {
 pub(crate) enum Recipe {
     Webm(Options),
     Tgs(tgs::Options),
-    Webp(Options),
+    Webp(webp::Options),
 }
 
 impl Recipe {
@@ -271,8 +271,9 @@ impl Recipe {
     /// What it makes: a sticker or an emoji.
     pub(crate) fn target(&self) -> Target {
         match self {
-            Recipe::Webm(options) | Recipe::Webp(options) => options.target,
+            Recipe::Webm(options) => options.target,
             Recipe::Tgs(options) => options.target,
+            Recipe::Webp(options) => options.target,
         }
         .unwrap_or_default()
     }
@@ -1184,6 +1185,10 @@ mod tests {
         tgs::Options { target: Some(Target::Sticker), ..options }
     }
 
+    fn picture_sticker(options: webp::Options) -> webp::Options {
+        webp::Options { target: Some(Target::Sticker), ..options }
+    }
+
     #[test]
     fn layers_an_inherited_preset() {
         let child = "extends = 'fast'\n[webm]\nfit = 'crf'\ncrf = 20\n[tgs]\nexact = false\n";
@@ -1197,7 +1202,7 @@ mod tests {
         let tgs = tgs::Options { effort: Some(Effort::Fast), exact: Some(false), ..default() };
         assert_eq!(recipe(Format::Tgs), Recipe::Tgs(tgs_sticker(tgs)));
         // a picture takes only a picture's (divergence 5)
-        assert_eq!(recipe(Format::Webp), Recipe::Webp(sticker(default())));
+        assert_eq!(recipe(Format::Webp), Recipe::Webp(picture_sticker(default())));
     }
 
     #[test]
@@ -1217,8 +1222,8 @@ mod tests {
             ..default()
         };
         assert_eq!(recipe(Format::Webm), Recipe::Webm(sticker(webm_off)));
-        let picture_off = Options { watermark: Some(false), ..default() };
-        assert_eq!(recipe(Format::Webp), Recipe::Webp(sticker(picture_off)));
+        let picture_off = webp::Options { watermark: Some(false), ..default() };
+        assert_eq!(recipe(Format::Webp), Recipe::Webp(picture_sticker(picture_off)));
         let tgs = tgs::Options { keep_canvas: Some(false), watermark: Some(false), ..default() };
         assert_eq!(recipe(Format::Tgs), Recipe::Tgs(tgs_sticker(tgs)));
     }
@@ -1280,7 +1285,7 @@ mod tests {
         // set aside, as only integer scaling scales by it (divergence 2)
         let scaled = |format| with_preset("scaled").recipe(format, &presets, &config).unwrap();
         assert_eq!(scaled(Format::Webm), Recipe::Webm(sticker(default())));
-        assert_eq!(scaled(Format::Webp), Recipe::Webp(sticker(default())));
+        assert_eq!(scaled(Format::Webp), Recipe::Webp(picture_sticker(default())));
         // and the crop it can't go with set aside instead (divergence 3)
         let cropped = with_preset("cropped").recipe(Format::Webm, &presets, &config);
         let scaled = Options {
@@ -1320,16 +1325,13 @@ mod tests {
         let presets = presets(&[("renamed", renamed)]);
         let config = Config::default();
         let recipe = |format| with_preset("renamed").recipe(format, &presets, &config).unwrap();
-        let picture = Options {
-            scaling: Some(Scaling::Integer),
-            integer_scale: "3".parse().ok(),
-            ..default()
-        };
-        let webm = Options { effort: Some(Effort::Best), ..picture.clone() };
+        let (scaling, integer_scale) = (Some(Scaling::Integer), "3".parse().ok());
+        let webm = Options { scaling, integer_scale, effort: Some(Effort::Best), ..default() };
         assert_eq!(recipe(Format::Webm), Recipe::Webm(sticker(webm)));
         let tgs = tgs::Options { effort: Some(Effort::Fast), ..default() };
         assert_eq!(recipe(Format::Tgs), Recipe::Tgs(tgs_sticker(tgs)));
-        assert_eq!(recipe(Format::Webp), Recipe::Webp(sticker(picture)));
+        let picture = webp::Options { scaling, integer_scale, ..default() };
+        assert_eq!(recipe(Format::Webp), Recipe::Webp(picture_sticker(picture)));
     }
 
     #[test]
@@ -1344,13 +1346,14 @@ mod tests {
         let mut choices = with_preset("picture");
         (choices.start, choices.length, choices.frame) = (Some(0.5), Some(1.0), Some(1.5));
         let recipe = choices.recipe(Format::Webp, &presets, &config);
-        let picture = Options { scaling: Some(Scaling::Sharp), start: Some(1.5), ..default() };
-        assert_eq!(recipe.unwrap(), Recipe::Webp(sticker(picture)));
+        let picture =
+            webp::Options { scaling: Some(Scaling::Sharp), start: Some(1.5), ..default() };
+        assert_eq!(recipe.unwrap(), Recipe::Webp(picture_sticker(picture)));
         // so a value a picture doesn't use isn't checked (divergence 5),
         // nor is it for WebM (divergence 4)
         let fast = with_preset("fast tempo");
         let picture = fast.recipe(Format::Webp, &presets, &config);
-        assert_eq!(picture.unwrap(), Recipe::Webp(sticker(default())));
+        assert_eq!(picture.unwrap(), Recipe::Webp(picture_sticker(default())));
         let webm = fast.recipe(Format::Webm, &presets, &config);
         let tempo = Options { tempo: Some(50.0), ..default() };
         assert_eq!(webm.unwrap(), Recipe::Webm(sticker(tempo)));
@@ -1398,7 +1401,7 @@ mod tests {
         // of which a picture takes none
         assert_eq!(
             recipe(&unnamed, Format::Webp, &fast).unwrap(),
-            Recipe::Webp(sticker(default()))
+            Recipe::Webp(picture_sticker(default()))
         );
         let balanced = tgs_sticker(tgs::Options { effort: Some(Effort::Balanced), ..default() });
         assert_eq!(recipe(&unnamed, Format::Tgs, &fast).unwrap(), Recipe::Tgs(balanced));
