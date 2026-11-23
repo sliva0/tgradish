@@ -31,7 +31,9 @@
 //!   entry, icons, man pages and completions; glibc builds with built-in
 //!   ffmpeg also get `.deb` and `.rpm` packages via `nfpm` (downloaded
 //!   automatically). `--max-glibc` fails if a glibc build needs a newer
-//!   glibc. Outputs go to `target/release-artifacts`.
+//!   glibc. Outputs go to `target/release-artifacts`. Builds for this machine
+//!   are smoke-tested with `.github/smoke.sh`, the one without ffmpeg only
+//!   if `ffmpeg` is on PATH.
 //! - `release`: automates the release steps in `CONTRIBUTING.md`:
 //!   - `prepare X.Y.Z [--tgs X.Y.Z]`: bumps versions everywhere (including
 //!     `tgradish-tgs` when `--tgs` is given), dates `CHANGELOG.md`

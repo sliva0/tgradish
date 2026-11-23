@@ -123,8 +123,12 @@ const FONT_LICENCES: [&str; 3] =
 /// `--features linked-static --target <triple>`, and the licences of the
 /// ffmpeg build linked into it. With `system_ffmpeg`, the binary is one
 /// built without ffmpeg instead. With `max_glibc`, fails if a Linux binary
-/// needs a newer glibc.
-pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)>) -> Result<()> {
+/// needs a newer glibc. Returns the binary as the archive has it.
+pub fn package(
+    target: Target,
+    system_ffmpeg: bool,
+    max_glibc: Option<(u32, u32)>,
+) -> Result<PathBuf> {
     ensure!(!(system_ffmpeg && target.is_windows()), "Windows builds always include ffmpeg");
     let root = workspace_root();
     // xtask shares the workspace's version, so this is tgradish's
@@ -255,7 +259,7 @@ pub fn package(target: Target, system_ffmpeg: bool, max_glibc: Option<(u32, u32)
             println!("{}", package.display());
         }
     }
-    Ok(())
+    Ok(stage.join(target.exe("tgradish")))
 }
 
 /// A build as the release's files and folders name it: its target, and

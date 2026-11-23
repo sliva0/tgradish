@@ -34,6 +34,7 @@ on:
       - Cargo.lock
       - rust-toolchain.toml
       - .github/workflows/release.yml
+      - .github/smoke.sh
   workflow_dispatch:
 
 # Cancel superseded PR runs, but never cancel a tag run.
@@ -179,9 +180,9 @@ jobs:
           key: ffmpeg-${{ matrix.triple }}-${{ matrix.container || matrix.runner }}-${{ hashFiles('xtask/src/ffmpeg.rs') }}
 
       # The command that builds releases locally too, so both make the same
-      # files: ffmpeg unless cached, the build with it linked in, packed, and
-      # for glibc the build without it, both checked against the container's
-      # glibc.
+      # files: ffmpeg unless cached, then each build packed (for glibc also
+      # one without ffmpeg, both checked against manylinux_2_28's glibc) and,
+      # where it runs on this machine, smoke-tested.
       - name: Build and package every variant
         run: >
           cargo xtask local-release --targets ${{ matrix.target }}
@@ -212,6 +213,12 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
+      # Only the smoke test, which every test job runs. Containers without
+      # git download the whole repository instead.
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/smoke.sh
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v8
         with:
           name: release-${{ matrix.target }}
@@ -225,16 +232,11 @@ jobs:
           cd artifacts
           for archive in tgradish-*.tar.gz; do tar -xzf "$archive"; done
           ffmpeg -v error -f lavfi -i testsrc2=s=320x240:d=4 -pix_fmt yuv420p input.mp4
-          # 16x16 PNG: red square with transparent border.
-          echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
           for bin in tgradish-*/tgradish; do
-            echo "== $bin"
             ldd "$bin"
-            "$bin" ffmpeg status
+            sh ../.github/smoke.sh "$bin"
+            # A longer H.264 video, which only this job converts.
             "$bin" convert input.mp4 -o out.webm --preset fast --overwrite
-            "$bin" convert input.png -o out.tgs --overwrite
-            "$bin" convert input.png -o out.webp --overwrite
-            "$bin" inspect out.webm out.tgs out.webp
           done
           # Confirm the system-ffmpeg variant actually uses /usr/bin/ffmpeg.
           tgradish-*-system-ffmpeg/tgradish --json ffmpeg status | grep -q /usr/bin/ffmpeg
@@ -254,15 +256,21 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 15
     steps:
+      # Only the smoke test (see test-linux).
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/smoke.sh
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v8
         with:
           name: release-${{ matrix.target }}
           path: artifacts
 
       # Run Alpine inside Docker because GitHub Actions steps cannot run
-      # directly on musl.
+      # directly on musl; the smoke test goes in through the mount.
       - name: Convert and open the GUI on Alpine
         run: |
+          cp .github/smoke.sh artifacts/
           cat > artifacts/test.sh <<'EOF'
           set -ex
           apk add -q xvfb weston weston-backend-headless weston-shell-desktop \
@@ -270,21 +278,12 @@ jobs:
             libxcursor libxi libxrender wayland-libs-client wayland-libs-egl dbus-libs
           tar -xzf tgradish-*.tar.gz
           bin=$(echo "$PWD"/tgradish-*/tgradish)
-          "$bin" --version
-          "$bin" ffmpeg status
+          sh smoke.sh "$bin"
           # Verify man pages and completions are present: packaging omits them
           # from a musl archive when it cannot run the binary, but release
           # archives must include them.
           test -f "${bin%/tgradish}/man/tgradish.1.gz"
           test -f "${bin%/tgradish}/completions/tgradish.nu"
-          # 16x16 PNG: red square with transparent border.
-          echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
-          "$bin" convert input.png -o still.webm --length 1 --preset fast
-          # Decode VP9 with alpha to verify the libvpx decoder works.
-          "$bin" convert still.webm -o out.webm --preset fast
-          "$bin" convert input.png -o out.tgs
-          "$bin" convert input.png -o out.webp
-          "$bin" inspect out.webm out.tgs out.webp
           export XDG_RUNTIME_DIR=/tmp
           # Confirm the GUI stays alive for 10s (libraries loaded and window
           # rendered).
@@ -324,6 +323,11 @@ jobs:
     container: ${{ matrix.image }}
     timeout-minutes: 15
     steps:
+      # Only the smoke test (see test-linux).
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/smoke.sh
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v8
         with:
           name: release-${{ matrix.target }}
@@ -344,15 +348,8 @@ jobs:
 
       - name: Convert with the installed tgradish
         run: |
-          tgradish --version
-          tgradish ffmpeg status
           test -f /usr/share/applications/tgradish.desktop
-          # 16x16 PNG: red square with transparent border.
-          echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > input.png
-          tgradish convert input.png -o out.webm --length 1 --preset fast
-          tgradish convert input.png -o out.tgs
-          tgradish convert input.png -o out.webp
-          tgradish inspect out.webm out.tgs out.webp
+          sh .github/smoke.sh tgradish
 
   # Build each AUR package with makepkg from the just-built archives (and a git
   # archive of this commit for the source package), install it, and test
@@ -401,12 +398,7 @@ jobs:
             pacman -S --noconfirm --needed $(sed -n 's/^\t\(make\)\?depends = //p' "$dir/.SRCINFO")
             (cd "$dir" && runuser -u builder -- makepkg --noconfirm)
             pacman -U --noconfirm "$dir"/*.pkg.tar.zst
-            tgradish --version
-            tgradish ffmpeg status
-            # 16x16 PNG: red square with transparent border.
-            echo iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAG0lEQVR42mNgGF7gjobGf2LwqAGjBtDWgKEJAGe22M1pQ+POAAAAAElFTkSuQmCC | base64 -d > /tmp/input.png
-            tgradish convert /tmp/input.png -o /tmp/out.tgs --overwrite
-            tgradish convert /tmp/input.png -o /tmp/out.webm --length 1 --preset fast --overwrite
+            (cd /tmp && sh "$GITHUB_WORKSPACE/.github/smoke.sh" tgradish)
             pacman -R --noconfirm "$package"
           done
 
@@ -429,24 +421,17 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     steps:
+      # Only the smoke test (see test-linux).
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: .github/smoke.sh
+          sparse-checkout-cone-mode: false
       - uses: actions/download-artifact@v8
         with:
           name: release-windows-x86_64
           path: artifacts
 
-      # Generate a test PNG with System.Drawing so this job has no external
-      # dependencies.
-      - name: Draw a test image with alpha
-        shell: powershell
-        run: |
-          Add-Type -AssemblyName System.Drawing
-          $image = New-Object System.Drawing.Bitmap 320, 240
-          $graphics = [System.Drawing.Graphics]::FromImage($image)
-          $graphics.Clear([System.Drawing.Color]::Transparent)
-          $graphics.FillEllipse([System.Drawing.Brushes]::Orange, 40, 20, 240, 200)
-          $graphics.FillRectangle([System.Drawing.Brushes]::Teal, 120, 90, 80, 60)
-          $image.Save("$PWD\artifacts\input.png", [System.Drawing.Imaging.ImageFormat]::Png)
-
+      # Git Bash, which Windows runners have, runs the smoke test's POSIX sh.
       - name: Convert with the built-in ffmpeg
         shell: bash
         run: |
@@ -456,13 +441,7 @@ jobs:
           # Verify the embedded manifest suppresses the console window when
           # launched from Explorer.
           grep -q consoleAllocationPolicy "$bin"
-          "$bin" ffmpeg status
-          "$bin" convert input.png -o still.webm --length 1 --preset fast
-          # Decode VP9 with alpha to verify the libvpx decoder works.
-          "$bin" convert still.webm -o out.webm --preset fast
-          "$bin" convert input.png -o out.tgs --preset fast
-          "$bin" convert input.png -o out.webp
-          "$bin" inspect out.webm out.tgs out.webp
+          sh ../.github/smoke.sh "$bin"
           # Verify Windows paths and refusal to overwrite an existing file.
           "$bin" convert still.webm -o out.webm --preset fast && exit 1 || true
           # Verify standalone tgradish.exe matches the zip copy and embeds LGPL
