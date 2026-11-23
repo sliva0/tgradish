@@ -319,6 +319,7 @@ fn set(choices: &mut Choices, layer: &LayerInfo, on: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tgradish_core::options::Selection;
     use tgradish_core::telegram::Target;
 
     #[test]
@@ -407,10 +408,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("awkward.ase");
         std::fs::write(&path, tgradish_corpus::encode::aseprite(&sprite, &spans)).unwrap();
-        let options = webm::Options::default();
+        let (whole, options) = (Selection::default(), webm::Options::default());
         let cancel = tgradish_core::CancelToken::new();
         let mut readable =
-            tgradish_core::drawn::readable(&Input::File(path), &options, &cancel).unwrap();
+            tgradish_core::drawn::readable(&Input::File(path), &whole, &options, &cancel).unwrap();
         let (tags, durations) = (readable.tags().to_vec(), readable.durations().to_vec());
         let (animation, _) = readable.take_drawn().unwrap();
         // which frames a .tgs normalised from `start` for `length` keeps
@@ -480,7 +481,7 @@ mod tests {
                     }
                     // read from a hair before the first, for the frames' length
                     Format::Webm => {
-                        let cut = readable.cut(&webm::Options { start, length, ..options.clone() });
+                        let cut = readable.cut(&Selection { start, length, ..whole.clone() });
                         let first = (from > 0).then(|| read_from(times[from], times[from - 1]));
                         assert_eq!(cut.start.is_some(), first.is_some(), "{what}");
                         let near = |a: f64, b: f64| (a - b).abs() < 1e-12;

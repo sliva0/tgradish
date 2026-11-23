@@ -425,7 +425,7 @@ fn limit_screenshots() {
             let recipe = |format| item.choices.recipe(format, presets, config).ok();
             let webm = recipe(Format::Webm).map(Recipe::into_webm).unwrap_or_default();
             let tgs = recipe(Format::Tgs).map(Recipe::into_tgs).unwrap_or_default();
-            let said = Some(PastLimit::of(item.format, &webm, &tgs.options).text());
+            let said = Some(PastLimit::of(item.format, &webm.options, &tgs.options).text());
             let bar = harness.query_all(egui_kittest::kittest::by()).find(|node| {
                 use egui_kittest::kittest::NodeT;
                 node.accesskit_node().description() == said

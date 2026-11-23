@@ -654,7 +654,7 @@ mod tests {
             choices.recipe(Format::Webm, &state.presets, &state.config).unwrap().into_webm();
         assert_eq!(crate::file_settings::resize_of(&effective), Resize::Crop);
         let saved = state.presets.webm("by quality").unwrap();
-        assert_eq!((saved.fit, saved.title), (Some(Fit::Crf), None));
+        assert_eq!(saved.fit, Some(Fit::Crf));
         assert!(dir.path().join("presets/by quality.toml").is_file());
     }
 
@@ -682,10 +682,12 @@ mod tests {
         item.choices.webm.scaling = Some(Scaling::Smooth);
         // the scale set aside, as only integer scaling scales by it
         // (divergence 2)
-        let smooth = Options {
-            target: Some(Target::Sticker),
-            scaling: Some(Scaling::Smooth),
-            ..Options::default()
+        let smooth = tgradish_core::options::Settings {
+            selection: tgradish_core::options::Selection {
+                target: Some(Target::Sticker),
+                ..Default::default()
+            },
+            options: Options { scaling: Some(Scaling::Smooth), ..Options::default() },
         };
         let recipe = |harness: &egui_kittest::Harness<crate::app::App>| {
             let state = harness.state();

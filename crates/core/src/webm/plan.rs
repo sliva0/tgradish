@@ -10,7 +10,7 @@ use super::Request;
 use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::ffmpeg::Probe;
-use crate::options::{self, Crop, Effort, Fit, FitUnit, Range, Resize, Scaling, Spoof};
+use crate::options::{self, Crop, Effort, Fit, FitUnit, Range, Resize, Scaling, Selection, Spoof};
 use crate::picture::{default_resize, picture_sizes};
 use crate::presets::Format;
 use crate::telegram::{self, Target};
@@ -161,22 +161,22 @@ pub fn frame_edge(time: f64, times: &[f64]) -> Option<usize> {
         .min_by(|&a, &b| (time - times[a]).abs().total_cmp(&(time - times[b]).abs()))
 }
 
-/// Adjusts `options.start` and `options.length` for drawn animations whose
+/// Adjusts `selection.start` and `selection.length` for drawn animations whose
 /// frame boundaries are `times` (including the end of the last frame). Snaps a
 /// `start` within [`edge_leeway`] of a frame edge via [`read_from`]; a `length`
 /// whose end (from the start as given) is within it of a frame edge becomes the
 /// time from the snapped frame to that edge. Cuts elsewhere are kept.
-pub fn drawn_cut(options: &super::Options, times: &[f64]) -> super::Options {
-    let mut cut = options.clone();
+pub fn drawn_cut(selection: &Selection, times: &[f64]) -> Selection {
+    let mut cut = selection.clone();
     let Some(last) = times.len().checked_sub(1).filter(|&last| last > 0) else { return cut };
-    let asked = options.start.unwrap_or(0.0);
+    let asked = selection.start.unwrap_or(0.0);
     let first = frame_edge(asked, times).filter(|&first| first < last);
     if let Some(first) = first {
         let from = if first == 0 { 0.0 } else { read_from(times[first], times[first - 1]) };
-        cut.start = options.start.map(|_| from);
+        cut.start = selection.start.map(|_| from);
     }
     let from = first.map_or(asked, |first| times[first]);
-    if let Some(length) = options.length
+    if let Some(length) = selection.length
         && let Some(end) = frame_edge(asked + length, times).filter(|&end| times[end] > from)
     {
         cut.length = Some(times[end] - from);
@@ -290,10 +290,10 @@ pub(crate) fn plan_for(
     request: &Request,
     source: Probe,
 ) -> Result<(Plan, Vec<String>)> {
-    let o = &request.options;
+    let (chosen, o) = (&request.selection, &request.options);
     let mut warnings = Vec::new();
 
-    let target = o.target.unwrap_or_default();
+    let target = chosen.target.unwrap_or_default();
     let resize = o.resize.unwrap_or(default_resize(target));
     if target.requires_exact_size() && resize == Resize::Contain {
         let (width, height) = target.box_size();
@@ -314,7 +314,7 @@ pub(crate) fn plan_for(
         return Err(Error::invalid("fake-duration", reason));
     }
 
-    let start = o.start.unwrap_or(0.0);
+    let start = chosen.start.unwrap_or(0.0);
     if !(start >= 0.0 && start.is_finite()) {
         return Err(Error::invalid("start", "must be 0 seconds or greater"));
     }
@@ -331,7 +331,7 @@ pub(crate) fn plan_for(
         let (slowest, fastest) = (options::TEMPOS.start(), options::TEMPOS.end());
         return Err(Error::invalid("tempo", format!("must be from {slowest} to {fastest}")));
     }
-    let used = match o.length {
+    let used = match chosen.length {
         Some(length) if !(length > 0.0 && length.is_finite()) => {
             return Err(Error::invalid("length", "must be greater than 0 seconds"));
         }
@@ -407,17 +407,17 @@ pub(crate) fn plan_for(
         return Err(Error::invalid("encoder-options", reason));
     }
 
-    if let Some(crop) = o.crop {
+    if let Some(crop) = chosen.crop {
         crop.check(source.width, source.height)?;
     }
-    let used = o.crop.map_or((source.width, source.height), |crop| (crop.width, crop.height));
-    let sizes = picture_sizes(format, o, used)?;
+    let used = chosen.crop.map_or((source.width, source.height), |crop| (crop.width, crop.height));
+    let sizes = picture_sizes(format, target, o, used)?;
 
     let plan = Plan {
         input: request.input.first().to_path_buf(),
         output,
         target,
-        crop: o.crop,
+        crop: chosen.crop,
         resize,
         scaling: sizes.scaling,
         width: sizes.width,
@@ -440,7 +440,7 @@ pub(crate) fn plan_for(
         alpha: source.alpha || sizes.pads(),
         spoof,
         fake_duration,
-        title: o.title.clone(),
+        title: chosen.title.clone(),
         watermark: o.watermark.unwrap_or(true),
         encoder_options,
         ffmpeg_args: o.ffmpeg_args.clone().unwrap_or_default(),
@@ -476,8 +476,22 @@ mod tests {
     }
 
     fn plan_with(options: Options) -> Result<(Plan, Vec<String>)> {
-        let request = Request { options, ..Request::new(Input::File("in.mp4".into())) };
+        plan_chosen(Selection::default(), options)
+    }
+
+    /// Planned with what `selection` chooses of the input.
+    fn plan_chosen(selection: Selection, options: Options) -> Result<(Plan, Vec<String>)> {
+        let input = Input::File("in.mp4".into());
+        let request = Request { selection, options, ..Request::new(input) };
         plan(&request, source(4.84))
+    }
+
+    fn length(length: f64) -> Selection {
+        Selection { length: Some(length), ..Selection::default() }
+    }
+
+    fn crop(crop: Option<Crop>) -> Selection {
+        Selection { crop, ..Selection::default() }
     }
 
     #[test]
@@ -500,11 +514,10 @@ mod tests {
     fn validates_ranges_before_capping_and_other_limits() {
         let reversed = Options {
             fit: Some(Fit::Length),
-            length: Some(1.0),
             fit_range: Some(Range { min: 8.0, max: 4.0 }),
             ..Default::default()
         };
-        assert!(plan_with(reversed).is_err());
+        assert!(plan_chosen(length(1.0), reversed).is_err());
         assert!(plan_with(Options { attempts: Some(51), ..Default::default() }).is_err());
         assert!(plan_with(Options { attempts: Some(0), ..Default::default() }).is_err());
         assert!(plan_with(Options { bitrate: Some(0.5), ..Default::default() }).is_err());
@@ -554,16 +567,15 @@ mod tests {
     fn length_fit_stays_within_planned_length() {
         let options = Options {
             fit: Some(Fit::Length),
-            length: Some(2.0),
             fit_range: Some(Range { min: 1.0, max: 5.0 }),
             ..Default::default()
         };
-        let (plan, warnings) = plan_with(options).unwrap();
+        let (plan, warnings) = plan_chosen(length(2.0), options).unwrap();
         assert_eq!(plan.fit_range, Range { min: 1.0, max: 2.0 });
         assert_eq!(warnings.len(), 1);
 
-        let tiny = Options { fit: Some(Fit::Length), length: Some(0.04), ..Default::default() };
-        let (plan, _) = plan_with(tiny).unwrap();
+        let tiny = Options { fit: Some(Fit::Length), ..Default::default() };
+        let (plan, _) = plan_chosen(length(0.04), tiny).unwrap();
         assert!(plan.fit_range.min <= plan.fit_range.max);
     }
 
@@ -582,13 +594,13 @@ mod tests {
         for first in 0..last {
             for after in first + 1..=last {
                 for digits in [5, 6, 9, 17] {
-                    let options = Options {
+                    let selection = Selection {
                         start: (first > 0).then(|| written(times[first], digits)),
                         length: (after < last)
                             .then(|| written(times[after] - times[first], digits)),
-                        ..Options::default()
+                        ..Selection::default()
                     };
-                    let cut = drawn_cut(&options, &times);
+                    let cut = drawn_cut(&selection, &times);
                     let what = format!("{first}..{after} with {digits} digits: {cut:?}");
                     match first {
                         0 => assert_eq!(cut.start, None, "{what}"),
@@ -605,9 +617,9 @@ mod tests {
             }
         }
         // a cut into a frame is as asked, and so is what isn't drawn
-        let into = Options { start: Some(0.2), length: Some(0.15), ..Options::default() };
+        let into = Selection { start: Some(0.2), length: Some(0.15), ..Selection::default() };
         assert_eq!(drawn_cut(&into, &times), into);
-        let exact = Options { start: Some(times[1]), ..Options::default() };
+        let exact = Selection { start: Some(times[1]), ..Selection::default() };
         assert_eq!(drawn_cut(&exact, &[]), exact);
         // which edge is the nearest, within a quarter of the frames beside
         assert_eq!(frame_edge(0.36633, &times), Some(2));
@@ -630,8 +642,8 @@ mod tests {
 
     #[test]
     fn sizes_a_crop_like_a_whole_input() {
-        let crop = Some(Crop { x: 100, y: 40, width: 300, height: 100 });
-        let (plan, _) = plan_with(Options { crop, ..Default::default() }).unwrap();
+        let cropped = Some(Crop { x: 100, y: 40, width: 300, height: 100 });
+        let (plan, _) = plan_chosen(crop(cropped), Options::default()).unwrap();
         assert_eq!((plan.width, plan.height), (512, 170));
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
         assert!(
@@ -640,7 +652,7 @@ mod tests {
         );
         assert!(filter.contains(",scale=512:170:flags=lanczos,"), "{filter}");
         let outside = Some(Crop { x: 400, y: 0, width: 300, height: 100 });
-        assert!(plan_with(Options { crop: outside, ..Default::default() }).is_err());
+        assert!(plan_chosen(crop(outside), Options::default()).is_err());
     }
 
     #[test]
@@ -679,15 +691,15 @@ mod tests {
         );
         assert_eq!(large.scaling, Scaling::Sharp);
 
-        let crop = Some(Crop { x: 0, y: 0, width: 50, height: 30 });
-        let options = Options { crop, scaling: Some(Scaling::Sharp), ..Default::default() };
-        let (plan, _) = plan_with(options).unwrap();
+        let cropped = crop(Some(Crop { x: 0, y: 0, width: 50, height: 30 }));
+        let options = Options { scaling: Some(Scaling::Sharp), ..Default::default() };
+        let (plan, _) = plan_chosen(cropped.clone(), options).unwrap();
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
         // 11 times as blocks, then down to 512 x 308 blending only edges
         assert!(filter.contains("scale=550:330:flags=neighbor,format=gbrp16le"), "{filter}");
         assert!(filter.contains("scale=512:308:flags=area"), "{filter}");
-        let options = Options { crop, scaling: Some(Scaling::Integer), ..Default::default() };
-        let (plan, _) = plan_with(options).unwrap();
+        let options = Options { scaling: Some(Scaling::Integer), ..Default::default() };
+        let (plan, _) = plan_chosen(cropped, options).unwrap();
         assert!(plan.alpha);
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuva420p");
         assert!(
@@ -742,9 +754,9 @@ mod tests {
             exact_sizes(Format::Webm, Target::Sticker, Resize::Crop, (256, 100), twice).is_err()
         );
 
-        let crop = Some(Crop { x: 0, y: 0, width: 256, height: 144 });
-        let options = Options { crop, integer_scale: Some(twice), ..Default::default() };
-        let (plan, _) = plan_with(options).unwrap();
+        let cropped = crop(Some(Crop { x: 0, y: 0, width: 256, height: 144 }));
+        let options = Options { integer_scale: Some(twice), ..Default::default() };
+        let (plan, _) = plan_chosen(cropped, options).unwrap();
         assert_eq!((plan.width, plan.height, plan.scaling), (512, 288, Scaling::Integer));
         let filter = crate::ffmpeg::video_filter(&plan, 30.0, 1.0, "yuv420p");
         assert!(filter.contains("scale=512:288:flags=neighbor") && !filter.contains("pad="));

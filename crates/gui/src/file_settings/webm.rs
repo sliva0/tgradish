@@ -3,7 +3,7 @@
 //! active fitting mode are disabled rather than hidden.
 
 use eframe::egui;
-use tgradish_core::options::{Effort, Fit, FitUnit, Range};
+use tgradish_core::options::{Effort, Fit, FitUnit, Range, Settings};
 use tgradish_core::webm::{
     CRFS, DEFAULT_ATTEMPTS, DEFAULT_CRF, HIGHEST_BITRATE, MAX_ATTEMPTS, Options,
 };
@@ -295,13 +295,14 @@ pub(super) fn planned(
 ) -> Result<(webm::Request, webm::Plan), String> {
     let video = item.video.ready().ok_or_else(|| fl!("no-ffmpeg-commands", "unread"))?;
     let recipe = item.choices.recipe(Format::Webm, context.presets, context.config)?;
-    let options = recipe.into_webm();
+    let Settings { selection, options } = recipe.into_webm();
     // pixel art drawn for ffmpeg cut where its frames are, as converting
     // cuts it
-    let options = video.readable.cut(&options);
+    let selection = video.readable.cut(&selection);
     let request = webm::Request {
         input: item.input(),
         output: context.output.clone(),
+        selection,
         options,
         overwrite: true,
         keep_temp: false,

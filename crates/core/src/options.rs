@@ -522,41 +522,6 @@ impl Selection {
             _ => true,
         })
     }
-
-    /// `options` with this selection's values written over the fields of
-    /// the same names they still have.
-    // until the options lose those fields, which then are this alone's
-    #[doc(hidden)]
-    pub fn into_options(self, options: FormatOptions) -> FormatOptions {
-        let Selection { target, tag, show_layers, hide_layers, crop, start, length, title, .. } =
-            self;
-        // as overlaid, which merging isn't: that clears a scale of none
-        match options {
-            FormatOptions::Webm(options) => FormatOptions::Webm(webm::Options {
-                target: target.or(options.target),
-                tag: tag.or(options.tag),
-                show_layers: show_layers.or(options.show_layers),
-                hide_layers: hide_layers.or(options.hide_layers),
-                crop: crop.or(options.crop),
-                start: start.or(options.start),
-                length: length.or(options.length),
-                title: title.or(options.title),
-                ..options
-            }),
-            FormatOptions::Webp(options) => FormatOptions::Webp(webp::Options {
-                target: target.or(options.target),
-                tag: tag.or(options.tag),
-                show_layers: show_layers.or(options.show_layers),
-                hide_layers: hide_layers.or(options.hide_layers),
-                crop: crop.or(options.crop),
-                start: start.or(options.start),
-                title: title.or(options.title),
-                ..options
-            }),
-            // which holds none of them
-            FormatOptions::Tgs(options) => FormatOptions::Tgs(options),
-        }
-    }
 }
 
 /// Everything a conversion of one file gets: what is the file's own, and the
@@ -750,8 +715,6 @@ pub trait Checked {
 impl Checked for crate::webm::Options {
     fn numbers(&self) -> Vec<(&'static str, f64)> {
         let numbers = [
-            ("start", self.start),
-            ("length", self.length),
             ("tempo", self.tempo),
             ("fps", self.fps),
             ("bitrate", self.bitrate),
@@ -767,9 +730,10 @@ impl Checked for crate::webm::Options {
     }
 }
 
+/// None: a picture's are of the file it is made of.
 impl Checked for crate::webp::Options {
     fn numbers(&self) -> Vec<(&'static str, f64)> {
-        self.start.map(|start| ("start", start)).into_iter().collect()
+        Vec::new()
     }
 }
 
@@ -863,10 +827,12 @@ mod tests {
         assert_eq!(invalid(check(&tgs)), "fps must be greater than 0 and at most 60");
         let range = Options { fit_range: Some(Range { min: 4.0, max: 1.0 }), ..Default::default() };
         assert_eq!(invalid(check(&range)), "fit-range 4..1 must have MIN <= MAX");
-        let length = Options { length: Some(0.0), ..Default::default() };
+        let length = Selection { length: Some(0.0), ..Default::default() };
         assert_eq!(invalid(check(&length)), "length must be greater than 0 seconds");
-        let fine =
-            Options { start: Some(0.0), crf: Some(63), attempts: Some(1), ..Default::default() };
+        let fine = Settings {
+            selection: Selection { start: Some(0.0), ..Default::default() },
+            options: Options { crf: Some(63), attempts: Some(1), ..Default::default() },
+        };
         assert!(check(&fine).is_ok());
         assert_eq!(wrong_value("start", f64::NAN).unwrap(), "must be 0 seconds or greater");
         assert!(wrong_value("title", -1.0).is_none());
@@ -883,15 +849,19 @@ mod tests {
     #[test]
     fn checks_numbers_that_arent_finite() {
         type Set<T> = fn(&mut T, f64);
-        let webm: [(&str, Set<Options>); 8] = [
-            ("start", |options, n| options.start = Some(n)),
-            ("length", |options, n| options.length = Some(n)),
-            ("tempo", |options, n| options.tempo = Some(n)),
-            ("fps", |options, n| options.fps = Some(n)),
-            ("bitrate", |options, n| options.bitrate = Some(n)),
-            ("fake-duration", |options, n| options.fake_duration = Some(n)),
-            ("fit-range", |options, n| options.fit_range = Some(Range { min: n, max: 400.0 })),
-            ("fit-range", |options, n| options.fit_range = Some(Range { min: 100.0, max: n })),
+        let webm: [(&str, Set<Settings<Options>>); 8] = [
+            ("start", |settings, n| settings.selection.start = Some(n)),
+            ("length", |settings, n| settings.selection.length = Some(n)),
+            ("tempo", |settings, n| settings.options.tempo = Some(n)),
+            ("fps", |settings, n| settings.options.fps = Some(n)),
+            ("bitrate", |settings, n| settings.options.bitrate = Some(n)),
+            ("fake-duration", |settings, n| settings.options.fake_duration = Some(n)),
+            ("fit-range", |settings, n| {
+                settings.options.fit_range = Some(Range { min: n, max: 400.0 })
+            }),
+            ("fit-range", |settings, n| {
+                settings.options.fit_range = Some(Range { min: 100.0, max: n })
+            }),
         ];
         let tgs: [(&str, Set<Settings<crate::tgs::Options>>); 4] = [
             ("start", |settings, n| settings.selection.start = Some(n)),
@@ -901,7 +871,7 @@ mod tests {
         ];
         for n in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
             for (key, set) in webm {
-                let mut options = Options::default();
+                let mut options = Settings::default();
                 set(&mut options, n);
                 assert_eq!(wrong_option(&options), key, "{key} {n}");
             }
@@ -954,12 +924,14 @@ mod tests {
 
     #[test]
     fn flags_print_numbers_plainly() {
-        let options = Options {
-            // as a cut of 0.12 s from 0.04 s comes out
-            length: Some(0.12 - 0.04),
-            start: Some(0.1 + 1e-6),
-            crf: Some(30),
-            ..Default::default()
+        let options = Settings {
+            selection: Selection {
+                // as a cut of 0.12 s from 0.04 s comes out
+                length: Some(0.12 - 0.04),
+                start: Some(0.1 + 1e-6),
+                ..Default::default()
+            },
+            options: Options { crf: Some(30), ..Default::default() },
         };
         let flags = flags(&options);
         for flag in ["--length=0.08", "--start=0.100001", "--crf=30"] {
@@ -970,21 +942,27 @@ mod tests {
     #[test]
     fn flags_carry_their_values() {
         // a value in a word of its own could be taken for a flag
-        let options = Options {
-            title: Some("-_-".into()),
-            show_layers: Some(vec!["--help".into(), "a, b".into()]),
-            lossless: Some(true),
-            watermark: Some(false),
-            encoder_options: Some([("aq-mode".to_owned(), "2".to_owned())].into()),
-            ..Default::default()
+        let options = Settings {
+            selection: Selection {
+                title: Some("-_-".into()),
+                show_layers: Some(vec!["--help".into(), "a, b".into()]),
+                ..Default::default()
+            },
+            options: Options {
+                lossless: Some(true),
+                watermark: Some(false),
+                encoder_options: Some([("aq-mode".to_owned(), "2".to_owned())].into()),
+                ..Default::default()
+            },
         };
+        // what is the file's own first
         assert_eq!(
             flags(&options),
             [
                 "--show-layers=--help",
                 "--show-layers=a, b",
-                "--lossless",
                 "--title=-_-",
+                "--lossless",
                 "--no-watermark",
                 "--encoder-options=aq-mode=2",
             ]
@@ -1050,7 +1028,7 @@ mod tests {
         assert_eq!(none.integer_scale(), None);
         assert!(none.auto_scaling());
         let sizes = |options: &Options| {
-            crate::picture::picture_sizes(crate::presets::Format::Webm, options, (8, 8)).unwrap()
+            crate::picture::picture_sizes(Format::Webm, Target::Sticker, options, (8, 8)).unwrap()
         };
         assert_eq!(sizes(&none), sizes(&Options::default()));
     }
@@ -1107,19 +1085,12 @@ mod tests {
     /// WebM's options, every one set.
     fn every_webm_option() -> Options {
         Options {
-            target: Some(Target::Emoji),
-            tag: Some("idle".into()),
-            show_layers: Some(vec!["Hat".into()]),
-            hide_layers: Some(vec!["Sketch".into(), "Guides".into()]),
-            crop: Some(Crop { x: 1, y: 2, width: 30, height: 40 }),
             resize: Some(Resize::Pad),
             scaling: Some(Scaling::Integer),
             integer_scale: Some(IntegerScale { up: 1, down: 2 }),
             fit: Some(Fit::Crf),
             attempts: Some(5),
             fit_range: Some(Range { min: 4.0, max: 40.5 }),
-            start: Some(1.25),
-            length: Some(2.0),
             tempo: Some(1.5),
             fps: Some(24.0),
             bitrate: Some(600.0),
@@ -1128,10 +1099,19 @@ mod tests {
             lossless: Some(false),
             spoof: Some(Spoof::Never),
             fake_duration: Some(0.5),
-            title: Some("pig".into()),
             watermark: Some(false),
             encoder_options: Some([("tune-content".into(), "screen".into())].into()),
             ffmpeg_args: Some(vec!["-x".into(), "a b".into()]),
+        }
+    }
+
+    /// A picture's options, every one set.
+    fn every_webp_option() -> crate::webp::Options {
+        crate::webp::Options {
+            resize: Some(Resize::Pad),
+            scaling: Some(Scaling::Integer),
+            integer_scale: Some(IntegerScale { up: 1, down: 2 }),
+            watermark: Some(false),
         }
     }
 
@@ -1153,37 +1133,28 @@ mod tests {
     }
 
     /// Every option as JSON and TOML spell and order it: as `--json`,
-    /// `preset show` and the GUI's session write it, and as presets and
-    /// `--options-json` read it. A change here is one to those files.
+    /// `preset show` write it, and as presets read it, without what is one
+    /// file's own. A change here is one to those files.
     #[test]
     fn writes_every_option_as_files_hold_it() {
         let webm = every_webm_option();
         let json = concat!(
-            r#"{"target":"emoji","tag":"idle","show-layers":["Hat"],"#,
-            r#""hide-layers":["Sketch","Guides"],"#,
-            r#""crop":{"x":1,"y":2,"width":30,"height":40},"#,
-            r#""resize":"pad","scaling":"integer","integer-scale":"1/2","fit":"crf","#,
-            r#""attempts":5,"fit-range":{"min":4.0,"max":40.5},"start":1.25,"#,
-            r#""length":2.0,"tempo":1.5,"fps":24.0,"bitrate":600.0,"crf":30,"#,
+            r#"{"resize":"pad","scaling":"integer","integer-scale":"1/2","fit":"crf","#,
+            r#""attempts":5,"fit-range":{"min":4.0,"max":40.5},"#,
+            r#""tempo":1.5,"fps":24.0,"bitrate":600.0,"crf":30,"#,
             r#""effort":"best","lossless":false,"spoof":"never","fake-duration":0.5,"#,
-            r#""title":"pig","watermark":false,"#,
+            r#""watermark":false,"#,
             r#""encoder-options":{"tune-content":"screen"},"ffmpeg-args":["-x","a b"]}"#,
         );
         assert_eq!(serde_json::to_string(&webm).unwrap(), json);
         assert_eq!(serde_json::from_str::<Options>(json).unwrap(), webm);
         // tables last, as TOML puts them
         let toml = "\
-target = \"emoji\"
-tag = \"idle\"
-show-layers = [\"Hat\"]
-hide-layers = [\"Sketch\", \"Guides\"]
 resize = \"pad\"
 scaling = \"integer\"
 integer-scale = \"1/2\"
 fit = \"crf\"
 attempts = 5
-start = 1.25
-length = 2.0
 tempo = 1.5
 fps = 24.0
 bitrate = 600.0
@@ -1192,15 +1163,8 @@ effort = \"best\"
 lossless = false
 spoof = \"never\"
 fake-duration = 0.5
-title = \"pig\"
 watermark = false
 ffmpeg-args = [\"-x\", \"a b\"]
-
-[crop]
-x = 1
-y = 2
-width = 30
-height = 40
 
 [fit-range]
 min = 4.0
@@ -1211,6 +1175,12 @@ tune-content = \"screen\"
 ";
         assert_eq!(toml::to_string(&webm).unwrap(), toml);
         assert_eq!(toml::from_str::<Options>(toml).unwrap(), webm);
+
+        let webp = every_webp_option();
+        let json =
+            r#"{"resize":"pad","scaling":"integer","integer-scale":"1/2","watermark":false}"#;
+        assert_eq!(serde_json::to_string(&webp).unwrap(), json);
+        assert_eq!(serde_json::from_str::<crate::webp::Options>(json).unwrap(), webp);
 
         // as a preset's table holds them, without one file's own
         let tgs = every_tgs_option();
@@ -1236,6 +1206,48 @@ watermark = true
 ";
         assert_eq!(toml::to_string(&tgs).unwrap(), toml);
         assert_eq!(toml::from_str::<crate::tgs::Options>(toml).unwrap(), tgs);
+    }
+
+    /// Everything a WebM and a picture get as JSON spells and orders it,
+    /// flat, the file's own first: as `--options-json` and the GUI's
+    /// session have it. A change here is one to those files.
+    #[test]
+    fn writes_every_setting_as_files_hold_it() {
+        let webm = Settings { selection: every_selection(), options: every_webm_option() };
+        let json = concat!(
+            r#"{"target":"emoji","tag":"idle","show-layers":["Hat"],"#,
+            r#""hide-layers":["Sketch","Guides"],"#,
+            r#""crop":{"x":1,"y":2,"width":30,"height":40},"start":1.25,"length":2.0,"#,
+            r#""title":"pig","sheet":"4x2","sheet-frames":7,"#,
+            r#""resize":"pad","scaling":"integer","integer-scale":"1/2","fit":"crf","#,
+            r#""attempts":5,"fit-range":{"min":4.0,"max":40.5},"#,
+            r#""tempo":1.5,"fps":24.0,"bitrate":600.0,"crf":30,"#,
+            r#""effort":"best","lossless":false,"spoof":"never","fake-duration":0.5,"#,
+            r#""watermark":false,"#,
+            r#""encoder-options":{"tune-content":"screen"},"ffmpeg-args":["-x","a b"]}"#,
+        );
+        assert_eq!(serde_json::to_string(&webm).unwrap(), json);
+        assert_eq!(serde_json::from_str::<Settings<Options>>(json).unwrap(), webm);
+        let any = Settings::from_json(Format::Webm, serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(any, webm.clone().map(FormatOptions::Webm));
+        assert_eq!(serde_json::to_string(&any).unwrap(), json);
+
+        let webp = Settings {
+            selection: every_selection().for_format(Format::Webp),
+            options: every_webp_option(),
+        };
+        let json = concat!(
+            r#"{"target":"emoji","tag":"idle","show-layers":["Hat"],"#,
+            r#""hide-layers":["Sketch","Guides"],"#,
+            r#""crop":{"x":1,"y":2,"width":30,"height":40},"start":1.25,"title":"pig","#,
+            r#""resize":"pad","scaling":"integer","integer-scale":"1/2","watermark":false}"#,
+        );
+        assert_eq!(serde_json::to_string(&webp).unwrap(), json);
+        let read = serde_json::from_str::<Settings<crate::webp::Options>>(json).unwrap();
+        assert_eq!(read, webp);
+        let any = Settings::from_json(Format::Webp, serde_json::from_str(json).unwrap()).unwrap();
+        assert_eq!(any, webp.map(FormatOptions::Webp));
+        assert_eq!(serde_json::to_string(&any).unwrap(), json);
     }
 
     /// Everything a `.tgs` gets as JSON spells and orders it, flat, the
@@ -1285,6 +1297,32 @@ watermark = true
             assert!(read(json!({ &key: null })).is_ok(), "{key}");
             assert!(Format::Tgs.uses(&key), "{key}");
         }
+        // as WebM's and a picture's are, by their old names too
+        let webm = |value| serde_json::from_value::<Settings<Options>>(value);
+        let old = json!({ "speed": "best", "scaling": "pixel-perfect", "exact-scale": "2" });
+        let settings = webm(old).unwrap();
+        assert_eq!(settings.options.effort, Some(Effort::Best));
+        assert_eq!(settings.options.scaling, Some(Scaling::Integer));
+        assert_eq!(settings.options.integer_scale, "2".parse().ok());
+        let picture = |value| serde_json::from_value::<Settings<crate::webp::Options>>(value);
+        let old = picture(json!({ "exact-scale": "2", "start": 1.0 })).unwrap();
+        assert_eq!((old.options.integer_scale, old.selection.start), ("2".parse().ok(), Some(1.0)));
+        for unknown in [json!({ "made-up": 1 }), json!({ "crop": null, "keep-canvas": true })] {
+            let err = webm(unknown.clone()).unwrap_err().to_string();
+            assert!(err.starts_with("unknown field"), "{unknown}: {err}");
+        }
+        assert!(picture(json!({ "crf": 30 })).is_err());
+        for key in Selection::keys_for(Format::Webm).chain(Options::keys()) {
+            assert!(webm(json!({ &key: null })).is_ok(), "{key}");
+            assert!(Format::Webm.uses(&key), "{key}");
+        }
+        for key in Selection::keys_for(Format::Webp).chain(crate::webp::Options::keys()) {
+            assert!(picture(json!({ &key: null })).is_ok(), "{key}");
+            assert!(Format::Webp.uses(&key), "{key}");
+        }
+        // what of one file's own a format doesn't take still reads, as it
+        // is the file's, and is left out where it is resolved
+        assert!(webm(json!({ "sheet": "2x1" })).is_ok());
     }
 
     /// One file's options, every one set.
@@ -1322,13 +1360,15 @@ watermark = true
     #[test]
     fn reads_kebab_case_toml() {
         let options: Options = toml::from_str(
-            "target = 'emoji'\nfit = 'bitrate'\nfit-range = { min = 50, max = 300 }\n\
+            "fit = 'bitrate'\nfit-range = { min = 50, max = 300 }\n\
              fake-duration = 1.5\nencoder-options = { tune-content = 'screen' }",
         )
         .unwrap();
-        assert_eq!(options.target, Some(Target::Emoji));
+        assert_eq!(options.fit, Some(Fit::Bitrate));
         assert_eq!(options.fit_range, Some(Range { min: 50.0, max: 300.0 }));
         assert_eq!(options.fake_duration, Some(1.5));
         assert!(toml::from_str::<Options>("unknown = 1").is_err());
+        // nor one file's own, which a preset is refused before this
+        assert!(toml::from_str::<Options>("target = 'emoji'").is_err());
     }
 }

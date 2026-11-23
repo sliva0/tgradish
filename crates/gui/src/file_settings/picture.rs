@@ -3,7 +3,7 @@
 //! so its display matches the conversion output.
 
 use eframe::egui;
-use tgradish_core::options::{Crop, IntegerScale, Resize, Scaling};
+use tgradish_core::options::{Crop, IntegerScale, Resize, Scaling, Settings};
 use tgradish_core::picture;
 use tgradish_core::presets::{Format, Presets};
 use tgradish_core::telegram::Target;
@@ -104,21 +104,27 @@ fn scalings() -> [Choice<Scaling>; 4] {
 }
 
 /// Where a `crop` of the input lands in a WebM or static (`format`) result
-/// made with `options`, everything the conversion gets; `None` when its
+/// made with `settings`, everything the conversion gets; `None` when its
 /// integer scale can't make it.
-pub(crate) fn webm_sizes(format: Format, options: &Options, crop: Crop) -> Option<picture::Sizes> {
-    picture::picture_sizes(format, options, (crop.width, crop.height)).ok()
+pub(crate) fn webm_sizes(
+    format: Format,
+    settings: &Settings<Options>,
+    crop: Crop,
+) -> Option<picture::Sizes> {
+    let (target, options) = (settings.selection.target.unwrap_or_default(), &settings.options);
+    picture::picture_sizes(format, target, options, (crop.width, crop.height)).ok()
 }
 
-/// How a WebM or static result made with `options` fills its box.
-pub(crate) fn resize_of(options: &Options) -> Resize {
-    options.resize.unwrap_or(picture::default_resize(options.target.unwrap_or_default()))
+/// How a WebM or static result made with `settings` fills its box.
+pub(crate) fn resize_of(settings: &Settings<Options>) -> Resize {
+    let target = settings.selection.target.unwrap_or_default();
+    settings.options.resize.unwrap_or(picture::default_resize(target))
 }
 
 /// The size an integer scale holds the crop to, for a WebM or static result
-/// made with `options`.
-pub(crate) fn exact_of(options: &Options) -> Option<Exact> {
-    Exact::of(options.integer_scale?, options.target.unwrap_or_default())
+/// made with `settings`.
+pub(crate) fn exact_of(settings: &Settings<Options>) -> Option<Exact> {
+    Exact::of(settings.options.integer_scale?, settings.selection.target.unwrap_or_default())
 }
 
 /// Integer scales as whole steps: 0 is 1x, 1 is 2x, -1 is 1/2.
@@ -164,7 +170,7 @@ fn largest_scale(target: Target, used: (u32, u32)) -> IntegerScale {
 struct Basis {
     size: Option<(u32, u32)>,
     base: Options,
-    effective: Options,
+    effective: Settings<Options>,
     exact: Option<Exact>,
 }
 
@@ -173,7 +179,7 @@ impl Basis {
         let (presets, config) = (context.presets, context.config);
         let base = item.choices.webm_base(presets, config).unwrap_or_default();
         let recipe = item.choices.recipe(Format::Webm, presets, config);
-        let effective = recipe.map_or_else(|_| item.choices.webm.clone(), Recipe::into_webm);
+        let effective = recipe.map_or_else(|_| own_webm(item), Recipe::into_webm);
         let exact = exact_of(&effective).filter(|_| item.format != Format::Tgs);
         Basis { size: item.input_size(), base, effective, exact }
     }
@@ -303,7 +309,7 @@ fn sizing(ui: &mut egui::Ui, item: &mut Item, basis: &Basis) {
         let scaling = item.choices.webm.scaling.unwrap_or(preset);
         chosen_hint(ui, scaling, &scalings);
     });
-    let integer = effective.scaling == Some(Scaling::Integer);
+    let integer = effective.options.scaling == Some(Scaling::Integer);
     let only = fl!("integer-scale", "only");
     let allowed = if integer { Ok(()) } else { Err(only.as_str()) };
     let preset = base.integer_scale;
@@ -595,14 +601,20 @@ fn keep_exact(item: &mut Item, exact: Option<Exact>) {
     }
 }
 
+/// The item's own WebM options, where its recipe can't be had.
+pub(crate) fn own_webm(item: &Item) -> Settings<Options> {
+    let selection = item.choices.selection(Format::Webm);
+    Settings { selection, options: item.choices.webm.clone() }
+}
+
 /// Keeps `item`'s crop as its settings hold it, to an integer scale and
 /// square where a `.tgs` keeps it so, as [`picture`] does as it is drawn.
 /// Done again as each frame ends, so that what a change made late in the
 /// frame brings about is part of that change, not one of the next frame.
 pub(crate) fn keep_crop(item: &mut Item, presets: &Presets, config: &Config) {
     let recipe = item.choices.recipe(Format::Webm, presets, config);
-    let options = recipe.map_or_else(|_| item.choices.webm.clone(), Recipe::into_webm);
-    keep_exact(item, exact_of(&options).filter(|_| item.format != Format::Tgs));
+    let settings = recipe.map_or_else(|_| own_webm(item), Recipe::into_webm);
+    keep_exact(item, exact_of(&settings).filter(|_| item.format != Format::Tgs));
     keep_square(item, presets, config);
 }
 
@@ -666,7 +678,7 @@ fn aspect_ratio(
     item: &mut Item,
     size: Option<(u32, u32)>,
     exact: Option<Exact>,
-    effective: &Options,
+    effective: &Settings<Options>,
     tgs_base: Option<Resize>,
 ) {
     let full = size.map(Crop::whole);
@@ -831,7 +843,7 @@ fn integer_scale(
     item: &mut Item,
     size: Option<(u32, u32)>,
     (integer, preset): (bool, Option<IntegerScale>),
-    effective: &Options,
+    effective: &Settings<Options>,
 ) {
     let full = size.map(Crop::whole);
     let Some(crop) = item.choices.crop.or(full) else {
@@ -905,7 +917,7 @@ fn integer_scale(
     let mut effective = effective.clone();
     if integer && chosen != scale {
         item.choices.webm.integer_scale = chosen.filter(|&chosen| Some(chosen) != preset);
-        effective.integer_scale = item.choices.webm.integer_scale.or(preset);
+        effective.options.integer_scale = item.choices.webm.integer_scale.or(preset);
     }
     let scale = item.choices.webm.integer_scale.or(preset);
     let sizes = webm_sizes(item.format, &effective, crop);

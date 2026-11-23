@@ -5,29 +5,14 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::options::{Crop, Effort, Fit, IntegerScale, Range, Resize, Scaling, Spoof, layered};
-use crate::telegram::Target;
+use crate::options::{Effort, Fit, IntegerScale, Range, Resize, Scaling, Spoof, layered};
 
-/// Settings for one WebM conversion. `None` uses the default.
+/// Options for one WebM conversion, as a preset's `[webm]` table holds them;
+/// what is one file's own is its [`Selection`](crate::options::Selection).
+/// `None` uses the default.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {
-    /// Target type: sticker or emoji. Default: sticker.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<Target>,
-    /// Aseprite tag to export. Default: all frames.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-    /// Aseprite layers to show by name (including hidden layers). Default:
-    /// layers visible in the file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub show_layers: Option<Vec<String>>,
-    /// Aseprite layers to hide by name; hiding a group hides its children.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hide_layers: Option<Vec<String>>,
-    /// Region of the input to keep, in source pixels. Default: full frame.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub crop: Option<Crop>,
     /// How to fit the video into the target dimensions. Default: contain for
     /// stickers, pad for emoji.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -56,13 +41,6 @@ pub struct Options {
     /// Default depends on `fit`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fit_range: Option<Range>,
-    /// Start offset in seconds. Default: 0.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub start: Option<f64>,
-    /// Maximum duration in seconds to read from `start`. Default: full
-    /// remaining duration (or 3 seconds of output when spoofing is off).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub length: Option<f64>,
     /// Playback speed multiplier (0.1 to 10; 2 plays twice as fast). Default:
     /// 1.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,9 +75,6 @@ pub struct Options {
     /// duration accepted by Telegram.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fake_duration: Option<f64>,
-    /// Title metadata stored in the output file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
     /// Write tgradish metadata into the output (writing/muxing app tags and
     /// padding signature). Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -120,19 +95,12 @@ pub struct Options {
 }
 
 layered!(Options {
-    target,
-    tag,
-    show_layers,
-    hide_layers,
-    crop,
     resize,
     scaling,
     integer_scale,
     fit,
     attempts,
     fit_range,
-    start,
-    length,
     tempo,
     fps,
     bitrate,
@@ -141,7 +109,6 @@ layered!(Options {
     lossless,
     spoof,
     fake_duration,
-    title,
     watermark,
     encoder_options,
     ffmpeg_args,
@@ -315,11 +282,11 @@ mod tests {
     #[test]
     fn merges_set_values_only() {
         let base = Options { fit: Some(Fit::Auto), crf: Some(20), ..Default::default() };
-        let overlay = Options { crf: Some(40), title: Some("x".into()), ..Default::default() };
+        let overlay = Options { crf: Some(40), watermark: Some(false), ..Default::default() };
         let merged = base.merged(&overlay);
         assert_eq!(merged.fit, Some(Fit::Auto));
         assert_eq!(merged.crf, Some(40));
-        assert_eq!(merged.title.as_deref(), Some("x"));
+        assert_eq!(merged.watermark, Some(false));
     }
 
     #[test]

@@ -6,7 +6,7 @@ use eframe::egui;
 use tgradish_core::options::{Crop, Resize, Spoof};
 use tgradish_core::picture;
 use tgradish_core::presets::Format;
-use tgradish_core::telegram;
+use tgradish_core::telegram::{self, Target};
 use tgradish_core::tgs;
 use tgradish_core::webm::Options;
 
@@ -94,17 +94,19 @@ fn steps(item: &Item, context: &Context) -> Vec<String> {
     match item.format {
         Format::Webm | Format::Webp => {
             let recipe = item.choices.recipe(item.format, presets, config);
-            let Ok(options) = recipe.map(Recipe::into_webm) else { return steps };
+            let Ok(settings) = recipe.map(Recipe::into_webm) else { return steps };
+            let (chosen, options) = (&settings.selection, &settings.options);
             let used = Used {
-                tag: options.tag.as_deref(),
-                crop: options.crop,
-                start: options.start,
-                length: options.length,
+                tag: chosen.tag.as_deref(),
+                crop: chosen.crop,
+                start: chosen.start,
+                length: chosen.length,
             };
             read(item, &used, &mut steps);
             if let Some((width, height)) = item.input_size() {
-                let crop = options.crop.unwrap_or(Crop::whole((width, height)));
-                steps.extend(picture(item.format, &options, (crop.width, crop.height)));
+                let crop = chosen.crop.unwrap_or(Crop::whole((width, height)));
+                let target = chosen.target.unwrap_or_default();
+                steps.extend(picture(item.format, target, options, (crop.width, crop.height)));
             }
             if item.format == Format::Webm {
                 let tempo = options.tempo_or_default();
@@ -159,8 +161,10 @@ fn read(item: &Item, used: &Used, steps: &mut Vec<String>) {
 
 /// How a `used` picture is scaled, stretched, cut and padded into a WebM
 /// or static (`format`) result.
-fn picture(format: Format, options: &Options, used: (u32, u32)) -> Vec<String> {
-    let Ok(sizes) = picture::picture_sizes(format, options, used) else { return Vec::new() };
+fn picture(format: Format, target: Target, options: &Options, used: (u32, u32)) -> Vec<String> {
+    let Ok(sizes) = picture::picture_sizes(format, target, options, used) else {
+        return Vec::new();
+    };
     let mut steps = Vec::new();
     let scaled = sizes.scaled;
     if scaled != used {
@@ -243,6 +247,11 @@ mod tests {
     use tgradish_core::options::{IntegerScale, Scaling};
     use tgradish_core::telegram::Target;
 
+    /// What [`super::picture`] says of a sticker.
+    fn picture(format: Format, options: &Options, used: (u32, u32)) -> Vec<String> {
+        super::picture(format, Target::Sticker, options, used)
+    }
+
     #[test]
     fn says_how_the_picture_fits() {
         // scaled to fill the longer side
@@ -262,13 +271,9 @@ mod tests {
             ["Scaled to 512 × 512", "Stretched ×1.6 down"]
         );
         // an emoji, its middle cut to a square
-        let cut = Options {
-            target: Some(Target::Emoji),
-            resize: Some(Resize::Crop),
-            ..Options::default()
-        };
+        let cut = Options { resize: Some(Resize::Crop), ..Options::default() };
         assert_eq!(
-            picture(Format::Webm, &cut, (64, 40)),
+            super::picture(Format::Webm, Target::Emoji, &cut, (64, 40)),
             ["Scaled to 160 × 100", "Middle cut to 100 × 100"]
         );
     }

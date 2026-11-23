@@ -48,6 +48,7 @@ use crate::error::{Error, FileAction, Result};
 use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::ffmpeg::Output;
 use crate::input::Input;
+use crate::options::Selection;
 use crate::picture::choose_auto_scaling;
 use crate::presets::Format;
 use crate::telegram;
@@ -62,6 +63,8 @@ pub struct Request {
     /// Destination path; defaults to [`Input::default_output`] (see
     /// [`Request::output`]).
     pub output: Option<PathBuf>,
+    /// What of the input is read, and the target and title.
+    pub selection: Selection,
     /// WebM conversion options.
     pub options: Options,
     /// Replace an existing output file if present.
@@ -80,6 +83,7 @@ impl Request {
         Self {
             input,
             output: None,
+            selection: Selection::default(),
             options: Options::default(),
             overwrite: false,
             keep_temp: false,
@@ -89,7 +93,7 @@ impl Request {
 
     /// Returns the explicit output path, or the default path beside the input.
     pub fn output(&self) -> PathBuf {
-        let target = self.options.target.unwrap_or_default();
+        let target = self.selection.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Webm, target))
     }
 }
@@ -225,12 +229,13 @@ pub fn convert(
 ) -> Result<Outcome> {
     request.input.check_output(&request.output(), request.overwrite)?;
     // pixel art, drawn for ffmpeg
-    let mut readable = crate::drawn::readable(&request.input, &request.options, cancel)?;
+    let mut readable =
+        crate::drawn::readable(&request.input, &request.selection, &request.options, cancel)?;
     // ffmpeg reads them from the file: not kept while it does
     drop(readable.take_drawn());
     let source = readable.probe(backend, cancel)?;
     // cut where the frames drawn start and end, as meant
-    let cut = Request { options: readable.cut(&request.options), ..request.clone() };
+    let cut = Request { selection: readable.cut(&request.selection), ..request.clone() };
     let request = &cut;
     let (mut plan, warnings) = plan(request, source)?;
     plan.input = readable.path().to_path_buf();

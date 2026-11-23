@@ -754,6 +754,11 @@ mod tests {
     }
 
     fn test_plan(options: Options, duration: f64) -> Plan {
+        test_plan_of(crate::options::Selection::default(), options, duration)
+    }
+
+    /// Planned with what `selection` chooses of the input.
+    fn test_plan_of(selection: crate::options::Selection, options: Options, duration: f64) -> Plan {
         let source = Probe {
             format: "mov,mp4".into(),
             codec: "h264".into(),
@@ -768,8 +773,8 @@ mod tests {
             orientation: Default::default(),
             decoder: None,
         };
-        let request =
-            Request { options, ..Request::new(crate::input::Input::File("in.mp4".into())) };
+        let input = crate::input::Input::File("in.mp4".into());
+        let request = Request { selection, options, ..Request::new(input) };
         plan(&request, source).unwrap().0
     }
 
@@ -907,12 +912,15 @@ mod tests {
     #[test]
     fn rounding_stays_in_range() {
         let exact = Options {
-            length: Some(2.996),
             crf: Some(50),
             fit_range: Some(Range { min: 2.996, max: 2.996 }),
             ..options(Fit::Length)
         };
-        let plan = test_plan(exact, 10.0);
+        let length = crate::options::Selection {
+            length: Some(2.996),
+            ..crate::options::Selection::default()
+        };
+        let plan = test_plan_of(length, exact, 10.0);
         let best = run(&plan, &mut FakeEncoder::new(0.0)).unwrap().best;
         assert_eq!(best.params.length, 2.996);
 

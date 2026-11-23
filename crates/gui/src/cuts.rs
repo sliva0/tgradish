@@ -321,9 +321,9 @@ mod tests {
                     assert_eq!(kept(&animation, (start, length), None), whole, "{what}");
                     // drawn for ffmpeg, read from a hair before the first,
                     // for as long as the frames
-                    let options =
-                        tgradish_core::webm::Options { start, length, ..Default::default() };
-                    let cut = tgradish_core::webm::drawn_cut(&options, &frames.times);
+                    let part =
+                        tgradish_core::options::Selection { start, length, ..Default::default() };
+                    let cut = tgradish_core::webm::drawn_cut(&part, &frames.times);
                     let times = &frames.times;
                     let from = (first > 0).then(|| read_from(times[first], times[first - 1]));
                     assert!(

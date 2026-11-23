@@ -9,7 +9,6 @@ use eframe::egui;
 use tgradish_core::backend::Backend;
 use tgradish_core::options::Settings;
 use tgradish_core::presets::Format;
-use tgradish_core::webm::Options;
 use tgradish_core::{tgs, webp};
 
 use crate::app::App;
@@ -156,7 +155,7 @@ impl App {
                     Kind::Aseprite | Kind::Frames => {
                         item.choices.drawing(item.format, &self.presets, &self.config)
                     }
-                    Kind::Video | Kind::Image => Options::default(),
+                    Kind::Video | Kind::Image => Settings::default(),
                 };
                 let redraw = item.video_drawing != drawing && !item.video.is_loading();
                 if item.video.is_idle() || redraw {

@@ -30,7 +30,7 @@ use time::{frame, time};
 use webm::webm_quality;
 
 pub(crate) use picture::{
-    exact_of, keep_crop, keep_square, keeps_crop_shape, ratio, resize_of, square_choices,
+    exact_of, keep_crop, keep_square, keeps_crop_shape, own_webm, ratio, resize_of, square_choices,
     webm_sizes,
 };
 pub(crate) use plan::{blocked, plan};

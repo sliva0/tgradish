@@ -89,14 +89,15 @@ pub fn convert(
     let (input, output, overwrite, threads) =
         (request.input.clone(), request.output.clone(), request.overwrite, request.threads);
     let Settings { selection, options } = request.settings.clone();
-    match selection.clone().into_options(options) {
+    match options {
         FormatOptions::Webm(options) => {
             let keep_temp = request.keep_temp;
-            let request = webm::Request { input, output, options, overwrite, keep_temp, threads };
+            let request =
+                webm::Request { input, output, selection, options, overwrite, keep_temp, threads };
             webm::convert(backend_for()?, &request, cancel, on_event)
         }
         FormatOptions::Webp(options) => {
-            let request = webp::Request { input, output, options, overwrite, threads };
+            let request = webp::Request { input, output, selection, options, overwrite, threads };
             webp::convert(backend_for()?, &request, cancel, on_event)
         }
         FormatOptions::Tgs(options) => {

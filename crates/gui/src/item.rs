@@ -119,7 +119,7 @@ pub(crate) struct SavedChoices {
     start: Option<f64>,
     length: Option<f64>,
     frame: Option<f64>,
-    webm: Options,
+    webm: Settings<Options>,
     tgs: Settings<tgs::Options>,
 }
 
@@ -127,21 +127,9 @@ impl From<SavedChoices> for Choices {
     fn from(saved: SavedChoices) -> Choices {
         let SavedChoices { webm, tgs, .. } = saved;
         // one title, which version 1 kept for each format, though it set
-        // neither
-        let title = webm.title.clone().or(tgs.selection.title);
-        // the file's own the GUI never wrote there are read and left out:
-        // its own are the item's
-        let webm = Options {
-            target: None,
-            tag: None,
-            show_layers: None,
-            hide_layers: None,
-            crop: None,
-            start: None,
-            length: None,
-            title: None,
-            ..webm
-        };
+        // neither; the rest of the file's own there, which the GUI never
+        // wrote, is left out, as the item's own are its
+        let title = webm.selection.title.or(tgs.selection.title);
         Choices {
             preset: saved.preset,
             target: saved.target,
@@ -155,7 +143,7 @@ impl From<SavedChoices> for Choices {
             title,
             sheet: tgs.selection.sheet,
             sheet_frames: tgs.selection.sheet_frames,
-            webm,
+            webm: webm.options,
             tgs: tgs.options,
         }
     }
@@ -175,7 +163,10 @@ impl From<Choices> for SavedChoices {
             length: choices.length,
             frame: choices.frame,
             // to both, as either format reads it
-            webm: Options { title: title.clone(), ..choices.webm },
+            webm: Settings {
+                selection: Selection { title: title.clone(), ..Selection::default() },
+                options: choices.webm,
+            },
             tgs: Settings {
                 selection: Selection {
                     title,
@@ -329,15 +320,22 @@ impl Choices {
     /// `format`: the item's tag and layers, which are of its file alone,
     /// and how fast a sequence's frames play, the preset's included, which
     /// pictures leave at the default, as making one does.
-    pub(crate) fn drawing(&self, format: Format, presets: &Presets, config: &Config) -> Options {
+    pub(crate) fn drawing(
+        &self,
+        format: Format,
+        presets: &Presets,
+        config: &Config,
+    ) -> Settings<Options> {
         // a broken preset still leaves the item's own
         let fps = self.webm.fps.or_else(|| self.webm_base(presets, config).ok()?.fps);
-        Options {
-            tag: self.tag.clone(),
-            show_layers: self.show_layers.clone(),
-            hide_layers: self.hide_layers.clone(),
-            fps: fps.filter(|_| format == Format::Webm),
-            ..Options::default()
+        Settings {
+            selection: Selection {
+                tag: self.tag.clone(),
+                show_layers: self.show_layers.clone(),
+                hide_layers: self.hide_layers.clone(),
+                ..Selection::default()
+            },
+            options: Options { fps: fps.filter(|_| format == Format::Webm), ..Options::default() },
         }
     }
 }
@@ -348,9 +346,9 @@ impl Choices {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum Recipe {
-    Webm(Options),
+    Webm(Settings<Options>),
     Tgs(Settings<tgs::Options>),
-    Webp(webp::Options),
+    Webp(Settings<webp::Options>),
 }
 
 impl Recipe {
@@ -364,21 +362,16 @@ impl Recipe {
 
     /// What it makes: a sticker or an emoji.
     pub(crate) fn target(&self) -> Target {
-        match self {
-            Recipe::Webm(options) => options.target,
-            Recipe::Tgs(settings) => settings.selection.target,
-            Recipe::Webp(options) => options.target,
-        }
-        .unwrap_or_default()
+        Settings::<FormatOptions>::from(self.clone()).target()
     }
 
-    /// Its options as WebM's, which a picture's are some of; none of a
+    /// Its settings as WebM's, which a picture's are some of; none of a
     /// `.tgs`'s.
-    pub(crate) fn into_webm(self) -> Options {
+    pub(crate) fn into_webm(self) -> Settings<Options> {
         match self {
-            Recipe::Webm(options) => options,
-            Recipe::Webp(options) => options.into(),
-            Recipe::Tgs(_) => Options::default(),
+            Recipe::Webm(settings) => settings,
+            Recipe::Webp(settings) => settings.map(Options::from),
+            Recipe::Tgs(_) => Settings::default(),
         }
     }
 
@@ -395,12 +388,9 @@ impl From<Settings<FormatOptions>> for Recipe {
     fn from(settings: Settings<FormatOptions>) -> Recipe {
         let Settings { selection, options } = settings;
         match options {
+            FormatOptions::Webm(options) => Recipe::Webm(Settings { selection, options }),
             FormatOptions::Tgs(options) => Recipe::Tgs(Settings { selection, options }),
-            options => match selection.into_options(options) {
-                FormatOptions::Webm(options) => Recipe::Webm(options),
-                FormatOptions::Webp(options) => Recipe::Webp(options),
-                FormatOptions::Tgs(_) => unreachable!("of another format"),
-            },
+            FormatOptions::Webp(options) => Recipe::Webp(Settings { selection, options }),
         }
     }
 }
@@ -409,9 +399,9 @@ impl From<Settings<FormatOptions>> for Recipe {
 impl From<Recipe> for Settings<FormatOptions> {
     fn from(recipe: Recipe) -> Settings<FormatOptions> {
         match recipe {
-            Recipe::Webm(options) => Settings::default().map(|()| FormatOptions::Webm(options)),
+            Recipe::Webm(settings) => settings.map(FormatOptions::Webm),
             Recipe::Tgs(settings) => settings.map(FormatOptions::Tgs),
-            Recipe::Webp(options) => Settings::default().map(|()| FormatOptions::Webp(options)),
+            Recipe::Webp(settings) => settings.map(FormatOptions::Webp),
         }
     }
 }
@@ -737,7 +727,7 @@ pub(crate) struct Item {
     /// The input read by ffmpeg, for WebM and pictures, with how an
     /// Aseprite file was drawn for it.
     pub(crate) video: Load<Video>,
-    pub(crate) video_drawing: Options,
+    pub(crate) video_drawing: Settings<Options>,
     /// The part of the video that is played: where it starts and how long.
     pub(crate) part: Option<((f64, f64), Load<Clip>)>,
     /// The frame shown while paused, at the input's full size, and its
@@ -793,7 +783,7 @@ impl Item {
             choices: Choices::new(target),
             view: View::default(),
             video: Load::Idle,
-            video_drawing: Options::default(),
+            video_drawing: Settings::default(),
             part: None,
             still: None,
             art: Load::Idle,
@@ -943,7 +933,8 @@ impl Item {
         let recipe = |format| self.choices.recipe(format, presets, config).ok();
         match self.format {
             Format::Webm => {
-                recipe(Format::Webm).map(Recipe::into_webm).unwrap_or_default().tempo_or_default()
+                let webm = recipe(Format::Webm).map(Recipe::into_webm).unwrap_or_default();
+                webm.options.tempo_or_default()
             }
             Format::Tgs => {
                 let used = self.range().map(|(start, end)| end - start);
@@ -1271,7 +1262,7 @@ mod tests {
         choices.preset = Some("quality".into());
         let config = Config::default();
         let range = |choices: &Choices| {
-            choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm().fit_range
+            choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm().options.fit_range
         };
         assert!(range(&choices).is_some());
         // a range of qualities is none of bitrates
@@ -1303,18 +1294,19 @@ mod tests {
         choices.hide_layers = Some(vec!["sketch".into()]);
         let config = Config::default();
         let drawing = choices.drawing(Format::Webm, &presets, &config);
-        assert_eq!(drawing.tag.as_deref(), Some("walk"));
+        assert_eq!(drawing.selection.tag.as_deref(), Some("walk"));
         assert_eq!(
-            (drawing.hide_layers.as_deref(), drawing.fps),
+            (drawing.selection.hide_layers.as_deref(), drawing.options.fps),
             (Some(&["sketch".into()][..]), Some(2.0))
         );
         // a picture is made of one frame, at no rate
-        assert_eq!(choices.drawing(Format::Webp, &presets, &config).fps, None);
+        assert_eq!(choices.drawing(Format::Webp, &presets, &config).options.fps, None);
         // and a broken preset leaves the item's own
         choices.preset = Some("no such preset".into());
         choices.webm.fps = Some(5.0);
         let drawing = choices.drawing(Format::Webm, &presets, &config);
-        assert_eq!((drawing.tag.as_deref(), drawing.fps), (Some("walk"), Some(5.0)));
+        let tag = drawing.selection.tag.as_deref();
+        assert_eq!((tag, drawing.options.fps), (Some("walk"), Some(5.0)));
     }
 
     #[test]
@@ -1325,20 +1317,23 @@ mod tests {
         choices.preset = Some("fast".into());
         choices.webm.crf = Some(20);
         choices.start = Some(1.0);
-        let options = choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm();
-        assert_eq!(options.target, Some(Target::Emoji));
+        let webm = |choices: &Choices| {
+            choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm()
+        };
+        let settings = webm(&choices);
+        let (chosen, options) = (&settings.selection, &settings.options);
+        assert_eq!(chosen.target, Some(Target::Emoji));
         assert_eq!(options.effort, presets.webm("fast").unwrap().effort);
         // fast fits the bitrate, which hides the quality: it has no say
-        assert_eq!((options.crf, options.start), (None, Some(1.0)));
+        assert_eq!((options.crf, chosen.start), (None, Some(1.0)));
         choices.webm.fit = Some(Fit::Length);
-        let options = choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm();
-        assert_eq!(options.crf, Some(20));
+        assert_eq!(webm(&choices).options.crf, Some(20));
         choices.webm.lossless = Some(true);
-        let options = choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm();
+        let options = webm(&choices).options;
         assert_eq!((options.crf, options.lossless), (None, Some(true)));
         // and lossless has no say once fitting hides it again
         choices.webm.fit = None;
-        let options = choices.recipe(Format::Webm, &presets, &config).unwrap().into_webm();
+        let options = webm(&choices).options;
         assert_eq!((options.fit, options.lossless), (Some(Fit::Bitrate), None));
         let tgs = choices.recipe(Format::Tgs, &presets, &config).unwrap().into_tgs();
         let chosen = (tgs.selection.target, tgs.selection.start);
@@ -1368,17 +1363,17 @@ mod tests {
     }
 
     /// WebM's options as the GUI's recipe has them, its target named.
-    fn sticker(options: Options) -> Options {
-        Options { target: Some(Target::Sticker), ..options }
-    }
-
-    fn tgs_sticker(options: tgs::Options) -> Settings<tgs::Options> {
+    fn sticker<O>(options: O) -> Settings<O> {
         let selection = Selection { target: Some(Target::Sticker), ..default() };
         Settings { selection, options }
     }
 
-    fn picture_sticker(options: webp::Options) -> webp::Options {
-        webp::Options { target: Some(Target::Sticker), ..options }
+    fn tgs_sticker(options: tgs::Options) -> Settings<tgs::Options> {
+        sticker(options)
+    }
+
+    fn picture_sticker(options: webp::Options) -> Settings<webp::Options> {
+        sticker(options)
     }
 
     #[test]
@@ -1542,9 +1537,10 @@ mod tests {
         let mut choices = with_preset("picture");
         (choices.start, choices.length, choices.frame) = (Some(0.5), Some(1.0), Some(1.5));
         let recipe = choices.recipe(Format::Webp, &presets, &config);
-        let picture =
-            webp::Options { scaling: Some(Scaling::Sharp), start: Some(1.5), ..default() };
-        assert_eq!(recipe.unwrap(), Recipe::Webp(picture_sticker(picture)));
+        let mut picture =
+            picture_sticker(webp::Options { scaling: Some(Scaling::Sharp), ..default() });
+        picture.selection.start = Some(1.5);
+        assert_eq!(recipe.unwrap(), Recipe::Webp(picture));
         // so a value a picture doesn't use isn't checked, though it is for
         // WebM, as the command line checks it
         let fast = with_preset("fast tempo");

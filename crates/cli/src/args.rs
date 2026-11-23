@@ -687,7 +687,6 @@ impl OptionArgs {
             encoder_options: (!self.encoder_options.is_empty())
                 .then(|| self.encoder_options.iter().flatten().cloned().collect()),
             ffmpeg_args: self.ffmpeg_args.clone().map(|words| words.0),
-            ..Options::default()
         }
     }
 }
@@ -1155,7 +1154,7 @@ mod tests {
             args.conversion.options.to_options()
         };
         let set = options(&["--lossless", "--no-watermark"]);
-        assert_eq!((set.lossless, set.watermark, set.title), (Some(true), Some(false), None));
+        assert_eq!((set.lossless, set.watermark, set.crf), (Some(true), Some(false), None));
         assert_eq!(options(&[]).watermark, None, "neither leaves it to the preset");
         // the later of a pair wins
         assert_eq!(options(&["--no-watermark", "--watermark"]).watermark, Some(true));
@@ -1230,7 +1229,6 @@ mod tests {
             watermark: Some(false),
             encoder_options: Some([("tune-content".into(), "screen".into())].into()),
             ffmpeg_args: Some(vec!["-x".into(), "a b".into()]),
-            ..Options::default()
         };
         let read = parsed([options::flags(&selection), options::flags(&webm)].concat());
         assert_eq!((read.to_selection(), read.to_options()), (selection, webm));

@@ -4,8 +4,10 @@
 //! quality that fits.
 //!
 //! Takes [`Options`], those of [`crate::webm::Options`] a still picture has
-//! (target, crop, resize, scaling, integer scale, start timestamp, Aseprite
-//! tag/layers, title and watermark), and plans as WebM does.
+//! (resize, scaling, integer scale and watermark), and of what is one file's
+//! own, its [`Selection`] but the length and sprite sheet (the target, crop,
+//! start timestamp, Aseprite tag and layers, and title), and plans as WebM
+//! does.
 
 mod encode;
 mod inspect;
@@ -26,6 +28,7 @@ use crate::config::Threads;
 use crate::error::{Error, Result};
 use crate::events::{Details, Event, Outcome, StartDetails, Started};
 use crate::input::Input;
+use crate::options::Selection;
 use crate::picture;
 use crate::presets::Format;
 use crate::telegram;
@@ -39,6 +42,9 @@ pub struct Request {
     /// Destination path; defaults to [`Input::default_output`] (see
     /// [`Request::output`]).
     pub output: Option<PathBuf>,
+    /// What of the input is read, and the target and title; a picture has
+    /// no length, nor a sprite sheet.
+    pub selection: Selection,
     /// Conversion options.
     pub options: Options,
     /// Replace an existing output file if present.
@@ -53,12 +59,13 @@ impl Request {
     /// overwriting existing files.
     pub fn new(input: Input) -> Self {
         let threads = Threads::Auto;
-        Self { input, output: None, options: Options::default(), overwrite: false, threads }
+        let (selection, options) = (Selection::default(), Options::default());
+        Self { input, output: None, selection, options, overwrite: false, threads }
     }
 
     /// Returns the explicit output path, or the default path beside the input.
     pub fn output(&self) -> PathBuf {
-        let target = self.options.target.unwrap_or_default();
+        let target = self.selection.target.unwrap_or_default();
         self.output.clone().unwrap_or_else(|| self.input.default_output(Format::Webp, target))
     }
 }
@@ -92,18 +99,20 @@ pub fn plan(
     source: crate::ffmpeg::Probe,
     starts: &[f64],
 ) -> Result<(Plan, Vec<String>)> {
-    let mut options = webm::Options::from(request.options.clone());
+    let options = webm::Options::from(request.options.clone());
+    let mut selection = request.selection.clone().for_format(Format::Webp);
     // Resolve the seek timestamp for the frame displayed at `start` (matching
     // preview); out-of-range timestamps are rejected later by `webm::plan_for`.
-    if let (Some(start), Some(fps)) = (options.start, source.fps.filter(|_| !source.still_image))
+    if let (Some(start), Some(fps)) = (selection.start, source.fps.filter(|_| !source.still_image))
         && start >= 0.0
         && source.duration.is_none_or(|duration| start < duration)
     {
-        options.start = Some(frame_start(start, starts, fps));
+        selection.start = Some(frame_start(start, starts, fps));
     }
     let request = webm::Request {
         input: request.input.clone(),
         output: Some(request.output()),
+        selection,
         options,
         overwrite: request.overwrite,
         keep_temp: false,
@@ -127,14 +136,15 @@ pub fn convert(
     // default frame timing for sequences because frame selection is
     // time-based).
     let drawing = webm::Options::from(request.options.clone());
-    let mut readable = crate::drawn::readable(&request.input, &drawing, cancel)?;
+    let mut readable =
+        crate::drawn::readable(&request.input, &request.selection, &drawing, cancel)?;
     // Drop the in-memory raster frames since ffmpeg reads from disk.
     drop(readable.take_drawn());
     let input = readable.path();
     let source = readable.probe(backend, cancel)?;
     // Probe packet start timestamps to locate the frame shown at `start`,
     // falling back to uniform frame spacing if unavailable.
-    let starts = match request.options.start {
+    let starts = match request.selection.start {
         Some(_) if !source.still_image => match backend.frame_starts(input, &source, cancel) {
             Err(Error::Cancelled) => return Err(Error::Cancelled),
             starts => starts.unwrap_or_default(),

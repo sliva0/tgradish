@@ -46,8 +46,9 @@ struct Read {
 /// whether that was guessed, its [`Choices`] whole, and its last result
 /// with the [`Recipe`] that made it; which item is selected; and the
 /// window's layout. tests/data/session-v1.json is a session as version 1
-/// writes it: every later version must still read it, restore its items
-/// with their results current, and write it again as it was.
+/// first wrote it: every later version must still read it and restore its
+/// items with their results current. tests/data/session-v2.json is the same
+/// as it is written now, which reads and writes again as it was.
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Session {
@@ -873,22 +874,29 @@ mod tests {
         assert!(parse(&newer).is_none(), "{newer}");
     }
 
-    /// A session as version 1 writes it, kept as a file: a WebM with its
+    /// A session as version 1 of the file wrote it before what is one
+    /// file's own was kept apart from a format's options: a WebM with its
     /// result, a sprite sheet's `.tgs` and a picture with theirs, a pasted
     /// image, an Aseprite file's tag and layers, and frames of a sequence.
     /// Its files were in `@DIR@`.
     const VERSION_1: &str = include_str!("../tests/data/session-v1.json");
 
-    /// Every later version must read a session this one wrote, take each
-    /// result as what converting makes now, and write it again as it was.
-    #[test]
-    fn reads_a_session_version_1_wrote() {
+    /// The same session as it is written now: the title in either format's
+    /// options, and what is one file's own before them, which version 1
+    /// reads as it is.
+    const VERSION_2: &str = include_str!("../tests/data/session-v2.json");
+
+    /// The session `fixture` read and restored, its files made where it
+    /// says in a folder of its own, each result taken up as it is once found
+    /// on disk; and the session written again, `@DIR@` for that folder.
+    fn restored(fixture: &str) -> (Vec<bool>, String) {
         use tgradish_core::presets::Presets;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("session.json");
         // its files where it says, which restoring looks for
         let quoted = serde_json::to_string(dir.path().to_str().unwrap()).unwrap();
-        let text = VERSION_1.trim_end().replace("@DIR@", quoted.trim_matches('"'));
+        let folder = quoted.trim_matches('"');
+        let text = fixture.trim_end().replace("@DIR@", folder);
         let files = ["clip.mp4", "sheet.png", "photo.png", "walk.aseprite", "frames/1.png"];
         for name in files.iter().chain(&["frames/2.png", "pasted/19a0-4.png"]) {
             let file = dir.path().join(name);
@@ -908,18 +916,28 @@ mod tests {
             // as an earlier result is taken up once found on disk
             item.made = item.earlier.take().map(|(earlier, _)| earlier);
         }
-        let current: Vec<bool> = items.iter().map(Item::result_is_current).collect();
-        assert_eq!(current, [true, true, true, false, false, false]);
+        let current = items.iter().map(Item::result_is_current).collect();
         let written = restored.written.into_iter().collect();
         let again = Session::of(&items, restored.selected, &written).with_window(window);
-        // the one title written for either format, as both read it
-        let titled = text.replacen(r#""tgs":{}}"#, r#""tgs":{"title":"pig"}}"#, 1);
-        // and what of a .tgs is the file's own before its options
-        let options = r#""effort":"fast","exact":false,"keep-canvas":true,"pixel-scale":2,"#;
-        let sheet = r#""sheet":"4x2","sheet-frames":7,"#;
-        let sheet_first =
-            titled.replace(&format!("{options}{sheet}"), &format!("{sheet}{options}"));
-        assert_eq!(again.to_json().unwrap(), sheet_first);
+        (current, again.to_json().unwrap().replace(folder, "@DIR@"))
+    }
+
+    /// Every later version must read a session version 1 wrote, and take
+    /// each result as what converting makes now; it writes it as it writes
+    /// sessions now.
+    #[test]
+    fn reads_a_session_version_1_wrote() {
+        let (current, again) = restored(VERSION_1);
+        assert_eq!(current, [true, true, true, false, false, false]);
+        assert_eq!(again, VERSION_2.trim_end());
+    }
+
+    /// And one written now, which it writes again as it was.
+    #[test]
+    fn writes_a_session_again_as_it_was() {
+        let (current, again) = restored(VERSION_2);
+        assert_eq!(current, [true, true, true, false, false, false]);
+        assert_eq!(again, VERSION_2.trim_end());
     }
 
     #[test]

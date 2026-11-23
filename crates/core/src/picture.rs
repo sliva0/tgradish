@@ -205,10 +205,14 @@ pub fn default_resize(target: Target) -> Resize {
     if target.requires_exact_size() { Resize::Pad } else { Resize::Contain }
 }
 
-/// Computes WebM or WebP output sizes for `used` dimensions and `options`.
-/// Shared between conversion planning and GUI previews.
-pub fn picture_sizes(format: Format, options: &Options, used: (u32, u32)) -> Result<Sizes> {
-    let target = options.target.unwrap_or_default();
+/// Computes WebM or WebP output sizes for `used` dimensions, `target` and
+/// `options`. Shared between conversion planning and GUI previews.
+pub fn picture_sizes(
+    format: Format,
+    target: Target,
+    options: &Options,
+    used: (u32, u32),
+) -> Result<Sizes> {
     let resize = options.resize.unwrap_or(default_resize(target));
     match options.integer_scale() {
         Some(scale) => exact_sizes(format, target, resize, used, scale),

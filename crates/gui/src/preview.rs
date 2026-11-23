@@ -223,11 +223,12 @@ fn under_settings(ui: &mut egui::Ui, item: &mut Item, context: &file_settings::C
 fn made_with(
     item: &Item,
     context: &file_settings::Context,
-) -> (f64, Options, Settings<tgs::Options>) {
+) -> (f64, Settings<Options>, Settings<tgs::Options>) {
     let (presets, config) = (context.presets, context.config);
     let recipe = |format| item.choices.recipe(format, presets, config);
     let tgs = recipe(Format::Tgs).map(Recipe::into_tgs).unwrap_or_default();
-    let webm = recipe(Format::Webm).map_or_else(|_| item.choices.webm.clone(), Recipe::into_webm);
+    let webm =
+        recipe(Format::Webm).map_or_else(|_| file_settings::own_webm(item), Recipe::into_webm);
     (item.tempo(presets, config), webm, tgs)
 }
 
@@ -238,7 +239,7 @@ fn preview(
     (screen, inset): (&mut Screen, &mut Inset),
     item: &mut Item,
     (tempo, in_frames): (f64, &mut bool),
-    (webm, tgs): (&Options, &Settings<tgs::Options>),
+    (webm, tgs): (&Settings<Options>, &Settings<tgs::Options>),
     (look, smooth): (&mut ResultPreview, bool),
 ) {
     let has_result = item.result_clip.ready().is_some();
@@ -497,14 +498,15 @@ fn preview(
                             if let Some(mut sizes) =
                                 file_settings::webm_sizes(item.format, webm, crop.unwrap_or(full))
                             {
-                                let start = webm.start.unwrap_or(0.0);
+                                let start = webm.selection.start.unwrap_or(0.0);
                                 let art_key = inset_key((clip.id, where_, start.to_bits()));
                                 let looks = || {
                                     inset.looks_like_art(art_key, || {
                                         predict::looks_like_art(clip, where_, start)
                                     })
                                 };
-                                if picture::turns_sharp(webm, sizes.enlarges(used), looks) {
+                                if picture::turns_sharp(&webm.options, sizes.enlarges(used), looks)
+                                {
                                     sizes.scaling = Scaling::Sharp;
                                 }
                                 let key = inset_key((clip.id, frame, where_, sizes));
@@ -603,7 +605,7 @@ fn timeline_row(
     item: &mut Item,
     shown: Show,
     (tempo, in_frames): (f64, &mut bool),
-    (webm, tgs): (&Options, &Settings<tgs::Options>),
+    (webm, tgs): (&Settings<Options>, &Settings<tgs::Options>),
 ) {
     let length = item.input_length();
     let result_length =
@@ -629,7 +631,7 @@ fn timeline_row(
                         playing: &mut item.view.playing,
                         // Convert Telegram's 3 s output limit into input seconds at `tempo`.
                         limit: telegram::MAX_SECONDS * tempo,
-                        past: timeline::PastLimit::of(item.format, webm, &tgs.options),
+                        past: timeline::PastLimit::of(item.format, &webm.options, &tgs.options),
                         frames: frames.as_deref(),
                         in_frames,
                     },
@@ -712,7 +714,7 @@ fn tgs_bounds(
 /// Returns the dimension sub-label shown beneath "Result" in the result inset
 /// (`Some(None)` for resolution-independent `.tgs` vectors, or `None` when the
 /// crop is out of bounds or dimensions are not yet known).
-fn inset_label(item: &Item, size: (u32, u32), webm: &Options) -> Option<Option<String>> {
+fn inset_label(item: &Item, size: (u32, u32), webm: &Settings<Options>) -> Option<Option<String>> {
     if item.choices.crop.is_some_and(|crop| !crop.fits(size.0, size.1)) {
         return None;
     }

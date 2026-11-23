@@ -13,6 +13,7 @@ use crate::backend::Backend;
 use crate::error::{Error, FileAction, Result};
 use crate::ffmpeg::Probe;
 use crate::input::{FileKind, Input, sniff};
+use crate::options::Selection;
 use crate::tgs::DEFAULT_FPS;
 use crate::webm::{self, Options};
 
@@ -84,10 +85,10 @@ impl Readable {
         self.dir.is_some()
     }
 
-    /// Snaps rounded trim boundaries in `options` to the drawn frame timestamps
-    /// (see [`webm::drawn_cut`]).
-    pub fn cut(&self, options: &Options) -> Options {
-        webm::drawn_cut(options, &self.times)
+    /// Snaps rounded trim boundaries in `selection` to the drawn frame
+    /// timestamps (see [`webm::drawn_cut`]).
+    pub fn cut(&self, selection: &Selection) -> Selection {
+        webm::drawn_cut(selection, &self.times)
     }
 
     /// Takes the rendered animation and its `still` flag for previewing without
@@ -131,15 +132,20 @@ pub(crate) fn not_aseprite(tag: Option<&str>, chosen: &Layers) -> Option<Error> 
 }
 
 /// Prepares `input` so ffmpeg can read it. Renders Aseprite files (applying
-/// `tag` and layer visibility), image sequences (at `options.fps` or
-/// [`DEFAULT_FPS`]), and animated WebP files into a temporary PNG/APNG. All
-/// other files are passed through directly. Rejects Aseprite-only options on
-/// non-Aseprite inputs.
-pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Result<Readable> {
+/// the selection's `tag` and layer visibility), image sequences (at
+/// `options.fps` or [`DEFAULT_FPS`]), and animated WebP files into a
+/// temporary PNG/APNG. All other files are passed through directly. Rejects
+/// Aseprite-only options on non-Aseprite inputs.
+pub fn readable(
+    input: &Input,
+    selection: &Selection,
+    options: &Options,
+    cancel: &CancelToken,
+) -> Result<Readable> {
     input.refuse_folder()?;
-    let layers = layers(options.show_layers.as_deref(), options.hide_layers.as_deref());
+    let layers = layers(selection.show_layers.as_deref(), selection.hide_layers.as_deref());
     let aseprite = matches!(input, Input::File(path) if sniff(path) == FileKind::Aseprite);
-    if let Some(err) = not_aseprite(options.tag.as_deref(), &layers).filter(|_| !aseprite) {
+    if let Some(err) = not_aseprite(selection.tag.as_deref(), &layers).filter(|_| !aseprite) {
         return Err(err);
     }
     let sequence = matches!(input, Input::Sequence(_));
@@ -152,7 +158,7 @@ pub fn readable(input: &Input, options: &Options, cancel: &CancelToken) -> Resul
         Input::File(path) if aseprite => {
             cancel.check()?;
             let bytes = art::read(path, art::most_bytes(&Limits::default()))?;
-            let tag = options.tag.clone();
+            let tag = selection.tag.clone();
             let decode = frames::DecodeOptions { tag, layers, cancelled: Some(&stop) };
             art::aseprite(&bytes, &decode, &Limits::default())
                 .map_err(|err| art::undecodable(path, err))?
@@ -278,6 +284,20 @@ fn fraction(seconds: f64) -> (u16, u16) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::options::Settings;
+
+    /// Settings choosing `selection` of the file.
+    fn chosen(selection: Selection) -> Settings<Options> {
+        Settings { selection, ..Settings::default() }
+    }
+
+    fn readable(
+        input: &Input,
+        settings: &Settings<Options>,
+        cancel: &CancelToken,
+    ) -> Result<Readable> {
+        super::readable(input, &settings.selection, &settings.options, cancel)
+    }
 
     #[test]
     fn draws_aseprite_files_for_ffmpeg() {
@@ -290,7 +310,7 @@ mod tests {
         };
         let corpus = |name: &str| &files.iter().find(|file| file.name == name).unwrap().bytes;
         let ase = write("walker.ase", corpus("walker_2x.ase"));
-        let read = |path: &Path, options: Options| {
+        let read = |path: &Path, options: Settings<Options>| {
             readable(&Input::File(path.to_path_buf()), &options, &CancelToken::new()).map(
                 |readable| {
                     assert!(readable.is_drawn());
@@ -305,19 +325,22 @@ mod tests {
             frames::aseprite::Sprite::read(&std::fs::read(&ase).unwrap(), &Limits::default())
                 .unwrap();
         let all = sprite.animation(&frames::DecodeOptions::default()).unwrap();
-        assert_eq!(read(&ase, Options::default()).unwrap(), all);
-        let idle = Options { tag: Some("idle".into()), ..Options::default() };
+        assert_eq!(read(&ase, Settings::default()).unwrap(), all);
+        let idle = chosen(Selection { tag: Some("idle".into()), ..Selection::default() });
         assert_eq!(read(&ase, idle).unwrap().frames().len(), 2);
         // its one layer hidden, nothing shows
-        let hidden = Options { hide_layers: Some(vec!["art".into()]), ..Options::default() };
+        let hidden =
+            chosen(Selection { hide_layers: Some(vec!["art".into()]), ..Selection::default() });
         let hidden = read(&ase, hidden).unwrap();
         assert!(hidden.frames().iter().all(|frame| frame.rgba.iter().all(|&byte| byte == 0)));
         // its hidden sketch shown, over the first frame
-        let sketch = Options { show_layers: Some(vec!["sketch".into()]), ..Options::default() };
+        let sketch =
+            chosen(Selection { show_layers: Some(vec!["sketch".into()]), ..Selection::default() });
         let sketched = read(&ase, sketch).unwrap();
         assert_ne!(sketched.frames()[0], all.frames()[0]);
         assert_eq!(sketched.frames()[1..], all.frames()[1..]);
-        let unknown = Options { show_layers: Some(vec!["sky".into()]), ..Options::default() };
+        let unknown =
+            chosen(Selection { show_layers: Some(vec!["sky".into()]), ..Selection::default() });
         assert!(read(&ase, unknown).is_err());
 
         // one frame is a still picture
@@ -325,7 +348,7 @@ mod tests {
         (still.frames, still.delays) = (still.frames[..1].to_vec(), vec![100]);
         let one = write("one.ase", &tgradish_corpus::encode::aseprite(&still, &[]));
         let drawn =
-            readable(&Input::File(one.clone()), &Options::default(), &CancelToken::new()).unwrap();
+            readable(&Input::File(one.clone()), &Settings::default(), &CancelToken::new()).unwrap();
         let bytes = std::fs::read(drawn.path()).unwrap();
         assert!(
             png::Decoder::new(std::io::Cursor::new(&bytes))
@@ -336,9 +359,9 @@ mod tests {
         // anything else is read as it is, and has no tags or layers
         let gif = write("walker.gif", corpus("walker_2x.gif"));
         let as_is =
-            readable(&Input::File(gif.clone()), &Options::default(), &CancelToken::new()).unwrap();
+            readable(&Input::File(gif.clone()), &Settings::default(), &CancelToken::new()).unwrap();
         assert!(!as_is.is_drawn() && as_is.path() == gif);
-        let tagged = Options { tag: Some("idle".into()), ..Options::default() };
+        let tagged = chosen(Selection { tag: Some("idle".into()), ..Selection::default() });
         assert!(matches!(
             readable(&Input::File(gif.clone()), &tagged, &CancelToken::new()),
             Err(Error::InvalidOption { option: "tag", .. })
@@ -355,7 +378,10 @@ mod tests {
             let png = tgradish_corpus::encode::png(frame);
             std::fs::write(folder.join(format!("{}.png", index + 1)), png).unwrap();
         }
-        let twelve = Options { fps: Some(12.0), ..Options::default() };
+        let twelve = Settings {
+            options: Options { fps: Some(12.0), ..Options::default() },
+            ..Settings::default()
+        };
         let sequence = Input::Sequence(vec![folder.clone()]);
         let drawn = readable(&sequence, &twelve, &CancelToken::new()).unwrap();
         let bytes = std::fs::read(drawn.path()).unwrap();
@@ -381,7 +407,10 @@ mod tests {
         let reader = png::Decoder::new(std::io::Cursor::new(&bytes)).read_info().unwrap();
         assert_eq!(reader.info().animation_control.map(|control| control.num_frames), Some(1));
         // the frames of a sequence have no tags
-        let tagged = Options { tag: Some("idle".into()), ..twelve };
+        let tagged = Settings {
+            selection: Selection { tag: Some("idle".into()), ..Selection::default() },
+            ..twelve
+        };
         assert!(readable(&sequence, &tagged, &CancelToken::new()).is_err());
     }
 
@@ -406,7 +435,10 @@ mod tests {
         let files = [dir.path().join("1.gif"), dir.path().join("2.png")];
         std::fs::write(&files[0], tgradish_corpus::encode::gif(&gif)).unwrap();
         std::fs::write(&files[1], tgradish_corpus::encode::png(&canvas(250))).unwrap();
-        let twelve = Options { fps: Some(12.0), ..Options::default() };
+        let twelve = Settings {
+            options: Options { fps: Some(12.0), ..Options::default() },
+            ..Settings::default()
+        };
         let input = Input::Sequence(files.to_vec());
         let mut drawn = readable(&input, &twelve, &CancelToken::new()).unwrap();
         let (taken, still) = drawn.take_drawn().unwrap();
@@ -441,8 +473,8 @@ mod tests {
         let glow = files.iter().find(|file| file.name == "glow.webp").unwrap();
         let path = dir.path().join("glow.webp");
         std::fs::write(&path, &glow.bytes).unwrap();
-        let drawn =
-            readable(&Input::File(path.clone()), &Options::default(), &CancelToken::new()).unwrap();
+        let drawn = readable(&Input::File(path.clone()), &Settings::default(), &CancelToken::new())
+            .unwrap();
         assert!(drawn.is_drawn());
         let decode = |bytes: &[u8]| {
             frames::decode(bytes, &frames::DecodeOptions::default(), &Limits::default())
@@ -453,8 +485,9 @@ mod tests {
         let still = dir.path().join("still.webp");
         std::fs::write(&still, crate::webp::encode(&[255, 0, 0, 255], 1, 1, None).unwrap())
             .unwrap();
-        let as_is = readable(&Input::File(still.clone()), &Options::default(), &CancelToken::new())
-            .unwrap();
+        let as_is =
+            readable(&Input::File(still.clone()), &Settings::default(), &CancelToken::new())
+                .unwrap();
         assert!(!as_is.is_drawn());
     }
 }

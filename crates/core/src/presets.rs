@@ -765,14 +765,7 @@ mod tests {
     #[test]
     fn saves_presets_that_read_back() {
         let dir = tempfile::tempdir().unwrap();
-        let webm = Options {
-            fit: Some(Fit::Crf),
-            crf: Some(28),
-            // one file's: left out
-            crop: Some(crate::options::Crop { x: 0, y: 0, width: 8, height: 8 }),
-            title: Some("pig".into()),
-            ..Options::default()
-        };
+        let webm = Options { fit: Some(Fit::Crf), crf: Some(28), ..Options::default() };
         let tgs = tgs::Options {
             effort: Some(Effort::Fast),
             exact: Some(false),
@@ -783,13 +776,8 @@ mod tests {
         assert_eq!(path, dir.path().join("my small.toml"));
         let presets = Presets::load(Some(dir.path())).unwrap();
         assert_eq!(presets.get("my small").unwrap().description, "Small ones");
-        assert_eq!(presets.webm("my small").unwrap(), shareable(&webm));
-        assert_eq!(presets.tgs("my small").unwrap(), shareable(&tgs));
-        // none of one file's options are kept
-        let preset = presets.get("my small").unwrap();
-        assert_eq!((preset.webm.crop, preset.webm.title.as_deref()), (None, None));
-        assert_eq!(preset.webm.crf, Some(28));
-        assert_eq!(presets.tgs("my small").unwrap().pixel_scale, Some(2));
+        assert_eq!(presets.webm("my small").unwrap(), webm);
+        assert_eq!(presets.tgs("my small").unwrap(), tgs);
         // there already, replaced only when asked
         let again = save(dir.path(), "my small", "", (&webm, &tgs), false);
         assert!(matches!(again, Err(Error::OutputExists(_))));
@@ -904,10 +892,7 @@ mod tests {
     fn resolves_builtin_presets_for_either_format() {
         let presets = Presets::builtin();
         let fast = presets.webm("fast").unwrap();
-        assert_eq!(
-            (fast.fit, fast.effort, fast.target),
-            (Some(Fit::Bitrate), Some(Effort::Fast), None)
-        );
+        assert_eq!((fast.fit, fast.effort), (Some(Fit::Bitrate), Some(Effort::Fast)));
         assert_eq!(presets.tgs("fast").unwrap().effort, Some(Effort::Fast));
         assert!(matches!(presets.options("best", Format::Tgs), Ok(FormatOptions::Tgs(_))));
         assert!(presets.webm("nope").is_err());

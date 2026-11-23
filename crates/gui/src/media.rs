@@ -13,7 +13,7 @@ use tgradish_core::config::Threads;
 use tgradish_core::drawn::{self, Readable};
 use tgradish_core::ffmpeg::Probe;
 use tgradish_core::input::Input;
-use tgradish_core::options::Settings;
+use tgradish_core::options::{Selection, Settings};
 use tgradish_core::preview::Preview;
 use tgradish_core::tgradish_tgs::frames::aseprite::{LayerInfo, Tag};
 use tgradish_core::tgs;
@@ -306,20 +306,18 @@ impl Video {
         ctx: &egui::Context,
         backend: Backend,
         input: Input,
-        drawing: Options,
+        drawing: Settings<Options>,
     ) -> Task<Video> {
         Task::spawn(ctx, move |cancel| {
             // where the item's tag or layers aren't the file's, as after it
             // was edited, all of it, as the file has it, so what it has
             // shows, for the item to say what it lacks
-            let mut readable = match drawn::readable(&input, &drawing, cancel) {
+            let (chosen, options) = (&drawing.selection, &drawing.options);
+            let mut readable = match drawn::readable(&input, chosen, options, cancel) {
                 Ok(readable) => readable,
-                Err(err)
-                    if chooses_art(&drawing.tag, &drawing.show_layers, &drawing.hide_layers) =>
-                {
-                    let plain =
-                        Options { tag: None, show_layers: None, hide_layers: None, ..drawing };
-                    match drawn::readable(&input, &plain, cancel) {
+                Err(err) if chooses_art(&chosen.tag, &chosen.show_layers, &chosen.hide_layers) => {
+                    let whole = Selection::default();
+                    match drawn::readable(&input, &whole, options, cancel) {
                         Ok(readable) => readable,
                         Err(_) => return Err(failure(&err)),
                     }
@@ -610,7 +608,6 @@ pub(crate) fn load_result(ctx: &egui::Context, backend: Backend, path: &Path) ->
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tgradish_core::options::Selection;
 
     fn clip(times: Vec<f64>) -> Clip {
         let frames = vec![vec![0; 4]; times.len() - 1];

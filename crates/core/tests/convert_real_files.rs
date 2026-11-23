@@ -15,7 +15,7 @@ use tgradish_core::events::{Details, StartDetails};
 use tgradish_core::ffmpeg;
 use tgradish_core::input::Input;
 use tgradish_core::mark::made_by_tgradish;
-use tgradish_core::options::{Crop, Effort, Fit, Resize, Scaling};
+use tgradish_core::options::{Crop, Effort, Fit, Resize, Scaling, Selection};
 use tgradish_core::telegram::{self, Target};
 use tgradish_core::webm::Decision;
 use tgradish_core::webm::Options;
@@ -45,6 +45,7 @@ fn still(
     let request = webp::Request {
         input: request.input.clone(),
         output: request.output.clone(),
+        selection: request.selection.clone(),
         options: webp::Options::from(&request.options),
         overwrite: request.overwrite,
         threads: request.threads,
@@ -54,6 +55,11 @@ fn still(
 
 fn fast(fit: Fit) -> Options {
     Options { fit: Some(fit), effort: Some(Effort::Fast), ..Default::default() }
+}
+
+/// What reads `length` seconds of the input.
+fn length(length: f64) -> Selection {
+    Selection { length: Some(length), ..Selection::default() }
 }
 
 /// First decoded frame as RGBA, using the libvpx decoder to keep alpha.
@@ -75,7 +81,8 @@ fn converts_short_clip_without_spoofing() {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
             output: Some(dir.path().join("out.webm")),
-            options: Options { length: Some(2.0), ..fast(Fit::Bitrate) },
+            selection: Selection { length: Some(2.0), ..Selection::default() },
+            options: fast(Fit::Bitrate),
             ..Request::new(Input::File(input.clone()))
         };
         let mut events = Vec::new();
@@ -124,7 +131,8 @@ fn converts_in_as_few_threads_as_asked() {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
             output: Some(dir.path().join("out.webm")),
-            options: Options { length: Some(1.0), attempts: Some(2), ..fast(Fit::Auto) },
+            selection: Selection { length: Some(1.0), ..Selection::default() },
+            options: Options { attempts: Some(2), ..fast(Fit::Auto) },
             threads: one,
             ..Request::new(Input::File(input.clone()))
         };
@@ -164,7 +172,8 @@ fn settles_on_the_best_so_far_when_asked() {
         // a bitrate far under what fits, so fitting would go on
         let request = Request {
             output: Some(dir.path().join("out.webm")),
-            options: Options { length: Some(2.0), bitrate: Some(50.0), ..fast(Fit::Bitrate) },
+            selection: Selection { length: Some(2.0), ..Selection::default() },
+            options: Options { bitrate: Some(50.0), ..fast(Fit::Bitrate) },
             ..Request::new(Input::File(input.clone()))
         };
         let cancel = CancelToken::new();
@@ -217,7 +226,8 @@ fn warns_once_started() {
         // a quality, which fitting a bitrate has no use for
         let request = Request {
             output: Some(dir.path().join("out.webm")),
-            options: Options { length: Some(0.5), crf: Some(30), ..fast(Fit::Bitrate) },
+            selection: Selection { length: Some(0.5), ..Selection::default() },
+            options: Options { crf: Some(30), ..fast(Fit::Bitrate) },
             ..Request::new(Input::File(input.clone()))
         };
         let mut events = Vec::new();
@@ -235,14 +245,15 @@ fn keeps_intermediate_files_whatever_comes_of_them() {
     for backend in &backends {
         let name = name(backend);
         let dir = tempfile::tempdir().unwrap();
-        let request = |options| Request {
+        let request = |(selection, options)| Request {
             output: Some(dir.path().join("out.webm")),
+            selection,
             options,
             overwrite: true,
             keep_temp: true,
             ..Request::new(Input::File(input.clone()))
         };
-        let made = Options { length: Some(0.5), ..fast(Fit::Off) };
+        let made = (length(0.5), fast(Fit::Off));
         let mut said = None;
         let outcome = convert(backend, &request(made), &CancelToken::new(), &mut |event| {
             if let Event::Finished(outcome) = event {
@@ -256,13 +267,13 @@ fn keeps_intermediate_files_whatever_comes_of_them() {
         std::fs::remove_dir_all(kept).unwrap();
 
         // an emoji that can't fit, at bitrates far past its limit
+        let emoji = Selection { target: Some(Target::Emoji), ..length(1.0) };
         let too_large = Options {
-            target: Some(Target::Emoji),
-            length: Some(1.0),
             attempts: Some(1),
             fit_range: Some(tgradish_core::options::Range { min: 5000.0, max: 50_000.0 }),
             ..fast(Fit::Bitrate)
         };
+        let too_large = (emoji, too_large);
         let mut warnings = Vec::new();
         let failed = convert(backend, &request(too_large), &CancelToken::new(), &mut |event| {
             if let Event::Warning { message } = event {
@@ -285,11 +296,12 @@ fn fits_emoji_into_their_smaller_limit() {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
             output: Some(dir.path().join("out.webm")),
-            options: Options {
+            selection: Selection {
                 target: Some(Target::Emoji),
                 length: Some(2.0),
-                ..fast(Fit::Bitrate)
+                ..Selection::default()
             },
+            options: fast(Fit::Bitrate),
             ..Request::new(Input::File(input.clone()))
         };
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -309,7 +321,8 @@ fn converts_long_clip_with_spoofing() {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
             output: Some(dir.path().join("out.webm")),
-            options: Options { title: Some("tall".into()), ..fast(Fit::Bitrate) },
+            selection: Selection { title: Some("tall".into()), ..Selection::default() },
+            options: fast(Fit::Bitrate),
             ..Request::new(Input::File(input.clone()))
         };
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -338,7 +351,8 @@ fn starts_at_offset() {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
             output: Some(dir.path().join("out.webm")),
-            options: Options { start: Some(5.0), length: Some(1.0), ..fast(Fit::Off) },
+            selection: Selection { start: Some(5.0), length: Some(1.0), ..Selection::default() },
+            options: fast(Fit::Off),
             ..Request::new(Input::File(input.clone()))
         };
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -354,7 +368,8 @@ fn previews_results() {
     let output = dir.path().join("preview.webm");
     let request = Request {
         output: Some(output.clone()),
-        options: Options { length: Some(1.0), ..fast(Fit::Bitrate) },
+        selection: Selection { length: Some(1.0), ..Selection::default() },
+        options: fast(Fit::Bitrate),
         ..Request::new(Input::File(input))
     };
     convert(&backends[0], &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -427,11 +442,12 @@ fn makes_transparent_emoji_from_image() {
         let output = dir.path().join(format!("{name}.webm"));
         let request = Request {
             output: Some(output.clone()),
-            options: Options {
+            selection: Selection {
                 target: Some(Target::Emoji),
                 length: Some(1.0),
-                ..fast(Fit::Bitrate)
+                ..Selection::default()
             },
+            options: fast(Fit::Bitrate),
             ..Request::new(Input::File(image.clone()))
         };
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -516,7 +532,8 @@ fn crops_odd_sizes_exactly() {
             let output = dir.path().join(format!("{name}-{}x{}.webm", crop.width, crop.height));
             let request = Request {
                 output: Some(output.clone()),
-                options: Options { crop: Some(crop), ..fast(Fit::Off) },
+                selection: Selection { crop: Some(crop), ..Selection::default() },
+                options: fast(Fit::Off),
                 ..Request::new(Input::File(input.clone()))
             };
             convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -535,7 +552,8 @@ fn crops_odd_sizes_exactly() {
             let output = dir.path().join(format!("{name}-{}x{}.webp", crop.width, crop.height));
             let request = Request {
                 output: Some(output.clone()),
-                options: Options { crop: Some(crop), ..Options::default() },
+                selection: Selection { crop: Some(crop), ..Selection::default() },
+                options: Options::default(),
                 ..Request::new(Input::File(input.clone()))
             };
             let made = still(backend, &request, &CancelToken::new()).unwrap();
@@ -567,13 +585,14 @@ fn pads_static_stickers_in_the_exact_middle() {
     // 47 of margin, 23 before it; a WebM makes it 54, 46 of margin, and
     // starts it on an even column, 22, as its colour planes need
     let crop = Crop { x: 1, y: 0, width: 53, height: 100 };
-    let options = Options { crop: Some(crop), target: Some(Target::Emoji), ..Options::default() };
+    let selection =
+        Selection { crop: Some(crop), target: Some(Target::Emoji), ..Selection::default() };
     for backend in &backends {
         let name = name(backend);
         let output = dir.path().join(format!("{name}.webp"));
         let request = Request {
             output: Some(output.clone()),
-            options: options.clone(),
+            selection: selection.clone(),
             ..Request::new(Input::File(input.clone()))
         };
         still(backend, &request, &CancelToken::new()).unwrap();
@@ -584,7 +603,12 @@ fn pads_static_stickers_in_the_exact_middle() {
         let output = dir.path().join(format!("{name}.webm"));
         let request = Request {
             output: Some(output.clone()),
-            options: Options { crop: Some(crop), target: Some(Target::Emoji), ..fast(Fit::Off) },
+            selection: Selection {
+                crop: Some(crop),
+                target: Some(Target::Emoji),
+                ..Selection::default()
+            },
+            options: fast(Fit::Off),
             ..Request::new(Input::File(input.clone()))
         };
         convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -611,7 +635,8 @@ fn keeps_pixel_art_sharp() {
         let output = dir.path().join(format!("{name}.webm"));
         let request = Request {
             output: Some(output.clone()),
-            options: Options { length: Some(0.2), crf: Some(10), ..fast(Fit::Off) },
+            selection: Selection { length: Some(0.2), ..Selection::default() },
+            options: Options { crf: Some(10), ..fast(Fit::Off) },
             ..Request::new(Input::File(image.clone()))
         };
         let mut scaling = None;
@@ -654,9 +679,9 @@ fn pads_pictures_of_odd_size_whole() {
         let output = dir.path().join(format!("{name}.webm"));
         let request = Request {
             output: Some(output.clone()),
+            selection: Selection { length: Some(0.2), ..Selection::default() },
             options: Options {
                 scaling: Some(Scaling::Integer),
-                length: Some(0.2),
                 lossless: Some(true),
                 ..fast(Fit::Off)
             },
@@ -681,11 +706,8 @@ fn pads_pictures_of_odd_size_whole() {
 fn rejects_contain_for_emoji() {
     let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let request = Request {
-        options: Options {
-            target: Some(Target::Emoji),
-            resize: Some(Resize::Contain),
-            ..Default::default()
-        },
+        selection: Selection { target: Some(Target::Emoji), ..Selection::default() },
+        options: Options { resize: Some(Resize::Contain), ..Default::default() },
         ..Request::new(Input::File(input))
     };
     for backend in &backends {
@@ -735,8 +757,8 @@ fn stays_under_three_seconds_without_spoofing() {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
             output: Some(dir.path().join("out.webm")),
+            selection: Selection { length: Some(3.0), ..Selection::default() },
             options: Options {
-                length: Some(3.0),
                 fps: Some(23.976),
                 spoof: Some(tgradish_core::options::Spoof::Never),
                 ..fast(Fit::Bitrate)
@@ -760,7 +782,8 @@ fn plays_at_a_tempo() {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
             output: Some(dir.path().join("out.webm")),
-            options: Options { length: Some(4.0), tempo: Some(2.0), ..fast(Fit::Bitrate) },
+            selection: Selection { length: Some(4.0), ..Selection::default() },
+            options: Options { tempo: Some(2.0), ..fast(Fit::Bitrate) },
             ..Request::new(Input::File(input.clone()))
         };
         let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -848,7 +871,8 @@ fn backends_agree() {
             let dir = tempfile::tempdir().unwrap();
             let request = Request {
                 output: Some(dir.path().join("out.webm")),
-                options: Options { bitrate: Some(150.0), length: Some(4.0), ..fast(Fit::Off) },
+                selection: Selection { length: Some(4.0), ..Selection::default() },
+                options: Options { bitrate: Some(150.0), ..fast(Fit::Off) },
                 ..Request::new(Input::File(input.clone()))
             };
             convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap().bytes as f64
@@ -908,7 +932,8 @@ fn handles_offset_and_missing_timestamps() {
             let dir = tempfile::tempdir().unwrap();
             let request = Request {
                 output: Some(dir.path().join("out.webm")),
-                options: Options { length: Some(1.0), ..fast(Fit::Off) },
+                selection: Selection { length: Some(1.0), ..Selection::default() },
+                options: fast(Fit::Off),
                 ..Request::new(Input::File(path.clone()))
             };
             let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {})
@@ -990,7 +1015,6 @@ fn uses_first_video_stream() {
 fn passes_encoder_options() {
     let (Some(backends), Some(input)) = (backends(), clip(Clip::Square)) else { return };
     let with = |name: &str, value: &str| Options {
-        length: Some(0.5),
         encoder_options: Some([(name.to_string(), value.to_string())].into()),
         ..fast(Fit::Off)
     };
@@ -998,6 +1022,7 @@ fn passes_encoder_options() {
         let dir = tempfile::tempdir().unwrap();
         let request = Request {
             output: Some(dir.path().join("out.webm")),
+            selection: length(0.5),
             options: with("tune-content", "screen"),
             ..Request::new(Input::File(input.clone()))
         };
@@ -1024,14 +1049,15 @@ fn tells_its_own_stickers_from_look_alikes() {
     let dir = tempfile::tempdir().unwrap();
     let cancel = CancelToken::new();
     let path = |name: &str| dir.path().join(name);
-    let unmarked = Options { watermark: Some(false), length: Some(0.2), ..fast(Fit::Off) };
-    let marked = Options { length: Some(0.2), ..fast(Fit::Off) };
+    let unmarked = Options { watermark: Some(false), ..fast(Fit::Off) };
+    let marked = fast(Fit::Off);
 
     // WebM: unmarked, signed by another, named by tgradish but unsigned,
     // and a video named as one
     let webm = |name: &str, options: Options| {
         let request = Request {
             output: Some(path(name)),
+            selection: length(0.2),
             options,
             ..Request::new(Input::File(input.clone()))
         };
@@ -1212,9 +1238,10 @@ fn finds_where_frames_start() {
             assert!(near(&starts, &expected), "{name}: {starts:?}");
             // the frame that shows at a time, however long frames show
             let colour_at = |time: f64| {
-                let options = Options { start: Some(time), ..Options::default() };
+                let selection = Selection { start: Some(time), ..Selection::default() };
                 let output = Some(dir.path().join(format!("{name}-{}-{time}.webp", delays[0])));
-                let request = Request { options, output, ..Request::new(Input::File(gif.clone())) };
+                let input = Input::File(gif.clone());
+                let request = Request { selection, output, ..Request::new(input) };
                 let made = still(backend, &request, &CancelToken::new());
                 let preview = tgradish_core::webp::preview(&made.unwrap().output).unwrap();
                 <[u8; 4]>::try_from(&preview.frames[0].0[..4]).unwrap()
@@ -1275,12 +1302,8 @@ fn counts_time_from_where_the_video_starts() {
             for (part, frames) in [((None, None), 10), ((Some(start), Some(0.3)), 3)] {
                 let request = Request {
                     output: Some(dir.path().join(format!("{name}-{frames}.webm"))),
-                    options: Options {
-                        start: part.0,
-                        length: part.1,
-                        fps: Some(10.0),
-                        ..fast(Fit::Off)
-                    },
+                    selection: Selection { start: part.0, length: part.1, ..Selection::default() },
+                    options: Options { fps: Some(10.0), ..fast(Fit::Off) },
                     ..Request::new(Input::File(input.clone()))
                 };
                 let outcome = convert(backend, &request, &CancelToken::new(), &mut |_| {}).unwrap();
@@ -1299,12 +1322,12 @@ fn makes_static_stickers_from_a_frame() {
         let dir = tempfile::tempdir().unwrap();
         let name = name(backend);
         // a wide part of the frame at 1 s, as a sticker
-        let options = Options {
+        let selection = Selection {
             start: Some(1.0),
             crop: Some(Crop { x: 0, y: 128, width: 512, height: 256 }),
-            ..Options::default()
+            ..Selection::default()
         };
-        let request = Request { options, ..Request::new(Input::File(input.clone())) };
+        let request = Request { selection, ..Request::new(Input::File(input.clone())) };
         let request = Request { output: Some(dir.path().join("out.webp")), ..request };
         let made = still(backend, &request, &CancelToken::new()).unwrap();
         assert!(made.issues.is_empty(), "{name}: {:?}", made.issues);
@@ -1316,9 +1339,9 @@ fn makes_static_stickers_from_a_frame() {
         assert_eq!((preview.width, preview.height), (512, 256), "{name}");
         pictures.push(preview.frames[0].0.clone());
         // an emoji, padded square
-        let emoji = Options { target: Some(Target::Emoji), ..request.options.clone() };
+        let emoji = Selection { target: Some(Target::Emoji), ..request.selection.clone() };
         let request = Request {
-            options: emoji,
+            selection: emoji,
             output: Some(dir.path().join("emoji.webp")),
             ..request.clone()
         };
@@ -1330,9 +1353,9 @@ fn makes_static_stickers_from_a_frame() {
         assert_eq!(corner[3], 0, "{name}: the padding is transparent");
         // the frame that shows at a time, from where it starts, and the last
         let at = |start| {
-            let options = Options { start: Some(start), ..Options::default() };
+            let selection = Selection { start: Some(start), ..Selection::default() };
             let output = Some(dir.path().join(format!("at-{start}.webp")));
-            let request = Request { options, output, overwrite: true, ..request.clone() };
+            let request = Request { selection, output, overwrite: true, ..request.clone() };
             let made = still(backend, &request, &CancelToken::new());
             tgradish_core::webp::preview(&made.unwrap().output).unwrap().frames[0].0.clone()
         };
@@ -1341,8 +1364,8 @@ fn makes_static_stickers_from_a_frame() {
         at(4.83);
         // before the start and past the end
         for start in [-1.0, 60.0] {
-            let options = Options { start: Some(start), ..Options::default() };
-            let request = Request { options, ..request.clone() };
+            let selection = Selection { start: Some(start), ..Selection::default() };
+            let request = Request { selection, ..request.clone() };
             let made = still(backend, &request, &CancelToken::new());
             assert!(made.is_err(), "{name}: {start}");
         }
@@ -1371,9 +1394,10 @@ fn converts_aseprite_files_through_ffmpeg() {
     for backend in &backends {
         let name = name(backend);
         // the idle tag: two frames of 100 ms
-        let options = Options { tag: Some("idle".into()), ..fast(Fit::Bitrate) };
-        let output = Some(dir.path().join(format!("{name}.webm")));
-        let request = Request { output, options, ..Request::new(Input::File(ase.clone())) };
+        let selection = Selection { tag: Some("idle".into()), ..Selection::default() };
+        let (output, options) = (Some(dir.path().join(format!("{name}.webm"))), fast(Fit::Bitrate));
+        let input = Input::File(ase.clone());
+        let request = Request { output, selection, options, ..Request::new(input) };
         let mut events = Vec::new();
         let made = convert(backend, &request, &CancelToken::new(), &mut |e| events.push(e));
         let made = made.unwrap();
@@ -1505,7 +1529,8 @@ fn sequences_keep_every_frame_at_any_rate() {
         let options = Options { fps, ..Options::default() };
         let inputs = Input::Sequence(sequence(frames));
         let cancel = CancelToken::new();
-        let drawn = tgradish_core::drawn::readable(&inputs, &options, &cancel).unwrap();
+        let whole = Selection::default();
+        let drawn = tgradish_core::drawn::readable(&inputs, &whole, &options, &cancel).unwrap();
         let probe = drawn.probe(backend, &cancel).unwrap();
         let rate = fps.unwrap_or(tgradish_core::tgs::DEFAULT_FPS);
         assert_eq!(probe.fps, Some(rate));
@@ -1524,6 +1549,7 @@ fn sequences_keep_every_frame_at_any_rate() {
         let request = Request {
             input: Input::Sequence(sequence(4)),
             output: Some(output.clone()),
+            selection: Selection::default(),
             options: Options { fps: Some(29.97), attempts: Some(1), ..Options::default() },
             overwrite: true,
             keep_temp: false,
@@ -1546,6 +1572,7 @@ fn times_animated_pictures_by_their_frames() {
     let webp = corpus_file(dir.path(), "glow.webp", "glow.webp");
     let drawn = tgradish_core::drawn::readable(
         &Input::File(webp.clone()),
+        &Selection::default(),
         &Options::default(),
         &CancelToken::new(),
     );
@@ -1554,9 +1581,10 @@ fn times_animated_pictures_by_their_frames() {
     let webp = drawn.path().to_path_buf();
     // nor how fast, when as short as two frames
     let ase = corpus_file(dir.path(), "walker_2x.ase", "walker.ase");
-    let idle = Options { tag: Some("idle".into()), ..Options::default() };
-    let two = tgradish_core::drawn::readable(&Input::File(ase.clone()), &idle, &CancelToken::new())
-        .unwrap();
+    let idle = Selection { tag: Some("idle".into()), ..Selection::default() };
+    let input = Input::File(ase.clone());
+    let none = Options::default();
+    let two = tgradish_core::drawn::readable(&input, &idle, &none, &CancelToken::new()).unwrap();
     let seconds = |name: &str| f64::from(tgradish_corpus::sprite(name).length()) / 1000.0;
     for backend in &backends {
         let name = name(backend);
@@ -1597,8 +1625,9 @@ fn makes_sequences_into_videos_and_pictures() {
         assert!((info.header_duration.unwrap() - 0.5).abs() < 1e-3, "{name}");
         // a picture's frames come twelve a second, whatever else says
         let picture = |fps| {
-            let options = Options { start: Some(0.15), fps, ..Options::default() };
-            let request = Request { options, ..request.clone() };
+            let selection = Selection { start: Some(0.15), ..Selection::default() };
+            let options = Options { fps, ..Options::default() };
+            let request = Request { selection, options, ..request.clone() };
             let made = still(backend, &request, &CancelToken::new());
             tgradish_core::webp::preview(&made.unwrap().output).unwrap().frames[0].0[..4].to_vec()
         };

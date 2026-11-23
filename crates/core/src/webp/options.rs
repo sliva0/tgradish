@@ -3,33 +3,17 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::options::{Crop, IntegerScale, Resize, Scaling, layered};
-use crate::telegram::Target;
+use crate::options::{IntegerScale, Resize, Scaling, layered};
 use crate::webm;
 
-/// Settings for one static WebP conversion: what to make, what of the
-/// input is read and where, how it is fitted and scaled, and metadata. The
-/// rest of WebM's concern time and video encoding. `None` uses the
-/// default, as WebM's does; presets set these in their `[webm]` table.
+/// Options for one static WebP conversion: how the picture is fitted and
+/// scaled, and whether it is watermarked; what is one file's own is its
+/// [`Selection`](crate::options::Selection). The rest of WebM's concern time
+/// and video encoding. `None` uses the default, as WebM's does; presets set
+/// these in their `[webm]` table.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default, deny_unknown_fields, rename_all = "kebab-case")]
 pub struct Options {
-    /// Target type: sticker or emoji. Default: sticker.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub target: Option<Target>,
-    /// Aseprite tag to read. Default: all frames.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-    /// Aseprite layers to show by name (including hidden layers). Default:
-    /// layers visible in the file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub show_layers: Option<Vec<String>>,
-    /// Aseprite layers to hide by name; hiding a group hides its children.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hide_layers: Option<Vec<String>>,
-    /// Region of the input to keep, in source pixels. Default: full frame.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub crop: Option<Crop>,
     /// How to fit the picture into the target dimensions. Default: contain
     /// for stickers, pad for emoji.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,31 +28,12 @@ pub struct Options {
     // read as `exact-scale` too, as it was once named
     #[serde(alias = "exact-scale", skip_serializing_if = "Option::is_none")]
     pub integer_scale: Option<IntegerScale>,
-    /// Seconds into the input of the frame to make the picture of.
-    /// Default: 0.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub start: Option<f64>,
-    /// Title metadata stored in the output file.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
     /// Write tgradish metadata into the output. Default: true.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub watermark: Option<bool>,
 }
 
-layered!(Options {
-    target,
-    tag,
-    show_layers,
-    hide_layers,
-    crop,
-    resize,
-    scaling,
-    integer_scale,
-    start,
-    title,
-    watermark,
-});
+layered!(Options { resize, scaling, integer_scale, watermark });
 
 impl Options {
     /// Overlays set fields from `overlay` onto `self`, clearing
@@ -87,16 +52,9 @@ impl Options {
 impl From<&webm::Options> for Options {
     fn from(options: &webm::Options) -> Options {
         Options {
-            target: options.target,
-            tag: options.tag.clone(),
-            show_layers: options.show_layers.clone(),
-            hide_layers: options.hide_layers.clone(),
-            crop: options.crop,
             resize: options.resize,
             scaling: options.scaling,
             integer_scale: options.integer_scale,
-            start: options.start,
-            title: options.title.clone(),
             watermark: options.watermark,
         }
     }
@@ -105,33 +63,8 @@ impl From<&webm::Options> for Options {
 /// WebM's options with a picture's set, as planning a picture takes them.
 impl From<Options> for webm::Options {
     fn from(options: Options) -> webm::Options {
-        let Options {
-            target,
-            tag,
-            show_layers,
-            hide_layers,
-            crop,
-            resize,
-            scaling,
-            integer_scale,
-            start,
-            title,
-            watermark,
-        } = options;
-        webm::Options {
-            target,
-            tag,
-            show_layers,
-            hide_layers,
-            crop,
-            resize,
-            scaling,
-            integer_scale,
-            start,
-            title,
-            watermark,
-            ..webm::Options::default()
-        }
+        let Options { resize, scaling, integer_scale, watermark } = options;
+        webm::Options { resize, scaling, integer_scale, watermark, ..webm::Options::default() }
     }
 }
 
@@ -144,16 +77,14 @@ mod tests {
         let webm = webm::Options {
             crf: Some(30),
             tempo: Some(2.0),
-            length: Some(1.0),
-            crop: Some(Crop::whole((8, 8))),
-            start: Some(1.5),
+            watermark: Some(false),
             integer_scale: Some(IntegerScale::NONE),
             ..webm::Options::default()
         };
         let picture = Options::from(&webm);
-        assert_eq!(crate::options::set_keys(&picture), ["crop", "integer-scale", "start"]);
+        assert_eq!(crate::options::set_keys(&picture), ["integer-scale", "watermark"]);
         let back = webm::Options::from(picture.clone());
-        assert_eq!(crate::options::set_keys(&back), ["crop", "integer-scale", "start"]);
+        assert_eq!(crate::options::set_keys(&back), ["integer-scale", "watermark"]);
         assert_eq!(Options::from(&back), picture);
         // every key of a picture's is WebM's, in WebM's order
         let webm_keys: Vec<String> = webm::Options::keys().collect();
