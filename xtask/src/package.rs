@@ -671,19 +671,17 @@ mod tests {
         assert!(links >= 5, "the README has {links} links to the latest release's files");
         // the AUR's: a release's files, by its tag
         for package in ["tgradish-bin", "tgradish-static-bin"] {
-            for file in ["PKGBUILD", ".SRCINFO"] {
-                let path = format!("packaging/aur/{package}/{file}");
-                let text = read(&path).replace("$_pkgname", "tgradish");
-                let downloads: Vec<&str> = text
-                    .split("/releases/download/")
-                    .skip(1)
-                    .map(|link| link.split_once('/').unwrap().1)
-                    .map(|link| link.split(['"', '\n', ')']).next().unwrap())
-                    .collect();
-                assert_eq!(downloads.len(), 2, "{path}: {downloads:?}");
-                for name in downloads {
-                    has(&path, name);
-                }
+            let path = format!("packaging/aur/{package}/PKGBUILD");
+            let text = read(&path).replace("$_pkgname", "tgradish");
+            let downloads: Vec<&str> = text
+                .split("/releases/download/")
+                .skip(1)
+                .map(|link| link.split_once('/').unwrap().1)
+                .map(|link| link.split(['"', '\n', ')']).next().unwrap())
+                .collect();
+            assert_eq!(downloads.len(), 2, "{path}: {downloads:?}");
+            for name in downloads {
+                has(&path, name);
             }
         }
     }
@@ -755,13 +753,9 @@ mod tests {
         {
             let described = format!("{SUMMARY}{note}");
             assert!(described.len() <= 80, "{described:?} is too long for a pkgdesc");
-            for (file, line) in [
-                ("PKGBUILD", format!("pkgdesc='{described}'")),
-                (".SRCINFO", format!("\tpkgdesc = {described}")),
-            ] {
-                let path = format!("packaging/aur/{package}/{file}");
-                assert!(read(&path).lines().any(|found| found == line), "{path} lacks {line:?}");
-            }
+            let (path, line) =
+                (format!("packaging/aur/{package}/PKGBUILD"), format!("pkgdesc='{described}'"));
+            assert!(read(&path).lines().any(|found| found == line), "{path} lacks {line:?}");
         }
     }
 }

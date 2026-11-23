@@ -2,7 +2,7 @@
 //!
 //! The main workspace version (`tgradish`, `tgradish-core`, `tgradish-gui`,
 //! `xtask`) appears in `[workspace.package]`, `[workspace.dependencies]`, both
-//! lock files, each AUR `PKGBUILD` and `.SRCINFO`, `CHANGELOG.md`, and
+//! lock files, each AUR `PKGBUILD`, `CHANGELOG.md`, and
 //! `crates/core/licenses/THIRD-PARTY-CRATES.txt` (which lists workspace crates
 //! with their versions). `tgradish-tgs` has an independent version in its
 //! manifest, `[workspace.dependencies]`, both lock files, and
@@ -85,10 +85,6 @@ pub fn pkgbuild(package: &str) -> String {
     format!("packaging/aur/{package}/PKGBUILD")
 }
 
-pub fn srcinfo(package: &str) -> String {
-    format!("packaging/aur/{package}/.SRCINFO")
-}
-
 /// Every file a version is written in, by its path from the repository's
 /// top.
 pub fn paths() -> Vec<String> {
@@ -98,7 +94,6 @@ pub fn paths() -> Vec<String> {
             .into();
     for package in AUR_PACKAGES {
         paths.push(pkgbuild(package));
-        paths.push(srcinfo(package));
     }
     paths
 }
@@ -129,8 +124,6 @@ const REPOSITORY: Field =
     Field { table: Some("[workspace.package]"), start: "repository = ", key: "repository = \"" };
 const PKGVER: Field = Field { table: None, start: "pkgver=", key: "pkgver=" };
 const PKGREL: Field = Field { table: None, start: "pkgrel=", key: "pkgrel=" };
-const SRCINFO_PKGVER: Field = Field { table: None, start: "pkgver = ", key: "pkgver = " };
-const SRCINFO_PKGREL: Field = Field { table: None, start: "pkgrel = ", key: "pkgrel = " };
 // what release builds are built with, see the workflow
 const TOOLCHAIN: Field =
     Field { table: None, start: "RUSTUP_TOOLCHAIN: ", key: "RUSTUP_TOOLCHAIN: \"" };
@@ -286,21 +279,6 @@ pub fn prepare(tree: &mut Tree, version: Version, tgs: Option<Version>, date: &s
         let path = pkgbuild(package);
         set(tree, &path, &PKGVER, &version.to_string())?;
         set(tree, &path, &PKGREL, "1")?;
-        let path = srcinfo(package);
-        set(tree, &path, &SRCINFO_PKGVER, &version.to_string())?;
-        set(tree, &path, &SRCINFO_PKGREL, "1")?;
-        // the downloads, named and found by the version
-        let text: String = file(tree, &path)?
-            .split_inclusive('\n')
-            .map(|line| {
-                if line.trim_start().starts_with("source") {
-                    line.replace(&previous.to_string(), &version.to_string())
-                } else {
-                    line.to_owned()
-                }
-            })
-            .collect();
-        tree.insert(path, text);
     }
     // as cargo-about would list them now
     let tgs = tgs_version(tree)?;
@@ -348,19 +326,6 @@ pub fn problems(tree: &Tree, tag: Option<&str>) -> Result<Vec<String>> {
         let path = pkgbuild(package);
         let pkgbuild = file(tree, &path)?;
         expect(&mut problems, format!("{path} pkgver"), PKGVER.get(pkgbuild)?, version);
-        let pkgrel = PKGREL.get(pkgbuild)?;
-        let path = srcinfo(package);
-        let srcinfo = file(tree, &path)?;
-        let (pkgver, srcinfo_pkgrel) = (SRCINFO_PKGVER.get(srcinfo)?, SRCINFO_PKGREL.get(srcinfo)?);
-        expect(&mut problems, format!("{path} pkgver"), pkgver, version);
-        if srcinfo_pkgrel != pkgrel {
-            problems.push(format!("{path} pkgrel is {srcinfo_pkgrel}, PKGBUILD has {pkgrel}"));
-        }
-        for line in srcinfo.lines().filter(|line| line.trim_start().starts_with("source")) {
-            if !line.contains(&format!("-{version}")) || !line.contains(&format!("/v{version}")) {
-                problems.push(format!("{path} downloads a different version: {}", line.trim()));
-            }
-        }
     }
     for path in [LOCK, LAB_LOCK] {
         let lock = file(tree, path)?;
@@ -483,12 +448,6 @@ mod tests {
                     "pkgname={package}\npkgver=2.0.0\npkgrel=2\nsource=(\"$pkgname-$pkgver.tar.gz::$url/v$pkgver.tar.gz\")\nsha256sums=('SKIP')\n"
                 ),
             );
-            add(
-                &srcinfo(package),
-                &format!(
-                    "pkgbase = {package}\n\tpkgver = 2.0.0\n\tpkgrel = 2\n\tsource_x86_64 = {package}-2.0.0-x86_64.tar.gz::https://github.com/sliva0/tgradish/releases/download/v2.0.0/tgradish-linux-x86_64.tar.gz\n\tsha256sums_x86_64 = SKIP\n\npkgname = {package}\n"
-                ),
-            );
         }
         tree
     }
@@ -574,7 +533,6 @@ mod tests {
         assert!(tree[MANIFEST].contains("version = \"=0.1.0\""));
         assert_eq!(tree[TGS_MANIFEST], before[TGS_MANIFEST]);
         assert!(tree[&pkgbuild("tgradish")].contains("pkgver=2.1.0\npkgrel=1\n"));
-        assert!(tree[&srcinfo("tgradish")].contains("\tpkgver = 2.1.0\n\tpkgrel = 1\n\tsource_x86_64 = tgradish-2.1.0-x86_64.tar.gz::https://github.com/sliva0/tgradish/releases/download/v2.1.0/"));
         assert!(
             tree[CHANGELOG].contains("## [Unreleased]\n\n## [2.1.0] - 2026-11-20\n\n### Fixed\n")
         );
@@ -633,8 +591,6 @@ mod tests {
                 "\"tgradish-corpus\"\nversion = \"1.9.0\"",
             ),
             ("packaging/aur/tgradish-bin/PKGBUILD", "pkgver=2.0.0", "pkgver=2.0.1"),
-            ("packaging/aur/tgradish-bin/.SRCINFO", "pkgrel = 2", "pkgrel = 1"),
-            ("packaging/aur/tgradish-bin/.SRCINFO", "/v2.0.0/", "/v1.0.0/"),
             (CHANGELOG, "## [2.0.0] - 2026-11-16", "## [2.0.0]"),
             (WORKFLOW, "\"1.99.0\"", "\"1.90.0\""),
             (
@@ -663,7 +619,7 @@ mod tests {
     }
 
     /// The packages named here are those in `packaging/aur`, each with a
-    /// PKGBUILD and a .SRCINFO, and the files of the version are all there.
+    /// PKGBUILD, and the files of the version are all there.
     #[test]
     fn the_repository_has_every_file() {
         let root = crate::workspace_root();

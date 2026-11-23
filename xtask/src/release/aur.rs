@@ -68,16 +68,13 @@ pub fn aur(args: &[String]) -> Result<()> {
         );
         run(git().args(["pull", "--ff-only", "origin", BRANCH]))?;
 
-        // the package's files, but .SRCINFO, which makepkg writes from
-        // the PKGBUILD with its checksums
+        // the package's files; .SRCINFO isn't one, as makepkg writes it
+        // from the PKGBUILD with its checksums
         let source = format!("packaging/aur/{package}");
         let tracked = output(Command::new("git").current_dir(root).args(["ls-files", &source]))?;
         let mut files = Vec::new();
         for path in tracked.lines() {
             let name = path.strip_prefix(&source).unwrap().trim_start_matches('/');
-            if name == ".SRCINFO" {
-                continue;
-            }
             let to = dir.join(name);
             std::fs::create_dir_all(to.parent().unwrap())?;
             std::fs::copy(root.join(path), &to)
@@ -256,17 +253,22 @@ pkgname = tgradish-bin
         assert_eq!(sums["b.tar.gz"], "def");
     }
 
-    /// The packages' PKGBUILDs keep their sums on one line each, which
-    /// [`set_sums`] needs.
+    /// The packages' PKGBUILDs keep the sums of each architecture's
+    /// sources on one line, which [`set_sums`] needs.
     #[test]
     fn the_pkgbuilds_have_sums_to_set() {
         let root = workspace_root();
         for package in AUR_PACKAGES {
             let pkgbuild = std::fs::read_to_string(root.join(version::pkgbuild(package))).unwrap();
-            let srcinfo = std::fs::read_to_string(root.join(version::srcinfo(package))).unwrap();
-            for (arch, sources) in sources(&srcinfo) {
-                let sums = vec!["0".repeat(64); sources.len()];
-                set_sums(&pkgbuild, &arch, &sums).unwrap();
+            let arches: Vec<&str> = pkgbuild
+                .lines()
+                .filter_map(|line| {
+                    line.strip_prefix("source")?.split_once("=(").map(|(arch, _)| arch)
+                })
+                .collect();
+            assert!(!arches.is_empty(), "{package} downloads nothing");
+            for arch in arches {
+                set_sums(&pkgbuild, arch, &["0".repeat(64)]).unwrap();
             }
         }
     }
