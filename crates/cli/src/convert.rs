@@ -1221,6 +1221,92 @@ mod tests {
         assert_eq!(layered.unwrap(), webm(kept));
     }
 
+    /// `--options-json` takes every key its format uses, by its old name
+    /// too, and the options it makes are written back as it was given,
+    /// in the current names.
+    #[test]
+    fn options_json_takes_every_key_its_format_uses() {
+        use serde_json::json;
+        // a preset of nothing, so only the JSON's are written back
+        let presets = presets(&[("none", "")]);
+        let config = Config::default();
+        let picture = json!({
+            "target": "emoji",
+            "tag": "idle",
+            "show-layers": ["Hat"],
+            "hide-layers": ["Sketch", "Guides"],
+            "crop": { "x": 1, "y": 2, "width": 30, "height": 40 },
+            "resize": "pad",
+            "scaling": "integer",
+            "integer-scale": "1/2",
+            "start": 1.25,
+            "title": "pig",
+            "watermark": false,
+        });
+        let mut webm = picture.clone();
+        webm.as_object_mut().unwrap().extend(
+            json!({
+                "fit": "crf",
+                "attempts": 5,
+                "fit-range": { "min": 4.0, "max": 40.5 },
+                "length": 2.0,
+                "tempo": 1.5,
+                "fps": 24.0,
+                "bitrate": 600.0,
+                "crf": 30,
+                "effort": "best",
+                "lossless": false,
+                "spoof": "never",
+                "fake-duration": 0.5,
+                "encoder-options": { "tune-content": "screen" },
+                "ffmpeg-args": ["-x", "a b"],
+            })
+            .as_object()
+            .unwrap()
+            .clone(),
+        );
+        let tgs = json!({
+            "target": "emoji",
+            "start": 0.5,
+            "length": 1.5,
+            "tempo": 0.5,
+            "effort": "fast",
+            "exact": false,
+            "reductions": ["merge-colours", "drop-frames"],
+            "compromise": "detail",
+            "crop": { "x": 0, "y": 0, "width": 8, "height": 8 },
+            "resize": "stretch",
+            "keep-canvas": true,
+            "pixel-scale": 2,
+            "tag": "run",
+            "show-layers": ["Outline"],
+            "hide-layers": ["Sketch"],
+            "sheet": "4x2",
+            "sheet-frames": 7,
+            "fps": 12.5,
+            "title": "pig",
+            "watermark": true,
+        });
+        let old_webm = json!({ "speed": "best", "scaling": "pixel-perfect", "exact-scale": "2" });
+        let new_webm = json!({ "scaling": "integer", "integer-scale": "2", "effort": "best" });
+        let old_picture = json!({ "scaling": "pixel-perfect", "exact-scale": "2" });
+        let new_picture = json!({ "scaling": "integer", "integer-scale": "2" });
+        for (format, given, written) in [
+            (Format::Webm, &webm, &webm),
+            (Format::Webp, &picture, &picture),
+            (Format::Tgs, &tgs, &tgs),
+            (Format::Webm, &old_webm, &new_webm),
+            (Format::Webp, &old_picture, &new_picture),
+            (Format::Tgs, &json!({ "speed": "fast" }), &json!({ "effort": "fast" })),
+        ] {
+            let args = args(&["-p", "none"]);
+            assert_eq!(args.options.unused(format, given.as_object()), [""; 0], "{format:?}");
+            let layered = layered(&presets, &config, format, &["-p", "none"], Some(given.clone()));
+            let layered = layered.unwrap_or_else(|err| panic!("{format:?}: {err}"));
+            assert_eq!(&serde_json::to_value(&layered).unwrap(), written, "{format:?}");
+        }
+    }
+
     fn default<T: Default>() -> T {
         T::default()
     }

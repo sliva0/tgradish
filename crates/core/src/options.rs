@@ -872,6 +872,166 @@ mod tests {
         assert_eq!(serde_json::to_value(sheet).unwrap(), "4x2");
     }
 
+    /// WebM's options, every one set.
+    fn every_webm_option() -> Options {
+        Options {
+            target: Some(Target::Emoji),
+            tag: Some("idle".into()),
+            show_layers: Some(vec!["Hat".into()]),
+            hide_layers: Some(vec!["Sketch".into(), "Guides".into()]),
+            crop: Some(Crop { x: 1, y: 2, width: 30, height: 40 }),
+            resize: Some(Resize::Pad),
+            scaling: Some(Scaling::Integer),
+            integer_scale: Some(IntegerScale { up: 1, down: 2 }),
+            fit: Some(Fit::Crf),
+            attempts: Some(5),
+            fit_range: Some(Range { min: 4.0, max: 40.5 }),
+            start: Some(1.25),
+            length: Some(2.0),
+            tempo: Some(1.5),
+            fps: Some(24.0),
+            bitrate: Some(600.0),
+            crf: Some(30),
+            effort: Some(Effort::Best),
+            lossless: Some(false),
+            spoof: Some(Spoof::Never),
+            fake_duration: Some(0.5),
+            title: Some("pig".into()),
+            watermark: Some(false),
+            encoder_options: Some([("tune-content".into(), "screen".into())].into()),
+            ffmpeg_args: Some(vec!["-x".into(), "a b".into()]),
+        }
+    }
+
+    /// `.tgs`'s options, every one set.
+    fn every_tgs_option() -> crate::tgs::Options {
+        use tgradish_tgs::reduce::{Compromise, Kind};
+        crate::tgs::Options {
+            target: Some(Target::Emoji),
+            start: Some(0.5),
+            length: Some(1.5),
+            tempo: Some(0.5),
+            effort: Some(Effort::Fast),
+            exact: Some(false),
+            reductions: Some(vec![Kind::MergeColours, Kind::DropFrames]),
+            compromise: Some(Compromise::Detail),
+            crop: Some(Crop { x: 0, y: 0, width: 8, height: 8 }),
+            resize: Some(Resize::Stretch),
+            keep_canvas: Some(true),
+            pixel_scale: Some(2),
+            tag: Some("run".into()),
+            show_layers: Some(vec!["Outline".into()]),
+            hide_layers: Some(vec!["Sketch".into()]),
+            sheet: Some(Sheet { columns: 4, rows: 2 }),
+            sheet_frames: Some(7),
+            fps: Some(12.5),
+            title: Some("pig".into()),
+            watermark: Some(true),
+        }
+    }
+
+    /// Every option as JSON and TOML spell and order it: as `--json`,
+    /// `preset show` and the GUI's session write it, and as presets and
+    /// `--options-json` read it. A change here is one to those files.
+    #[test]
+    fn writes_every_option_as_files_hold_it() {
+        let webm = every_webm_option();
+        let json = concat!(
+            r#"{"target":"emoji","tag":"idle","show-layers":["Hat"],"#,
+            r#""hide-layers":["Sketch","Guides"],"#,
+            r#""crop":{"x":1,"y":2,"width":30,"height":40},"#,
+            r#""resize":"pad","scaling":"integer","integer-scale":"1/2","fit":"crf","#,
+            r#""attempts":5,"fit-range":{"min":4.0,"max":40.5},"start":1.25,"#,
+            r#""length":2.0,"tempo":1.5,"fps":24.0,"bitrate":600.0,"crf":30,"#,
+            r#""effort":"best","lossless":false,"spoof":"never","fake-duration":0.5,"#,
+            r#""title":"pig","watermark":false,"#,
+            r#""encoder-options":{"tune-content":"screen"},"ffmpeg-args":["-x","a b"]}"#,
+        );
+        assert_eq!(serde_json::to_string(&webm).unwrap(), json);
+        assert_eq!(serde_json::from_str::<Options>(json).unwrap(), webm);
+        // tables last, as TOML puts them
+        let toml = "\
+target = \"emoji\"
+tag = \"idle\"
+show-layers = [\"Hat\"]
+hide-layers = [\"Sketch\", \"Guides\"]
+resize = \"pad\"
+scaling = \"integer\"
+integer-scale = \"1/2\"
+fit = \"crf\"
+attempts = 5
+start = 1.25
+length = 2.0
+tempo = 1.5
+fps = 24.0
+bitrate = 600.0
+crf = 30
+effort = \"best\"
+lossless = false
+spoof = \"never\"
+fake-duration = 0.5
+title = \"pig\"
+watermark = false
+ffmpeg-args = [\"-x\", \"a b\"]
+
+[crop]
+x = 1
+y = 2
+width = 30
+height = 40
+
+[fit-range]
+min = 4.0
+max = 40.5
+
+[encoder-options]
+tune-content = \"screen\"
+";
+        assert_eq!(toml::to_string(&webm).unwrap(), toml);
+        assert_eq!(toml::from_str::<Options>(toml).unwrap(), webm);
+
+        let tgs = every_tgs_option();
+        let json = concat!(
+            r#"{"target":"emoji","start":0.5,"length":1.5,"tempo":0.5,"effort":"fast","#,
+            r#""exact":false,"reductions":["merge-colours","drop-frames"],"#,
+            r#""compromise":"detail","crop":{"x":0,"y":0,"width":8,"height":8},"#,
+            r#""resize":"stretch","keep-canvas":true,"pixel-scale":2,"tag":"run","#,
+            r#""show-layers":["Outline"],"hide-layers":["Sketch"],"sheet":"4x2","#,
+            r#""sheet-frames":7,"fps":12.5,"title":"pig","watermark":true}"#,
+        );
+        assert_eq!(serde_json::to_string(&tgs).unwrap(), json);
+        assert_eq!(serde_json::from_str::<crate::tgs::Options>(json).unwrap(), tgs);
+        let toml = "\
+target = \"emoji\"
+start = 0.5
+length = 1.5
+tempo = 0.5
+effort = \"fast\"
+exact = false
+reductions = [\"merge-colours\", \"drop-frames\"]
+compromise = \"detail\"
+resize = \"stretch\"
+keep-canvas = true
+pixel-scale = 2
+tag = \"run\"
+show-layers = [\"Outline\"]
+hide-layers = [\"Sketch\"]
+sheet = \"4x2\"
+sheet-frames = 7
+fps = 12.5
+title = \"pig\"
+watermark = true
+
+[crop]
+x = 0
+y = 0
+width = 8
+height = 8
+";
+        assert_eq!(toml::to_string(&tgs).unwrap(), toml);
+        assert_eq!(toml::from_str::<crate::tgs::Options>(toml).unwrap(), tgs);
+    }
+
     #[test]
     fn reads_kebab_case_toml() {
         let options: Options = toml::from_str(

@@ -41,6 +41,13 @@ struct Read {
     window: Option<serde_json::Value>,
 }
 
+/// The session as its file holds it. Kept: each item's inputs (or its
+/// pasted image's copy), whether they are a sequence, its format and
+/// whether that was guessed, its [`Choices`] whole, and its last result
+/// with the [`Recipe`] that made it; which item is selected; and the
+/// window's layout. tests/data/session-v1.json is a session as version 1
+/// writes it: every later version must still read it, restore its items
+/// with their results current, and write it again as it was.
 #[derive(Debug, Default, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) struct Session {
@@ -864,6 +871,48 @@ mod tests {
         // and one of the session's own leaves out all of it
         let newer = text.replacen('{', r#"{"made-up":1,"#, 1);
         assert!(parse(&newer).is_none(), "{newer}");
+    }
+
+    /// A session as version 1 writes it, kept as a file: a WebM with its
+    /// result, a sprite sheet's `.tgs` and a picture with theirs, a pasted
+    /// image, an Aseprite file's tag and layers, and frames of a sequence.
+    /// Its files were in `@DIR@`.
+    const VERSION_1: &str = include_str!("../tests/data/session-v1.json");
+
+    /// Every later version must read a session this one wrote, take each
+    /// result as what converting makes now, and write it again as it was.
+    #[test]
+    fn reads_a_session_version_1_wrote() {
+        use tgradish_core::presets::Presets;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("session.json");
+        // its files where it says, which restoring looks for
+        let quoted = serde_json::to_string(dir.path().to_str().unwrap()).unwrap();
+        let text = VERSION_1.trim_end().replace("@DIR@", quoted.trim_matches('"'));
+        let files = ["clip.mp4", "sheet.png", "photo.png", "walk.aseprite", "frames/1.png"];
+        for name in files.iter().chain(&["frames/2.png", "pasted/19a0-4.png"]) {
+            let file = dir.path().join(name);
+            std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+            std::fs::write(file, b"").unwrap();
+        }
+        std::fs::write(&path, &text).unwrap();
+        let loaded = Store::open(path.clone()).unwrap().read().unwrap();
+        assert!(loaded.unreadable.is_none());
+        let window = loaded.session.window;
+        let restored = loaded.session.restore(&path, 1);
+        assert_eq!((restored.items.len(), restored.gone, restored.selected), (6, 0, Some(3)));
+        let mut items = restored.items;
+        let (presets, config) = (Presets::builtin(), crate::config::Config::default());
+        for item in &mut items {
+            item.recipe = item.choices.recipe(item.format, &presets, &config).ok();
+            // as an earlier result is taken up once found on disk
+            item.made = item.earlier.take().map(|(earlier, _)| earlier);
+        }
+        let current: Vec<bool> = items.iter().map(Item::result_is_current).collect();
+        assert_eq!(current, [true, true, true, false, false, false]);
+        let written = restored.written.into_iter().collect();
+        let again = Session::of(&items, restored.selected, &written).with_window(window);
+        assert_eq!(again.to_json().unwrap(), text);
     }
 
     #[test]
