@@ -10,7 +10,7 @@ How many crates each licence covers:
 --------------------------------------------------------------------------------
 {{name}}, used by:
 {{#each used_by}}
-  {{crate.name}} {{crate.version}}
+  {{crate.name}}{{#if crate.source}} {{crate.version}}{{/if}}
 {{/each}}
 
 {{{text}}}

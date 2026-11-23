@@ -4333,10 +4333,10 @@ SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License, used by:
-  tgradish 2.1.1
-  tgradish-core 2.1.1
-  tgradish-gui 2.1.1
-  tgradish-tgs 0.2.0
+  tgradish
+  tgradish-core
+  tgradish-gui
+  tgradish-tgs
 
 MIT License
 
@@ -4363,7 +4363,7 @@ SOFTWARE.
 
 --------------------------------------------------------------------------------
 MIT License, used by:
-  tgradish-gui 2.1.1
+  tgradish-gui
 
 MIT License
 

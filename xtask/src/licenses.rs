@@ -5,7 +5,8 @@
 //! The generated list is committed so builds do not require network access or
 //! `cargo-about`, and its sections are sorted so licences and crates are easy
 //! to look up. CI runs `--check` to catch outdated notices after dependency
-//! changes.
+//! changes. `xtask/about.hbs` leaves out the versions of the workspace's own
+//! crates, which have no `source`, so that a release doesn't change the list.
 
 use std::path::{Path, PathBuf};
 
