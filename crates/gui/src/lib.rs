@@ -202,7 +202,7 @@ pub fn run(launch: Launch) -> Result<Started, Error> {
                 ..App::new(launch, store, listener)
             };
             app.style(&cc.egui_ctx);
-            if let Some(listener) = &app.instance {
+            if let Some(listener) = &app.handover.listener {
                 listener.attach(&cc.egui_ctx);
                 #[cfg(all(unix, not(target_os = "macos")))]
                 if let Some(window) = cc.winit_window() {

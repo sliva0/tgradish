@@ -460,6 +460,55 @@ impl Listener {
     }
 }
 
+/// What GUIs started later hand this one, and the window brought forward
+/// for it: `App` adds the files.
+#[derive(Default)]
+pub(crate) struct Handover {
+    /// Where GUIs started while this one runs hand it their files.
+    pub(crate) listener: Option<Listener>,
+    /// The window asked for attention, for files handed over, until it
+    /// has the focus.
+    pub(crate) attention: bool,
+}
+
+impl Handover {
+    /// The files GUIs started since handed over, once the attention asked
+    /// for them is let go of where the window has the focus by now.
+    pub(crate) fn take(&mut self, ctx: &egui::Context) -> Vec<Handed> {
+        let focused = ctx.input(|input| input.viewport().focused == Some(true));
+        if self.attention && focused {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Reset,
+            ));
+            self.attention = false;
+        }
+        self.listener.as_ref().map(Listener::poll).unwrap_or_default()
+    }
+
+    /// Brings the window forward for files handed over: where it was
+    /// `raised` with a token already, as on Wayland, by egui's means too,
+    /// and where it wasn't, asking for attention as well, as a system may
+    /// not let a window take the focus itself.
+    pub(crate) fn come_forward(&mut self, ctx: &egui::Context, raised: bool) {
+        let (minimized, focused) = ctx.input(|input| {
+            let viewport = input.viewport();
+            (viewport.minimized == Some(true), viewport.focused == Some(true))
+        });
+        // restored only from being minimised, as Windows would restore a
+        // maximised window too
+        if minimized {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
+        }
+        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
+        if !raised && !focused {
+            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
+                egui::UserAttentionType::Informational,
+            ));
+            self.attention = true;
+        }
+    }
+}
+
 /// Reads one GUI's message from `link`, answers it, and passes it on
 /// once that GUI says it leaves the files to this one, all by `deadline`;
 /// anything else is let go of unanswered.

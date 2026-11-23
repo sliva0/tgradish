@@ -81,11 +81,8 @@ pub(crate) struct App {
     pub(crate) scaling: crate::scaling::Scaling,
     /// Where and when the session is kept, and the window's layout in it.
     pub(crate) keeping: session::Keeping,
-    /// Where GUIs started while this one runs hand it their files.
-    pub(crate) instance: Option<instance::Listener>,
-    /// The window asked for attention, for files handed over, until it
-    /// has the focus.
-    pub(crate) attention: bool,
+    /// What GUIs started while this one runs hand it.
+    pub(crate) handover: instance::Handover,
     /// The system's fonts for what tgradish's own lack.
     pub(crate) fallbacks: fallback::Fallbacks,
     /// What the texts were when fonts were last looked for them.
@@ -159,7 +156,7 @@ impl App {
         if let Some(store) = session {
             app.resume(store);
         }
-        app.instance = listener;
+        app.handover.listener = listener;
         app.add(launch.files);
         app
     }
@@ -252,21 +249,9 @@ impl App {
 
     /// Adds the files GUIs started since handed over, as dropped files
     /// are, whatever dialog is open, and brings the window forward for
-    /// them: where it was raised with a token already, as on Wayland, by
-    /// egui's means too, and where it wasn't, asking for attention as
-    /// well, as a system may not let a window take the focus itself.
+    /// them.
     fn take_handed(&mut self, ctx: &egui::Context) {
-        let (minimized, focused) = ctx.input(|input| {
-            let viewport = input.viewport();
-            (viewport.minimized == Some(true), viewport.focused == Some(true))
-        });
-        if self.attention && focused {
-            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
-                egui::UserAttentionType::Reset,
-            ));
-            self.attention = false;
-        }
-        let handed = self.instance.as_ref().map(instance::Listener::poll).unwrap_or_default();
+        let handed = self.handover.take(ctx);
         if handed.is_empty() {
             return;
         }
@@ -274,18 +259,7 @@ impl App {
         for handed in handed {
             self.add(handed.files);
         }
-        // restored only from being minimised, as Windows would restore a
-        // maximised window too
-        if minimized {
-            ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(false));
-        }
-        ctx.send_viewport_cmd(egui::ViewportCommand::Focus);
-        if !raised && !focused {
-            ctx.send_viewport_cmd(egui::ViewportCommand::RequestUserAttention(
-                egui::UserAttentionType::Informational,
-            ));
-            self.attention = true;
-        }
+        self.handover.come_forward(ctx, raised);
     }
 
     /// Keeps the open files and their settings, if they changed.
@@ -336,8 +310,7 @@ impl App {
             scale_shown: None,
             scaling: Default::default(),
             keeping: session::Keeping::default(),
-            instance: None,
-            attention: false,
+            handover: instance::Handover::default(),
             fallbacks: fallback::Fallbacks::new(fonts()),
             fonts_checked: None,
             banner: Banner::default(),
@@ -1024,7 +997,7 @@ pub(crate) fn set_theme(ctx: &egui::Context, theme: crate::config::Theme) {
 impl eframe::App for App {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         // the window is let go of next
-        if let Some(instance) = &self.instance {
+        if let Some(instance) = &self.handover.listener {
             instance.detach();
         }
         self.save_session();
@@ -1336,7 +1309,7 @@ mod tests {
         let mut first = harness(Config::default());
         listener.attach(&first.ctx);
         first.state_mut().resume(store);
-        first.state_mut().instance = Some(listener);
+        first.state_mut().handover.listener = Some(listener);
         // behind a dialog, as a drop is
         first.state_mut().dialogs.about = true;
         first.run_steps(2);
