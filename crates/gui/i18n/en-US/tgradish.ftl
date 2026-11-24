@@ -37,6 +37,9 @@ drop-here-note = To convert into a video, animated, or static sticker or emoji
 
 ## What to make, beside the preview
 
+preset =
+    .image = A static sticker takes only the preset's picture settings, how it is squared and scaled: it is saved lossless where that fits, otherwise at the best quality that still fits
+    .missing = There is no preset "{ $name }" anymore: pick another
 manage-presets =
     .hint = Rename, describe, or delete your presets
 
@@ -92,6 +95,7 @@ step-colours = colors closer than { $distance }% merged
 
 ## What went wrong, as converting or reading a file reports it
 
+no-such-file = { $name } isn't there anymore
 not-sticker = { $name } isn't a sticker: a WebM, WebP, or .tgs file
 nothing-fits = Nothing fits the { $limit } limit: the smallest encode was { $smallest }. A shorter used part, a lower frame rate, or a wider range to search within can help
 
@@ -115,3 +119,5 @@ about-summary = Telegram stickers and emoji from videos, images, or pixel art. M
 about-notices = tgradish is built from other people's work too. Their licenses ask for these notices to go with every copy, so the program carries them:
 notice-licence = { $name }: license
 notice-licence-notes = { $name }: license notes
+notice-crates-licence =
+    .more = { $licence }: { $crates }, and { $more } more
