@@ -873,12 +873,13 @@ fn headline_and_buttons(ui: &mut egui::Ui, said: &Said, column: f32, row: &mut R
     });
 }
 
-/// The button of `action`, taking in what it did into `row`.
+/// The button of `action`, taking in what it did into `row`: on one line,
+/// going on to the next whole where there isn't room for it on this one.
 fn action_button(ui: &mut egui::Ui, action: Action, row: &mut Row) {
     let label = action.label();
     let response = if action.primary() {
         let button = egui::Button::new(label).stroke(theme::on_outline(ui.visuals()));
-        ui.add(button)
+        ui.add(button.wrap_mode(egui::TextWrapMode::Extend))
     } else {
         link_button(ui, label)
     };
@@ -973,8 +974,8 @@ fn link_button(ui: &mut egui::Ui, text: String) -> egui::Response {
     let colour = ui.visuals().hyperlink_color;
     ui.scope(|ui| {
         ui.spacing_mut().button_padding.x = 0.0;
-        let response =
-            ui.add(egui::Button::new(egui::RichText::new(text).color(colour)).frame(false));
+        let button = egui::Button::new(egui::RichText::new(text).color(colour)).frame(false);
+        let response = ui.add(button.wrap_mode(egui::TextWrapMode::Extend));
         if response.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
         }
