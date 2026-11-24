@@ -82,17 +82,17 @@ folder-of = Mostrar na pasta
     .hint = Abrir a pasta onde ele está
 presets-unreadable = Não foi possível ler suas predefinições, então só as embutidas estão disponíveis
 files-gone = { $count ->
-    [one] { $count } arquivo da última vez não existe mais
-    [many] { $count } arquivos da última vez não existem mais
-   *[other] { $count } arquivos da última vez não existem mais
+    [one] { $count } arquivo da sessão anterior não existe mais
+    [many] { $count } arquivos da sessão anterior não existem mais
+   *[other] { $count } arquivos da sessão anterior não existem mais
 }
-session-unreadable = Não foi possível ler os arquivos da última vez, então nenhum foi aberto; a lista deles foi guardada à parte
+session-unreadable = Não foi possível ler os arquivos da sessão anterior, então nenhum foi aberto; a lista deles foi guardada à parte
 files-unreadable = { $count ->
-    [one] { $count } arquivo da última vez não pôde ser lido e ficou de fora; a lista como estava foi guardada à parte
-    [many] { $count } arquivos da última vez não puderam ser lidos e ficaram de fora; a lista como estava foi guardada à parte
-   *[other] { $count } arquivos da última vez não puderam ser lidos e ficaram de fora; a lista como estava foi guardada à parte
+    [one] { $count } arquivo da sessão anterior não pôde ser lido e ficou de fora; a lista como estava foi guardada à parte
+    [many] { $count } arquivos da sessão anterior não puderam ser lidos e ficaram de fora; a lista como estava foi guardada à parte
+   *[other] { $count } arquivos da sessão anterior não puderam ser lidos e ficaram de fora; a lista como estava foi guardada à parte
 }
-session-unsaved = Não foi possível guardar os arquivos abertos para a próxima vez
+session-unsaved = Não foi possível guardar os arquivos abertos para a próxima sessão
 nothing-to-paste = Nada para colar
     .why = A área de transferência não tem arquivos, caminhos de arquivo nem imagem
 paste-failed = Não foi possível ler a área de transferência
@@ -130,7 +130,7 @@ menu-redo = Refazer
     .hint = A última alteração desfeita
 menu-settings = Configurações…
 inspect = Inspecionar figurinha…
-    .hint = Conferir um arquivo com os limites do Telegram
+    .hint = Verificar se um arquivo atende aos limites do Telegram
 feedback = Enviar feedback
     .hint = Escrever ao autor no Telegram: no app, se estiver instalado, ou no navegador
 about-and-licences = Sobre e licenças…
@@ -187,7 +187,7 @@ keep-best = Manter o melhor
 keeping-best = Mantendo o melhor…
 cancel-waiting = Cancelar
 next-to-convert = Próximo a converter
-waiting-for = Aguardando mais { $ahead }
+waiting-for = Na fila, { $ahead } à frente
 convert-again = Converter de novo
     .changed = Desatualizado: criar de novo com as configurações atuais
     .hint = Criar de novo com as mesmas configurações
@@ -250,7 +250,7 @@ zoom-out = Diminuir zoom
     .hint = Mostrar tudo
     .all = O zoom já está no mínimo
 input-hint = Arraste para recortar · role para dar zoom · botão direito para mover
-crop-hint = Arraste o recorte ou suas bordas · clique duplo para tudo
+crop-hint = Arraste o recorte ou suas bordas · clique duplo para a imagem toda
 result-hint = Role para dar zoom · botão direito para mover
 unreadable = Não foi possível ler: { $error }
 reading = Lendo…
@@ -316,7 +316,7 @@ manage-presets = Gerenciar…
     .hint = Renomear, descrever ou excluir suas predefinições
 preset-fast = Rápida
     .webm = Ajusta só a taxa de bits, com o codificador rápido: leva segundos, mas fica mais borrado
-    .tgs = Leva menos de um segundo, alguns por cento maior
+    .tgs = Leva menos de um segundo, arquivo um pouco maior
 preset-balanced = Equilibrada
     .webm = Ajusta a taxa de bits e tenta taxas de quadros menores quando podem ficar melhores
     .tgs = Entre a rápida e a melhor
@@ -496,7 +496,7 @@ fitting-off = “{ fit-off }” codifica uma vez
 attempts = Codificar até
     .hint = Quantas vezes o ajuste pode codificar, no máximo
 attempts-default = Padrão
-    .hint = O bastante para chegar a poucos por cento do limite de tamanho do arquivo na maioria das entradas
+    .hint = O bastante para ficar só alguns por cento abaixo do limite de tamanho do arquivo na maioria das entradas
 attempts-times = { $count ->
     [one] vez
     [many] vezes
@@ -533,7 +533,7 @@ bitrate-auto = Pelo limite de tamanho
 tgs-encoder = Esforço do codificador
     .hint = Quanto se esforçar para achar uma codificação pequena
 tgs-fast = Rápido
-    .hint = Leva menos de um segundo, alguns por cento maior
+    .hint = Leva menos de um segundo, arquivo um pouco maior
 tgs-balanced = Equilibrado
 tgs-best = Melhor
     .hint = Leva alguns segundos, o menor arquivo
@@ -550,7 +550,7 @@ give-up-motion = Movimento
 give-up-detail = Detalhes
     .hint = A imagem fica mais grosseira primeiro: movimento fluido, menos detalhes
 ways-to-fit = Como fazer caber
-    .hint = O que o ajuste pode fazer com a pixel art para ela caber em 64 KiB, do menos visível ao mais
+    .hint = O que o ajuste pode fazer com a pixel art para ela caber em 64 KiB, do menos ao mais visível
 reduce-snap = Alinhar à grade de pixels
     .hint = Move pixels soltos para a grade de pixels da arte
 reduce-colours = Fundir cores parecidas
@@ -671,12 +671,12 @@ plan-tag = Reprodução da tag “{ $tag }”
 plan-tag-reverse = Reprodução da tag “{ $tag }”, ao contrário
 plan-tag-ping-pong = Reprodução da tag “{ $tag }”, em ida e volta
 plan-tag-pong-ping = Reprodução da tag “{ $tag }”, em volta e ida
-plan-cropped = Recorte em { $width } × { $height }
+plan-cropped = Recorte para { $width } × { $height }
 plan-frame = Uso do quadro em { $time }
 plan-scaled = Redimensionamento para { $width } × { $height }
 plan-stretched-across = Esticamento ×{ $factor } na horizontal
 plan-stretched-down = Esticamento ×{ $factor } na vertical
-plan-middle-cut = Corte do centro em { $width } × { $height }
+plan-middle-cut = Corte do centro para { $width } × { $height }
 plan-padded = Preenchimento até { $width } × { $height }
 plan-trimmed = Corte das bordas até os pixels visíveis
 plan-grid = Alinhamento dos pixels a uma grade de { $scale } × { $scale }
@@ -699,8 +699,8 @@ copy = Copiar
 commands-posix = A mesma conversão na linha de comando, para um shell POSIX:
 commands-powershell = A mesma conversão na linha de comando, para o PowerShell:
 pasted-temporary = Uma imagem colada fica em uma pasta temporária, que some quando o tgradish fecha
-ffmpeg-commands = Os comandos do ffmpeg da primeira codificação; o ajuste muda a taxa, e talvez a taxa de quadros, entre uma codificação e outra:
-    .builtin = O que o ffmpeg embutido faz na primeira codificação, como comandos para o ffmpeg do sistema; o ajuste muda a taxa, e talvez a taxa de quadros, entre uma codificação e outra:
+ffmpeg-commands = Os comandos do ffmpeg da primeira codificação; o ajuste muda a taxa de bits ou a qualidade, e talvez a taxa de quadros, entre uma codificação e outra:
+    .builtin = O que o ffmpeg embutido faz na primeira codificação, como comandos para o ffmpeg do sistema; o ajuste muda a taxa de bits ou a qualidade, e talvez a taxa de quadros, entre uma codificação e outra:
 no-ffmpeg-commands = Sem comandos do ffmpeg: { $why }
     .unread = a entrada ainda não foi lida
     .art = o ffmpeg lê um PNG que cada conversão desenha a partir da pixel art
@@ -713,7 +713,7 @@ saved-to = Salvo em { $path }
     .kept = Salvo em { $path }; o arquivo que não pôde ser lido foi mantido como { $kept }
 not-saved = Não foi possível salvar: { $error }
 no-home = Não há pasta pessoal para guardar as configurações
-settings-note = As alterações são aplicadas e guardadas na hora
+settings-note = As alterações são aplicadas e salvas na hora
 reset-settings = Restaurar padrões
     .hint = Devolver cada configuração daqui ao valor original do tgradish
 ffmpeg-given = Esta execução usa o ffmpeg indicado ao iniciar o tgradish; estas configurações valem quando ele é iniciado sem indicar um
@@ -791,7 +791,7 @@ accent-hue = Matiz
 accent-hex = Hex
     .wrong = Escreva como # e seis dígitos hexadecimais, como #3daee9
 files = Arquivos
-reopen-files = Reabrir os arquivos da última vez, com suas configurações
+reopen-files = Reabrir os arquivos da sessão anterior, com suas configurações
 motion = Movimento
     .hint = Quando o sistema pede menos movimento, nada se move de qualquer forma
 motion-on = Suavizar a rolagem, e esmaecer e mover o que muda
@@ -816,15 +816,15 @@ converting = Convertendo
 stage-reading = Lendo a pixel art
 stage-drawing = Convertendo para vetor
 stage-fitting-steps = { $count ->
-    [one] Ajustando a 64 KiB: { $count } etapa, cerca de { $size }
-    [many] Ajustando a 64 KiB: { $count } etapas, cerca de { $size }
-   *[other] Ajustando a 64 KiB: { $count } etapas, cerca de { $size }
+    [one] Ajustando para 64 KiB: { $count } etapa, cerca de { $size }
+    [many] Ajustando para 64 KiB: { $count } etapas, cerca de { $size }
+   *[other] Ajustando para 64 KiB: { $count } etapas, cerca de { $size }
 }
-stage-fitting-from = Ajustando a 64 KiB a partir de { $size }
-stage-compressing = Comprimindo
-    .hopeless = Comprimindo rápido: não vai caber
-    .missed = Comprimido → { $size }, grande demais
-    .missed-far = Comprimindo: ainda muito grande
+stage-fitting-from = Ajustando para 64 KiB a partir de { $size }
+stage-compressing = Compactando
+    .hopeless = Compactando rápido: não vai caber
+    .missed = Compactado → { $size }, grande demais
+    .missed-far = Compactando: ainda muito grande
 retry = Tentativa { $number }: mirando em { $aim }
 retry-done = Tentativa { $number }: mirando em { $aim } → { $size }, grande demais
     .far = Tentativa { $number }: mirando em { $aim } → ainda muito grande
@@ -899,7 +899,7 @@ issue-count =
     .paint-sources = Máximo de formas pintadas numa camada: { $count }, acima do limite de { $limit } dos apps do Telegram
     .path-points = Máximo de pontos num caminho: { $count }, acima do limite de { $limit } dos apps do Telegram
     .keyframes = Máximo de quadros-chave numa propriedade: { $count }, acima do limite de { $limit } dos apps do Telegram
-    .assets = Ativos: { $count }, acima do limite de { $limit } dos apps do Telegram
+    .assets = Assets: { $count }, acima do limite de { $limit } dos apps do Telegram
     .expanded-layers = Camadas com as pré-composições expandidas: { $count }, acima do limite de { $limit } dos apps do Telegram
     .nesting = Níveis de aninhamento no JSON: { $count }, acima do limite de { $limit } dos apps do Telegram
     .group-depth = Níveis de grupos dentro de grupos: { $count }, acima do limite de { $limit } dos apps do Telegram
@@ -984,7 +984,7 @@ unreadable-file = Não foi possível ler { $name }: { $details }
 no-video = { $name } não tem vídeo
 no-such-file = { $name } não existe mais
 not-webm = { $name } não é um arquivo WebM
-not-sticker = { $name } não é uma figurinha: um arquivo WebM, WebP ou .tgs
+not-sticker = { $name } não é uma figurinha (um arquivo WebM, WebP ou .tgs)
 no-frame-at = { $name } não tem quadro em { $seconds }
 nothing-fits = Nada cabe no limite de { $limit }: a menor codificação teve { $smallest }. Um trecho usado mais curto, uma taxa de quadros menor ou um intervalo de busca mais amplo podem ajudar
 clipboard-failed = Não foi possível colar da área de transferência: { $details }
@@ -1011,7 +1011,7 @@ preset-name-builtin = “{ $name }” é o nome de uma predefinição embutida
 preset-name-taken = Outra predefinição já se chama “{ $name }”
 preset-extended = “{ $other }” se baseia nela: altere aquela predefinição primeiro
 your-presets = Suas predefinições
-your-presets-note = As alterações são guardadas na hora. “{ preset-fast }”, “{ preset-balanced }” e “{ preset-best }” são embutidas e não mudam
+your-presets-note = As alterações são salvas na hora. “{ preset-fast }”, “{ preset-balanced }” e “{ preset-best }” são embutidas e não mudam
 no-presets = Nenhuma ainda: “{ -save-settings }”, na barra abaixo das configurações
 preset-broken = Não foi possível ler o arquivo dela
 delete-it = Excluir
@@ -1097,7 +1097,7 @@ mouse-centred = Alt+arrastar uma borda
 mouse-free = Ctrl+arrastar
     .does = Recortar sem se prender às bordas e ao centro da imagem
 mouse-cancel = Esc ao arrastar
-    .does = Devolver o recorte ao que era
+    .does = Restaurar o recorte anterior
 mouse-crop-keys = Clicar no recorte, depois setas
     .does = Movê-lo um pixel, dez com Shift; Ctrl+setas o redimensionam
 mouse-double-click = Clique duplo
@@ -1105,8 +1105,8 @@ mouse-double-click = Clique duplo
 mouse-wheel = Rolar
     .does = Aproximar ou afastar o zoom
 mouse-pan = Arrastar com o botão direito ou do meio
-    .does = Mover a vista, com zoom
+    .does = Mover a visualização, com zoom
 mouse-pan-across = Shift+rolar
-    .does = Mover a vista na horizontal, com zoom
+    .does = Mover a visualização na horizontal, com zoom
 mouse-slide = Shift+arrastar um colchete
     .does = Deslizar o trecho usado na linha do tempo, mantendo sua duração
