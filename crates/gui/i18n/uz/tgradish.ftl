@@ -53,7 +53,7 @@ settings-file-note = Ehtimol, u qoʻlda yoki tgradishning boshqa versiyasida tah
 fresh-settings = Yangi sozlamalardan boshlash
     .hint = Hozirgi sozlamalarni yangi sozlamalar fayliga yozish; eskisi yonida saqlanib qoladi
     .saved = Yangi sozlamalar saqlandi
-    .kept = Eski fayl ularning yonida { $name } nomi bilan saqlandi
+    .kept = Eski fayl yangisining yonida { $name } nomi bilan saqlandi
     .failed = Yangi sozlamalarni yozib boʻlmadi
 read-again = Qayta urinish
     .hint = Tuzatilgach, uni qayta oʻqish
@@ -78,16 +78,16 @@ files-gone = { $count ->
     [one] Oʻtgan safardan beri { $count } ta fayl yoʻqolgan
    *[other] Oʻtgan safardan beri { $count } ta fayl yoʻqolgan
 }
-session-unreadable = Oʻtgan safargi fayllarni oʻqib boʻlmadi, shuning uchun hech biri ochilmadi; ularning roʻyxati chetga olib qoʻyildi
+session-unreadable = Oʻtgan safargi fayllarni oʻqib boʻlmadi, shuning uchun hech biri ochilmadi; ularning roʻyxati alohida saqlab qoʻyildi
 files-unreadable = { $count ->
-    [one] Oʻtgan safargi { $count } ta faylni oʻqib boʻlmadi va u oʻtkazib yuborildi; roʻyxatning avvalgi holati chetga olib qoʻyildi
-   *[other] Oʻtgan safargi { $count } ta faylni oʻqib boʻlmadi va ular oʻtkazib yuborildi; roʻyxatning avvalgi holati chetga olib qoʻyildi
+    [one] Oʻtgan safargi { $count } ta faylni oʻqib boʻlmadi va u oʻtkazib yuborildi; roʻyxatning avvalgi nusxasi alohida saqlab qoʻyildi
+   *[other] Oʻtgan safargi { $count } ta faylni oʻqib boʻlmadi va ular oʻtkazib yuborildi; roʻyxatning avvalgi nusxasi alohida saqlab qoʻyildi
 }
 session-unsaved = Ochiq fayllarni keyingi safar uchun saqlab boʻlmadi
-nothing-to-paste = Joylash uchun hech narsa yoʻq
+nothing-to-paste = Joylashtirish uchun hech narsa yoʻq
     .why = Almashuv buferida fayl, fayl yoʻli yoki rasm yoʻq
 paste-failed = Almashuv buferini oʻqib boʻlmadi
-    .image = Joylangan rasmni saqlab boʻlmadi
+    .image = Joylashtirilgan rasmni saqlab boʻlmadi
 pick-failed = Fayl tanlash oynasi ishdan chiqdi, hech narsa tanlanmadi
 
 
@@ -123,10 +123,10 @@ menu-settings = Sozlamalar…
 inspect = Stikerni tekshirish…
     .hint = Fayl Telegram cheklovlariga mosligini tekshirish
 feedback = Fikr bildirish
-    .hint = Muallifga Telegramda yozish: ilovasida (agar oʻrnatilgan boʻlsa) yoki brauzerda
+    .hint = Muallifga Telegramda yozish: oʻrnatilgan boʻlsa ilovasida, aks holda brauzerda
 about-and-licences = Dastur haqida va litsenziyalar…
 show-input-in-folder = Jildda koʻrsatish
-    .pasted = Joylangan rasmning oʻz fayli yoʻq
+    .pasted = Joylashtirilgan rasmning oʻz fayli yoʻq
 shortcuts = Tezkor tugmalar
 add-files = Fayl qoʻshish…
 add-more = Fayl qoʻshishning boshqa usullari
@@ -140,7 +140,7 @@ convert-all = { $count ->
     [0] Hammasini aylantirish
    *[other] Hammasini aylantirish ({ $count })
 }
-    .hint = Dolzarb natijasi yoʻq barcha fayllarni aylantirish
+    .hint = Natijasi yoʻq yoki eskirgan barcha fayllarni aylantirish
 remove-all = Hammasini olib tashlash
 converting-batch = Aylantirilmoqda: { $current } / { $total }
 stop-all = Hammasini toʻxtatish
@@ -158,8 +158,8 @@ row-exists = fayl xalaqit bermoqda
 row-stopped = toʻxtatildi
 drop-here = Video, GIF, rasm yoki Aseprite fayllarini shu yerga tashlang
 drop-here-note = Video, animatsiyali yoki statik stiker yoxud emojiga aylantirish uchun
-paste = Joylash
-name-pasted = joylangan rasm
+paste = Joylashtirish
+name-pasted = joylashtirilgan rasm
 name-frames = { $name } (kadrlar)
 name-and-more = { $name } va yana { $more } ta
 no-font = { $count ->
@@ -195,7 +195,7 @@ saves-as = Saqlash nomi
     .hint = Natijalar qayerga saqlanishi «{ settings }» oynasida belgilanadi
 result-saved-as = Saqlangan nomi
 copy-result = Nusxalash
-    .hint = Telegram chatiga joylash uchun stikerni fayl sifatida nusxalash
+    .hint = Telegram chatiga joylashtirish uchun stikerni fayl sifatida nusxalash
     .done = Nusxalandi
     .failed = Nusxalanmadi
 replaces-earlier = Avvalgi natija almashtiriladi
@@ -299,7 +299,7 @@ needs-image-sticker = WebP, uzun tomoni 512 px, 512 KiB gacha
 needs-image-emoji = WebP, 100 × 100 px, 512 KiB gacha
 not-pixel-art = «{ format-animation }» piksel-art uchun moʻljallangan: u vektorga aylantiriladi va tiniq qoladi. Bu piksel-artga oʻxshamaydi: unga «{ format-video }» koʻproq mos keladi
 preset = Andoza
-    .hint = Natija ustida qanchalik koʻp ishlash; quyidagi oʻz qiymatlaringiz andoza ustidan qoʻllanadi
+    .hint = Natija ustida qanchalik koʻp ishlash; quyidagi oʻz qiymatlaringiz andozanikidan ustun turadi
     .image = Statik stiker andozadan faqat tasvir sozlamalarini oladi, yaʼni kvadratga keltirish va masshtablashni: sigʻsa, yoʻqotishsiz saqlanadi, aks holda sigʻadigan eng yaxshi sifatda
     .broken = Bu andozaning fayli buzilgan
     .missing = «{ $name }» andozasi endi yoʻq: boshqasini tanlang
@@ -382,7 +382,7 @@ integer-scale = Butun masshtab
     .hint = Har bir manba pikseli nechta natija pikseliga aylanadi yoki nechta manba pikseli bittasini tashkil qiladi
     .only = Faqat «{ scaling-integer }» masshtablash bilan
 scale-largest = Sigʻadigan eng kattasi
-    .hint = Qirqimni natija ichida saqlaydigan eng katta butun karrali
+    .hint = Qirqimni natija ichida saqlaydigan eng katta butun karrali masshtab
     .preset = Masshtabni andoza belgilaydi
 scale-fixed = Belgilangan
     .hint = Aynan shu masshtab; qirqim bu masshtabda natijaga sigʻadiganidan katta boʻla olmaydi
@@ -394,7 +394,7 @@ scale-unused = Butun masshtablar faqat «{ scaling-integer }» masshtablash bila
 scale-unsuited = Qirqim hali bu masshtabga mos emas
 scale-makes = { $scale } qirqimni { $width } × { $height } px qiladi
 scale-makes-padded = { $scale } qirqimni { $width } × { $height } px qiladi; { $box_width } × { $box_height } ning qolgan qismini shaffof hoshiyalar toʻldiradi
-scale-each-way = eniga ×{ $across }, boʻyiga ×{ $down }
+scale-each-way = Eniga ×{ $across }, boʻyiga ×{ $down }
 scale-shrinks = Qirqim natijadan katta, shuning uchun u aniq piksellar bilan kichraytiriladi: ×1/2 kabi belgilangan masshtab uni butun bloklar bilan kichraytiradi
 margins = Hoshiyalar
     .hint = Manbaning barcha kadrlarida shaffof boʻlgan chekka qator va ustunlar
@@ -509,7 +509,7 @@ crf-default = Standart
 lossless = Yoʻqotishsiz
 lossless-encoding = Yoʻqotishsiz kodlash
     .hint = Faqat juda kichik yoki harakatsiz tasvirlarda hajmi kichik boʻladi
-    .switches = Faqat juda kichik yoki harakatsiz tasvirlarda hajmi kichik boʻladi. Yoʻqotishsiz kodlashda moslanadigan bitreyt ham, sifat ham yoʻq: buni belgilash moslashni «{ fit-fps }» usuliga oʻtkazadi
+    .switches = Faqat juda kichik yoki harakatsiz tasvirlarda hajmi kichik boʻladi. Yoʻqotishsiz kodlashda moslanadigan bitreyt ham, sifat ham yoʻq: buni belgilash «{ fitting }» sozlamasini «{ fit-fps }» usuliga oʻtkazadi
 bitrate = Bitreyt
     .hint = Faqat sifat belgilanmagan boʻlsa ishlatiladi
     .fitted = Bitreytni moslash topadi
@@ -573,7 +573,7 @@ aseprite-file = Aseprite fayli
 unreadable-choices = U tanlangan teg va qatlamlar bilan oʻqilmaydi
 read-all = Hammasini oʻqish
 tag = Teg
-    .hint = Teg kadrlarini tanlaydi: u boshlanib tugaydigan joy boʻyicha yoki, teskari yoki borib-qaytib ijro etilsa, oʻz tartibida
+    .hint = Teg kadrlarini tanlaydi: u boshlanib tugaydigan joy boʻyicha yoxud, teskari yoki borib-qaytib ijro etilsa, oʻz tartibida
 all-frames = Barcha kadrlar
     .hint = Faylning har bir kadri
 tag-frame = { $number }-kadr
@@ -590,7 +590,7 @@ layers = Qatlamlar
 ## Settings: encoder options, folded away under the rest
 
 encoder-options = Kodlovchi parametrlari
-vp9-options = Nomi boʻyicha kodlovchi parametrlari, masalan, tekis grafika uchun tune-content = screen. Ularni ffmpeg -h encoder=libvpx-vp9 roʻyxatlaydi
+vp9-options = Nomi boʻyicha kodlovchi parametrlari, masalan, tekis grafika uchun tune-content = screen. Ularning roʻyxatini ffmpeg -h encoder=libvpx-vp9 koʻrsatadi
     .name = Masalan: tune-content
     .value = Masalan: screen
 add-option = Parametr qoʻshish
@@ -604,7 +604,7 @@ example-qmax = Hech qayerda sifat 50 dan yomon emas
 ffmpeg-arguments = ffmpeg argumentlari
     .hint = Chiqish faylidan oldin qoʻshiladigan xom argumentlar, buyruq qobigʻidagidek boʻlinadi
     .placeholder = Masalan: -qmin 4
-    .unfinished = Qoʻshtirnoq yoki teskari chiziq yopilmagan: u yopilguncha argumentlar oxirgi oʻqilgan holicha qoladi
+    .unfinished = Qoʻshtirnoq yoki teskari qiya chiziq yopilmagan: u yopilguncha argumentlar oxirgi oʻqilgan holicha qoladi
     .system = Faqat tizimdagi ffmpeg bilan, uni «{ settings }» oynasida tanlash mumkin
 
 
@@ -675,7 +675,7 @@ plan-square-pad = Hoshiya bilan kvadratgacha toʻldiriladi
 plan-cut = { $from }–{ $to } qismi olinadi, jami { $length }
 plan-faster = ×{ $factor } tezlashtiriladi
 plan-slower = ×{ $factor } sekinlashtiriladi
-plan-cut-3-s = { $played } 3 s da kesiladi
+plan-cut-3-s = 3 s da kesiladi, jami { $played }
 plan-spoofed = Davomiylik soxtalashtiriladi, shuning uchun toʻliq { $played } ijro etiladi
 plan-spoofed-anyway = Davomiylik soxtalashtiriladi, garchi { $played } yetarlicha qisqa boʻlsa ham
 plan-saved = { $name } sifatida saqlanadi
@@ -687,7 +687,7 @@ commands = Buyruqlar
 copy = Nusxalash
 commands-posix = Xuddi shu aylantirish buyruq satrida, POSIX qobigʻi uchun:
 commands-powershell = Xuddi shu aylantirish buyruq satrida, PowerShell uchun:
-pasted-temporary = Joylangan rasm vaqtinchalik jildda saqlanadi, tgradish yopilganda u oʻchadi
+pasted-temporary = Joylashtirilgan rasm vaqtinchalik jildda saqlanadi, tgradish yopilganda u oʻchadi
 ffmpeg-commands = Birinchi kodlashning ffmpeg buyruqlari; moslash kodlashlar orasida bitreyt yoki sifatni, balki kadr chastotasini ham oʻzgartiradi:
     .builtin = Ichki ffmpeg birinchi kodlashda nima qilishi, tizimdagi ffmpeg uchun buyruqlar koʻrinishida; moslash kodlashlar orasida bitreyt yoki sifatni, balki kadr chastotasini ham oʻzgartiradi:
 no-ffmpeg-commands = ffmpeg buyruqlari yoʻq: { $why }
@@ -796,7 +796,7 @@ path-in-the-way = { $path } xalaqit bermoqda
 stopped-early = Tugamasdan toʻxtatildi
 result = Natija
     .stale = Natija, eskirgan
-result-copy = Telegram chatiga joylash uchun uni nusxalang ({ $keys })
+result-copy = Telegram chatiga joylashtirish uchun uni nusxalang ({ $keys })
 result-webm = { $width } × { $height } px, { $fps } fps, { $length }
     .spoofed = { $width } × { $height } px, { $fps } fps, { $length }, davomiylik soxtalashtirilgan
 changed-to-fit = Sigʻishi uchun oʻzgartirildi: qanday qilib — quyida
@@ -889,8 +889,8 @@ issue-count =
     .expanded-layers = Prekompozitsiyalar ochilgandagi qatlamlar: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
     .nesting = JSON dagi ichma-ich darajalar: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
     .group-depth = Guruh ichidagi guruhlar darajalari: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
-issue-cost = Chizish narxi: { $cost }, bu { $limit } chegarasidan ortiq; shakllar: { $shapes }, qatlamlar: { $layers }, har biri { $each }
-issue-empty-tangents = Telegram rad etadigan boʻsh tangensli ([]) konturlar: { $count }; [0,0] ishlaydi
+issue-cost = Chizish sarfi: { $cost }, bu { $limit } chegarasidan ortiq; shakllar: { $shapes }, qatlamlar: { $layers }, har biri { $each }
+issue-empty-tangents = Telegram rad etadigan boʻsh urinmali ([]) konturlar: { $count }; [0,0] ishlaydi
 issue-path-coordinate = Eng katta kontur koordinatasi: { $coordinate }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
 issue-precomp-loop = Uning prekompozitsiyalari bir-biriga aylana boʻylab havola qiladi
 issue-feature = { $feature }: Telegram qoidalariga zid, garchi Telegram uni qabul qilsa ham
@@ -946,7 +946,7 @@ inspect-name = Nom
 inspect-length = Uzunlik
     .hint = Animatsiyali stikerlar koʻpi bilan 3 soniya davom etadi
     .value = { $seconds } / 3.00 s, { $frames }
-inspect-cost = Chizish narxi
+inspect-cost = Chizish sarfi
     .hint = Shakllar soniga har bir qatlam uchun 9 qoʻshiladi, Telegram shunday hisoblaydi
 inspect-layers = Qatlamlar
 inspect-shapes = Qatlamdagi eng koʻp shakl
@@ -973,7 +973,7 @@ not-webm = { $name } WebM fayl emas
 not-sticker = { $name } stiker emas: WebM, WebP yoki .tgs fayl emas
 no-frame-at = { $name } faylida { $seconds } vaqtda kadr yoʻq
 nothing-fits = { $limit } chegarasiga hech narsa sigʻmadi: eng kichik kodlash { $smallest } chiqdi. Qisqaroq tanlangan qism, pastroq kadr chastotasi yoki kengroq qidirish oraligʻi yordam berishi mumkin
-clipboard-failed = Almashuv buferidan joylab boʻlmadi: { $details }
+clipboard-failed = Almashuv buferidan joylashtirib boʻlmadi: { $details }
 output-is-input = Natija { $name } ustiga yozilardi, holbuki u shundan yasaladi
 nothing-to-convert = Aylantirish uchun rasm yoʻq
 
@@ -981,7 +981,7 @@ nothing-to-convert = Aylantirish uchun rasm yoʻq
 ## Saving and managing presets
 
 save-preset-title = { -save-settings }
-save-preset-note = Bu faylning sozlamalari, istalgan fayl uchun boshlangʻich sifatida, faqat unga mos keladiganlaridan tashqari: stiker yoki emoji, qirqim, tanlangan qism, teg, qatlamlar va sprayt varagʻi
+save-preset-note = Bu faylning sozlamalari istalgan fayl uchun boshlangʻich sifatida saqlanadi, faqat shu faylning oʻziga xos sozlamalaridan tashqari: stiker yoki emoji, qirqim, tanlangan qism, teg, qatlamlar va sprayt varagʻi
 preset-name = Nom
     .placeholder = mening stikerlarim
 preset-description = Tavsif
@@ -1054,9 +1054,9 @@ shortcut-add-files = Fayl qoʻshish
 shortcut-paste = Almashuv buferidagi fayllar yoki rasmni qoʻshish
 shortcut-select = Yuqoridagi yoki pastdagi faylni tanlash
 shortcut-convert = Tanlangan faylni aylantirish
-shortcut-convert-all = Hammasini aylantirish: dolzarb natijasi yoʻq har bir fayl
+shortcut-convert-all = Hammasini aylantirish: natijasi yoʻq yoki eskirgan har bir fayl
 shortcut-keep-best = WebM moslanayotganda, hozircha eng yaxshi kodlashni saqlash
-shortcut-copy-result = Telegramga joylash uchun tanlangan fayl natijasini nusxalash
+shortcut-copy-result = Telegramga joylashtirish uchun tanlangan fayl natijasini nusxalash
 shortcut-remove = Tanlangan faylni yoki qatori fokusda boʻlgan faylni olib tashlash
 shortcut-undo = Tanlangan fayldagi oʻzgarishni bekor qilish yoki olib tashlangan fayllarni qaytarish
 shortcut-redo = Bekor qilingan oʻzgarishni qayta bajarish
