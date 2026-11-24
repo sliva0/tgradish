@@ -45,7 +45,7 @@ use crate::CancelToken;
 use crate::backend::{Backend, Pass};
 use crate::config::Threads;
 use crate::error::{Error, FileAction, Result};
-use crate::events::{Details, Event, Outcome, StartDetails, Started};
+use crate::events::{Details, Event, LeftOut, Outcome, StartDetails, Started, Warning};
 use crate::ffmpeg::Output;
 use crate::input::Input;
 use crate::options::Selection;
@@ -268,7 +268,7 @@ pub fn convert(
     let made = encode_in(temp.path(), backend, request, plan, cancel, on_event);
     if made.is_err() && request.keep_temp {
         // the outcome says where they are, and there is none
-        let message = format!("{KEPT_IN}{}", temp.path().display());
+        let message = Warning::KeptIn { dir: temp.path().to_path_buf() };
         on_event(Event::Warning { message });
     }
     made
@@ -290,23 +290,19 @@ fn patch_what_fits(
             Ok(_) => return Ok(changes),
             Err(err) => err,
         };
-        let left_out = if changes.muxing_app.is_some() || changes.signature.is_some() {
+        let what = if changes.muxing_app.is_some() || changes.signature.is_some() {
             (changes.muxing_app, changes.signature) = (None, None);
-            "tgradish's name"
+            LeftOut::Name
         } else if changes.duration.is_some() {
             changes.duration = None;
-            "the spoofed duration"
+            LeftOut::SpoofedDuration
         } else {
             return Err(err.into());
         };
-        let message = format!("written without {left_out} in metadata: {err}");
+        let message = Warning::LeftOut { what, error: err.to_string() };
         on_event(Event::Warning { message });
     }
 }
-
-/// What a warning that a failed conversion's intermediate files are kept
-/// starts with; their directory follows.
-const KEPT_IN: &str = "intermediate files kept in ";
 
 /// Fits `plan` by encodes into `dir`, and writes the result.
 fn encode_in(

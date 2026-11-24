@@ -28,7 +28,7 @@ pub(super) struct Loaded {
     /// `selection.start`.
     pub(super) video: Option<VideoPart>,
     /// Non-fatal warnings produced during decoding.
-    pub(super) warnings: Vec<String>,
+    pub(super) warnings: Vec<crate::events::Warning>,
 }
 
 /// Portion of a video read via ffmpeg starting at `selection.start`.
@@ -201,10 +201,8 @@ fn read_video(
     }
     let mut warnings = Vec::new();
     if wanted > fit {
-        warnings.push(format!(
-            "read at {:.1} fps because more {}×{} frames would exceed the memory limit",
-            decoded.fps, decoded.width, decoded.height
-        ));
+        let (fps, width, height) = (decoded.fps, decoded.width, decoded.height);
+        warnings.push(crate::events::Warning::FewerFrames { fps, width, height });
     }
     // a picture shows as long as pictures do; a video's frames as it times
     // them, the cut made after

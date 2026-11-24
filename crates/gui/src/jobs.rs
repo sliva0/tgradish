@@ -652,7 +652,7 @@ fn follow(event: Event, update: Update) {
             (progress.tgs_done, progress.stage_done) = (fraction as f32, stage_fraction as f32);
         })),
         Event::Warning { message } => {
-            update(Box::new(move |progress| progress.warnings.push(message)))
+            update(Box::new(move |progress| progress.warnings.push(message.to_string())))
         }
         _ => {}
     }

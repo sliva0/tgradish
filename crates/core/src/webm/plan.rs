@@ -9,6 +9,7 @@ use serde::Serialize;
 use super::Request;
 use crate::config::Threads;
 use crate::error::{Error, Result};
+use crate::events::Warning;
 use crate::ffmpeg::Probe;
 use crate::options::{self, Crop, Effort, Fit, FitUnit, Range, Resize, Scaling, Selection, Spoof};
 use crate::picture::{default_resize, picture_sizes};
@@ -226,7 +227,7 @@ fn check_fit_range(
     range: Range,
     fit: Fit,
     length: f64,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<Warning>,
 ) -> Result<Range> {
     if !(range.min.is_finite() && range.max.is_finite()) {
         return Err(Error::invalid("fit-range", format!("{range} must have finite ends")));
@@ -238,7 +239,7 @@ fn check_fit_range(
     // duration and spoofing policy.
     let range = match fit {
         Fit::Length if range.max > length => {
-            warnings.push(format!("length range capped at {length:.2} s"));
+            warnings.push(Warning::LengthRangeCapped { length });
             Range { min: range.min.min(length), max: length }
         }
         _ => range,
@@ -279,7 +280,7 @@ pub(crate) fn estimate_bitrate(length: f64, limit: u64) -> f64 {
 
 /// Resolves options against the probed input. Returns the plan and warnings
 /// about options that were adjusted or ignored.
-pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<String>)> {
+pub fn plan(request: &Request, source: Probe) -> Result<(Plan, Vec<Warning>)> {
     plan_for(Format::Webm, request, source)
 }
 
@@ -289,7 +290,7 @@ pub(crate) fn plan_for(
     format: Format,
     request: &Request,
     source: Probe,
-) -> Result<(Plan, Vec<String>)> {
+) -> Result<(Plan, Vec<Warning>)> {
     let (chosen, o) = (&request.selection, &request.options);
     let mut warnings = Vec::new();
 
@@ -337,7 +338,7 @@ pub(crate) fn plan_for(
         }
         // Ignore <= 10 ms overshoot caused by timestamp rounding.
         Some(length) if length > available + 0.01 => {
-            warnings.push(format!("input is only {available:.2} s long after start"));
+            warnings.push(Warning::InputShorter { available });
             available
         }
         Some(length) => length,
@@ -347,10 +348,7 @@ pub(crate) fn plan_for(
     // Playback duration after applying tempo.
     let mut length = used / tempo;
     if spoof == Spoof::Never && length > telegram::MAX_SECONDS {
-        warnings.push(format!(
-            "trimming to {} s because spoofing is off (Telegram rejects longer videos)",
-            telegram::MAX_SECONDS
-        ));
+        warnings.push(Warning::Trimmed { max: telegram::MAX_SECONDS });
         length = telegram::MAX_SECONDS;
     }
     // Default to input fps scaled by tempo (using average fps for VFR inputs),
@@ -392,7 +390,7 @@ pub(crate) fn plan_for(
     // lossless encoding where it has no say was refused above
     for (key, why) in super::set_aside(o, o) {
         if key != "lossless" {
-            warnings.push(format!("{key} is ignored because {why}"));
+            warnings.push(Warning::Ignored { option: key, why });
         }
     }
 
@@ -475,12 +473,12 @@ mod tests {
         }
     }
 
-    fn plan_with(options: Options) -> Result<(Plan, Vec<String>)> {
+    fn plan_with(options: Options) -> Result<(Plan, Vec<Warning>)> {
         plan_chosen(Selection::default(), options)
     }
 
     /// Planned with what `selection` chooses of the input.
-    fn plan_chosen(selection: Selection, options: Options) -> Result<(Plan, Vec<String>)> {
+    fn plan_chosen(selection: Selection, options: Options) -> Result<(Plan, Vec<Warning>)> {
         let input = Input::File("in.mp4".into());
         let request = Request { selection, options, ..Request::new(input) };
         plan(&request, source(4.84))
@@ -537,7 +535,14 @@ mod tests {
     #[test]
     fn warns_of_what_sets_a_quality_or_bitrate_aside() {
         let crf = Options { crf: Some(20), ..Default::default() };
-        let warned = |options: Options| plan_with(crf.clone().merged(&options)).unwrap().1;
+        let warned = |options: Options| {
+            plan_with(crf.clone().merged(&options))
+                .unwrap()
+                .1
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+        };
         let lossless = Options { fit: Some(Fit::Fps), lossless: Some(true), ..Default::default() };
         assert_eq!(warned(lossless), ["crf is ignored because lossless is on"]);
         let bitrate = Options { fit: Some(Fit::Off), bitrate: Some(300.0), ..Default::default() };
@@ -553,7 +558,7 @@ mod tests {
             fake_duration: Some(1.0),
             ..Default::default()
         };
-        let warned = plan_with(off).unwrap().1;
+        let warned = plan_with(off).unwrap().1.iter().map(ToString::to_string).collect::<Vec<_>>();
         assert_eq!(
             warned[warned.len() - 2..],
             [

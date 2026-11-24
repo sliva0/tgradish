@@ -26,7 +26,7 @@ use crate::CancelToken;
 use crate::backend::Backend;
 use crate::config::Threads;
 use crate::error::{Error, Result};
-use crate::events::{Details, Event, Outcome, StartDetails, Started};
+use crate::events::{Details, Event, Outcome, StartDetails, Started, Warning};
 use crate::input::Input;
 use crate::options::{Resize, Selection};
 use crate::presets::Format;
@@ -116,8 +116,8 @@ pub fn convert(
         &mut |progress| match progress {
             // what reading the art found worth saying, after it
             Progress::Normalised { report } => {
-                let found = report.warnings.iter().map(|w| w.to_string());
-                let warnings: Vec<String> = loaded.warnings.iter().cloned().chain(found).collect();
+                let found = report.warnings.iter().cloned().map(Warning::Art);
+                let warnings: Vec<Warning> = loaded.warnings.iter().cloned().chain(found).collect();
                 on_event(Event::Started(Started {
                     input: input.clone(),
                     output: output.clone(),

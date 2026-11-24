@@ -331,7 +331,7 @@ impl<'a> Converter<'a> {
             // of each input, where planning it would say them
             if started {
                 for message in &self.set_aside {
-                    say(Event::Warning { message: message.clone() });
+                    say(Event::Warning { message: message.clone().into() });
                 }
             }
         };

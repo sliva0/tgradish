@@ -277,7 +277,7 @@ fn keeps_intermediate_files_whatever_comes_of_them() {
         let mut warnings = Vec::new();
         let failed = convert(backend, &request(too_large), &CancelToken::new(), &mut |event| {
             if let Event::Warning { message } = event {
-                warnings.push(message);
+                warnings.push(message.to_string());
             }
         });
         assert!(matches!(failed, Err(Error::NothingFits { .. })), "{name}: {failed:?}");

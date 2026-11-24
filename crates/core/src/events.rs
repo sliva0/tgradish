@@ -121,14 +121,138 @@ pub enum Event {
     /// Non-fatal warning (adjusted or ignored options, pixel-art notes, or
     /// unreadable watch directories).
     Warning {
-        /// Human-readable warning message.
-        message: String,
+        /// What it warns of, serialised as its English message.
+        message: Warning,
     },
     /// Output written; carries the same [`Outcome`] returned by `convert`.
     Finished(Outcome),
     /// Conversion or command failed. Emitted only by the CLI; library calls
     /// return `Err` instead.
     Error(Failure),
+}
+
+/// What an [`Event::Warning`] warns of, with what it measured, for
+/// front-ends to word it their own way. `Display` (and serialising, as
+/// a string) words it in English.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum Warning {
+    /// A video is read at `fps` frames a second, fewer than it has, as more
+    /// of its `width` × `height` frames would exceed the memory limit.
+    FewerFrames {
+        /// The frame rate read at.
+        fps: f64,
+        /// Frame width in pixels.
+        width: u32,
+        /// Frame height in pixels.
+        height: u32,
+    },
+    /// What reading pixel art found worth saying.
+    Art(tgradish_tgs::normalise::Warning),
+    /// Fitting the length can only shorten: its range is capped at
+    /// `length` seconds.
+    LengthRangeCapped {
+        /// The length the range is capped at, in seconds.
+        length: f64,
+    },
+    /// The length asked for is longer than the `available` seconds of the
+    /// input after its start, which is all that is used.
+    InputShorter {
+        /// Seconds of input after the start.
+        available: f64,
+    },
+    /// Trimmed to `max` seconds as spoofing is off, as Telegram rejects
+    /// longer videos.
+    Trimmed {
+        /// The length trimmed to, in seconds.
+        max: f64,
+    },
+    /// The option `option` has no effect, for the reason `why`, a clause
+    /// naming options by key, as [`crate::webm::set_aside`] gives it.
+    Ignored {
+        /// The option's key.
+        option: &'static str,
+        /// Why it has no effect.
+        why: String,
+    },
+    /// A failed conversion's intermediate files are kept in `dir`.
+    KeptIn {
+        /// Their directory.
+        dir: PathBuf,
+    },
+    /// The output is written without `what` in its metadata, as there is no
+    /// room for it beside extra ffmpeg arguments' output, as `error` says.
+    LeftOut {
+        /// What is left out.
+        what: LeftOut,
+        /// Why it didn't fit, in English.
+        error: String,
+    },
+    /// Anything else, in English.
+    Other(String),
+}
+
+/// What [`Warning::LeftOut`] leaves out of a WebM's metadata.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum LeftOut {
+    /// tgradish's name, as the muxing app and signature.
+    Name,
+    /// The spoofed duration.
+    SpoofedDuration,
+}
+
+impl std::fmt::Display for Warning {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Warning::FewerFrames { fps, width, height } => write!(
+                f,
+                "read at {fps:.1} fps because more {width}×{height} frames would exceed the \
+                 memory limit"
+            ),
+            Warning::Art(warning) => write!(f, "{warning}"),
+            Warning::LengthRangeCapped { length } => {
+                write!(f, "length range capped at {length:.2} s")
+            }
+            Warning::InputShorter { available } => {
+                write!(f, "input is only {available:.2} s long after start")
+            }
+            Warning::Trimmed { max } => write!(
+                f,
+                "trimming to {max} s because spoofing is off (Telegram rejects longer videos)"
+            ),
+            Warning::Ignored { option, why } => write!(f, "{option} is ignored because {why}"),
+            Warning::KeptIn { dir } => {
+                write!(f, "intermediate files kept in {}", dir.display())
+            }
+            Warning::LeftOut { what, error } => {
+                let what = match what {
+                    LeftOut::Name => "tgradish's name",
+                    LeftOut::SpoofedDuration => "the spoofed duration",
+                };
+                write!(f, "written without {what} in metadata: {error}")
+            }
+            Warning::Other(message) => f.write_str(message),
+        }
+    }
+}
+
+impl Serialize for Warning {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_str(self)
+    }
+}
+
+impl From<String> for Warning {
+    fn from(message: String) -> Warning {
+        Warning::Other(message)
+    }
+}
+
+impl From<&str> for Warning {
+    fn from(message: &str) -> Warning {
+        Warning::Other(message.to_owned())
+    }
 }
 
 /// Payload for [`Event::Started`]: input, output, format, target, size limit,

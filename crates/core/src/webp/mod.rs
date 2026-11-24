@@ -26,7 +26,7 @@ use crate::CancelToken;
 use crate::backend::Backend;
 use crate::config::Threads;
 use crate::error::{Error, Result};
-use crate::events::{Details, Event, Outcome, StartDetails, Started};
+use crate::events::{Details, Event, Outcome, StartDetails, Started, Warning};
 use crate::input::Input;
 use crate::options::Selection;
 use crate::picture;
@@ -98,7 +98,7 @@ pub fn plan(
     request: &Request,
     source: crate::ffmpeg::Probe,
     starts: &[f64],
-) -> Result<(Plan, Vec<String>)> {
+) -> Result<(Plan, Vec<Warning>)> {
     let options = webm::Options::from(request.options.clone());
     let mut selection = request.selection.clone().for_format(Format::Webp);
     // Resolve the seek timestamp for the frame displayed at `start` (matching

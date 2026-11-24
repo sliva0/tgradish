@@ -197,7 +197,7 @@ fn sleep(ctx: &Context, seconds: f64) {
 /// Emits a watcher-level warning without stopping the loop.
 fn warn(ctx: &Context, message: String) {
     if ctx.global.json {
-        crate::json_line(&tgradish_core::Event::Warning { message });
+        crate::json_line(&tgradish_core::Event::Warning { message: message.into() });
     } else {
         eprintln!("{} {message}", ui::warning_label());
     }
