@@ -219,9 +219,11 @@ impl App {
                 let (above, below) = footer_spaces(ui.style());
                 ui.add_space(above);
                 // converting: how far it got of all asked for, and a way to
-                // stop it all, each where it stays as the numbers change
+                // stop it all, each where it stays as the numbers change;
+                // as below, a button whole on a line of its own where
+                // longer words leave no room
                 if let Some((current, total)) = self.batch_progress() {
-                    ui.horizontal(|ui| {
+                    ui.horizontal_wrapped(|ui| {
                         let text = fl!("converting-batch", current = current, total = total);
                         let widest = fl!("converting-batch", current = total, total = total);
                         let width = widgets::text_width(ui, &widgets::zeros(&widest), 0.0);
@@ -229,7 +231,8 @@ impl App {
                         let layout = egui::Layout::left_to_right(egui::Align::Center);
                         ui.allocate_ui_with_layout(row, layout, |ui| ui.label(text));
                         let hint = fl!("stop-all", "hint");
-                        stop = ui.button(fl!("stop-all")).on_hover_text(hint).clicked();
+                        let button = whole(egui::Button::new(fl!("stop-all")));
+                        stop = ui.add(button).on_hover_text(hint).clicked();
                     });
                     ui.add_space(2.0);
                 }
@@ -242,10 +245,10 @@ impl App {
                     let all = egui::Button::new(fl!("convert-all", count = changed))
                         .min_size(vec2(width.ceil(), 0.0));
                     let hint = with_keys(&fl!("convert-all", "hint"), Command::ConvertAll);
-                    if ui.add_enabled(changed > 0, all).on_hover_text(hint).clicked() {
+                    if ui.add_enabled(changed > 0, whole(all)).on_hover_text(hint).clicked() {
                         self.convert_all();
                     }
-                    if ui.button(fl!("remove-all")).clicked() {
+                    if ui.add(whole(egui::Button::new(fl!("remove-all")))).clicked() {
                         let ids: Vec<u64> = self.items.iter().map(|item| item.id).collect();
                         self.remove_all(&ids);
                     }
@@ -505,6 +508,12 @@ fn under_header(style: &egui::Style) -> f32 {
 /// Height of the drop zone's buttons, larger than others, as they are the
 /// one thing to do.
 const ZONE_BUTTON: f32 = 34.0;
+
+/// `button` with its words on one line: in a row that wraps, it goes on
+/// to the next whole where this one hasn't room for it.
+fn whole(button: egui::Button<'_>) -> egui::Button<'_> {
+    button.wrap_mode(egui::TextWrapMode::Extend)
+}
 
 /// The space over the list's bar, and under it, which lay its buttons
 /// level with those of the bar under the preview beside it.
