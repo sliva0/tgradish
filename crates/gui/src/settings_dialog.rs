@@ -971,54 +971,86 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
 }
 
 /// Draws the accent colour selector: system accent, Plasma palette swatches,
-/// and a custom colour swatch with a popup HSV/hex picker.
+/// and a custom colour swatch with a popup HSV/hex picker. The swatches go
+/// beside the system accent where all of them fit, else under it, as many
+/// on each line, so none is left on a line alone.
 fn accents(ui: &mut egui::Ui, accent: &mut Accent, typed: &mut String) {
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing.x = 2.0;
-        let system = *accent == Accent::System;
-        let button = widgets::choice(ui, system, &fl!("accent-system"), true);
-        if button.on_hover_text(fl!("accent-system", "hint")).clicked() {
-            *accent = Accent::System;
-        }
-        ui.add_space(6.0);
-        for (name, colour) in theme::ACCENTS {
+    let count = theme::ACCENTS.len() + 1;
+    let system = *accent == Accent::System;
+    let mut pressed = false;
+    let mut swatch = |ui: &mut egui::Ui, at: usize| match theme::ACCENTS.get(at) {
+        Some(&(name, colour)) => {
             let chosen = *accent == Accent::Named(name);
             if widgets::swatch(ui, Some(colour), chosen, &accent_name(name)).clicked() {
                 *accent = Accent::Named(name);
             }
         }
-        let own = match *accent {
-            Accent::Own(colour) => Some(colour),
-            _ => None,
-        };
-        let name = match own {
-            Some(colour) => fl!("accent-own", "chosen", colour = config::hex(colour)),
-            None => fl!("accent-own"),
-        };
-        let swatch = widgets::swatch(ui, own, own.is_some(), &name);
-        let picker = egui::Popup::from_toggle_button_response(&swatch)
-            .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
-        picker.show(|ui| {
-            // Initialise from the currently active accent until a custom colour is picked.
-            let mut colour = own.unwrap_or_else(|| theme::accent(ui.visuals()));
-            if widgets::colour_picker(ui, &mut colour) {
-                *accent = Accent::Own(colour);
+        None => own_accent(ui, accent, typed),
+    };
+    // side by side, a swatch's circle keeps apart from the next within its
+    // square
+    let run = count as f32 * theme::CONTROL;
+    let beside = ui
+        .horizontal(|ui| {
+            let button = widgets::choice(ui, system, &fl!("accent-system"), true);
+            pressed = button.on_hover_text(fl!("accent-system", "hint")).clicked();
+            ui.spacing_mut().item_spacing.x = 0.0;
+            let beside = ui.available_width() >= run;
+            if beside {
+                (0..count).for_each(|at| swatch(ui, at));
             }
+            beside
+        })
+        .inner;
+    if !beside {
+        let fit = ((ui.available_width() / theme::CONTROL).floor() as usize).max(1);
+        let each = count.div_ceil(count.div_ceil(fit));
+        for from in (0..count).step_by(each) {
             ui.horizontal(|ui| {
-                ui.label(fl!("accent-hex"));
-                let field = ui.add(widgets::text_field(typed).desired_width(90.0));
-                if field.changed() {
-                    if let Some(colour) = Accent::hex(typed.trim()) {
-                        *accent = Accent::Own(colour);
-                    }
-                } else if !field.has_focus() {
-                    *typed = config::hex(colour);
-                }
+                ui.spacing_mut().item_spacing.x = 0.0;
+                (from..count.min(from + each)).for_each(|at| swatch(ui, at));
             });
-            if Accent::hex(typed.trim()).is_none() {
-                problem(ui, Some(fl!("accent-hex", "wrong")));
+        }
+    }
+    if pressed {
+        *accent = Accent::System;
+    }
+}
+
+/// Draws the swatch of a colour of the user's own, which opens a picker of
+/// it, its hex code typed or shown under it.
+fn own_accent(ui: &mut egui::Ui, accent: &mut Accent, typed: &mut String) {
+    let own = match *accent {
+        Accent::Own(colour) => Some(colour),
+        _ => None,
+    };
+    let name = match own {
+        Some(colour) => fl!("accent-own", "chosen", colour = config::hex(colour)),
+        None => fl!("accent-own"),
+    };
+    let swatch = widgets::swatch(ui, own, own.is_some(), &name);
+    let picker = egui::Popup::from_toggle_button_response(&swatch)
+        .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
+    picker.show(|ui| {
+        // Initialise from the currently active accent until a custom colour is picked.
+        let mut colour = own.unwrap_or_else(|| theme::accent(ui.visuals()));
+        if widgets::colour_picker(ui, &mut colour) {
+            *accent = Accent::Own(colour);
+        }
+        ui.horizontal(|ui| {
+            ui.label(fl!("accent-hex"));
+            let field = ui.add(widgets::text_field(typed).desired_width(90.0));
+            if field.changed() {
+                if let Some(colour) = Accent::hex(typed.trim()) {
+                    *accent = Accent::Own(colour);
+                }
+            } else if !field.has_focus() {
+                *typed = config::hex(colour);
             }
         });
+        if Accent::hex(typed.trim()).is_none() {
+            problem(ui, Some(fl!("accent-hex", "wrong")));
+        }
     });
 }
 
