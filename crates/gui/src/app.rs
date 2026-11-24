@@ -23,7 +23,7 @@ use crate::fonts::fonts;
 use crate::item::{Conversion, Item};
 use crate::jobs::{Job, failure};
 use crate::keys::direct_scrolling;
-use crate::l10n::fl;
+use crate::l10n::{Text, fl, later};
 use crate::outputs::Outputs;
 use crate::preview::Preview;
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -131,7 +131,7 @@ impl App {
     /// why, and reads the presets in `presets_dir`, as the GUI starts.
     fn start(&mut self, unreadable: Option<tgradish_core::Error>, presets_dir: Option<PathBuf>) {
         if let Some(err) = unreadable {
-            self.say(settings_unreadable(fl!("settings-unreadable"), &err));
+            self.say(settings_unreadable(later!("settings-unreadable"), &err));
         }
         self.presets_dir = presets_dir;
         self.reload_presets();
@@ -166,8 +166,8 @@ impl App {
             };
             if let Some(unreadable) = loaded.unreadable {
                 let message = Message::info(match unreadable.files {
-                    Some(count) => fl!("files-unreadable", count = count),
-                    None => fl!("session-unreadable"),
+                    Some(count) => later!("files-unreadable", count = count),
+                    None => later!("session-unreadable"),
                 });
                 self.say(message.file(unreadable.aside).actions(&[Action::ShowInFolder]));
             }
@@ -179,7 +179,7 @@ impl App {
                 self.select(id);
             }
             if restored.gone > 0 {
-                self.say(Message::info(fl!("files-gone", count = restored.gone)));
+                self.say(Message::info(later!("files-gone", count = restored.gone)));
             }
         }
         self.keeping.store = Some(store);
@@ -377,7 +377,7 @@ impl App {
         self.ffmpeg.settings(&self.config.ffmpeg)
     }
 
-    pub(crate) fn backend(&self) -> Result<Backend, String> {
+    pub(crate) fn backend(&self) -> Result<Backend, crate::l10n::Text> {
         self.ffmpeg.backend(&self.config.ffmpeg)
     }
 
@@ -501,7 +501,7 @@ impl App {
         removed.batches.push(taken);
         removed.selected = removed.selected.or(selected);
         let count = removed.batches.iter().map(Vec::len).sum::<usize>();
-        let message = Message::info(fl!("files-removed", count = count));
+        let message = Message::info(later!("files-removed", count = count));
         self.say(message.actions(&[Action::Undo]).about(Subject::Removed));
     }
 
@@ -606,7 +606,7 @@ impl App {
         self.take_dialog_settings(&Config::default());
         self.dialogs.settings.forget_typed();
         self.settings_reset = Some(before);
-        let message = Message::info(fl!("settings-reset"));
+        let message = Message::info(later!("settings-reset"));
         self.say(message.actions(&[Action::UndoReset]).about(Subject::SettingsReset));
     }
 
@@ -704,9 +704,9 @@ impl App {
             // whatever was said of the file is past
             Ok(()) => self.banner.forget(Subject::SettingsFile),
             Err(err @ tgradish_core::Error::Config { .. }) => {
-                self.say(settings_unreadable(fl!("setting-unsaved", "unreadable"), &err));
+                self.say(settings_unreadable(later!("setting-unsaved", "unreadable"), &err));
             }
-            Err(err) => self.say(told(Message::warning(fl!("setting-unsaved")), &err)),
+            Err(err) => self.say(told(Message::warning(later!("setting-unsaved")), &err)),
         }
     }
 
@@ -808,16 +808,18 @@ fn load_config(path: &Path) -> (Config, Option<tgradish_core::Error>) {
 /// `headline` first. Where it isn't settings, as when it was changed by
 /// hand or by another version, it can be replaced; read again, once it is
 /// put right; and found, by those who would put it right.
-pub(crate) fn settings_unreadable(headline: String, err: &tgradish_core::Error) -> Message {
+pub(crate) fn settings_unreadable(headline: Text, err: &tgradish_core::Error) -> Message {
     let mut message = told(Message::warning(headline), err).about(Subject::SettingsFile);
     message.file = message.file.map(|file| std::path::absolute(&file).unwrap_or(file));
     match err {
-        tgradish_core::Error::Config { .. } => message.note(fl!("settings-file-note")).actions(&[
-            Action::FreshSettings,
-            Action::ReadSettingsAgain,
-            Action::CopyPath,
-            Action::ShowInFolder,
-        ]),
+        tgradish_core::Error::Config { .. } => {
+            message.note(later!("settings-file-note")).actions(&[
+                Action::FreshSettings,
+                Action::ReadSettingsAgain,
+                Action::CopyPath,
+                Action::ShowInFolder,
+            ])
+        }
         _ => message.actions(&[Action::ReadSettingsAgain, Action::CopyPath, Action::ShowInFolder]),
     }
 }
@@ -834,7 +836,7 @@ pub(crate) fn told(message: Message, err: &tgradish_core::Error) -> Message {
         Error::Io { path, error, .. } => message.file(path).literal(error.to_string()),
         Error::Ffmpeg { program, status, stderr } => {
             let program = program.to_string();
-            let failed = fl!("program-failed", program = program, status = status.as_str());
+            let failed = later!("program-failed", program = program, status = status.as_str());
             message.reason(failed).literal(stderr)
         }
         err => message.reason(failure(err)),
@@ -844,7 +846,7 @@ pub(crate) fn told(message: Message, err: &tgradish_core::Error) -> Message {
 /// What to say of the open files that couldn't be kept at `path` for
 /// next time, as the system said why.
 pub(crate) fn session_unsaved(path: &Path, err: &std::io::Error) -> Message {
-    Message::warning(fl!("session-unsaved")).file(path).literal(err.to_string())
+    Message::warning(later!("session-unsaved")).file(path).literal(err.to_string())
 }
 
 /// What to say when nothing was pasted, as `err` says why: the clipboard
@@ -853,16 +855,16 @@ pub(crate) fn not_pasted(err: &tgradish_core::Error) -> Message {
     use tgradish_core::{ClipboardError, Error};
     match err {
         Error::Clipboard(ClipboardError::Empty) => {
-            Message::warning(fl!("nothing-to-paste")).reason(fl!("nothing-to-paste", "why"))
+            Message::warning(later!("nothing-to-paste")).reason(later!("nothing-to-paste", "why"))
         }
         Error::Clipboard(ClipboardError::Unreadable(said)) => {
-            Message::warning(fl!("paste-failed")).literal(said)
+            Message::warning(later!("paste-failed")).literal(said)
         }
         Error::Clipboard(ClipboardError::ImageUnsaved(said)) => {
-            Message::warning(fl!("paste-failed", "image")).literal(said)
+            Message::warning(later!("paste-failed", "image")).literal(said)
         }
         // making the image's file
-        err => told(Message::warning(fl!("paste-failed", "image")), err),
+        err => told(Message::warning(later!("paste-failed", "image")), err),
     }
 }
 
@@ -1632,5 +1634,168 @@ mod tests {
         // the result made with these settings is still the current one
         assert!(item.result_is_current());
         assert!(crate::testing::said(app).contains("1 file is gone"));
+    }
+
+    /// Set in the process [`rewords_what_it_shows_once_the_language_changes`]
+    /// runs itself in.
+    const REWORDING: &str = "TGRADISH_TEST_REWORDING";
+
+    /// Every text drawn in the last frame.
+    fn painted(harness: &egui_kittest::Harness<App>) -> Vec<String> {
+        fn walk(shape: &egui::Shape, texts: &mut Vec<String>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, texts)),
+                egui::Shape::Text(text) => texts.push(text.galley.text().to_owned()),
+                _ => {}
+            }
+        }
+        let mut texts = Vec::new();
+        harness.output().shapes.iter().for_each(|clipped| walk(&clipped.shape, &mut texts));
+        texts
+    }
+
+    /// What of `texts` is in Ukrainian's letters.
+    fn cyrillic(texts: &[String]) -> Vec<&String> {
+        let letter = |c: char| ('\u{400}'..='\u{4ff}').contains(&c);
+        texts.iter().filter(|text| text.chars().any(letter)).collect()
+    }
+
+    /// What the GUI said and keeps showing, made in Ukrainian, is all in
+    /// English once the language changes, as Settings changes it: a
+    /// result's problems and warnings; a failure; the notices along the bottom; what
+    /// checking ffmpeg found; and a sticker inspected. The language is the
+    /// whole process's, so the test runs itself in a process of its own,
+    /// where no other test runs meanwhile.
+    #[test]
+    fn rewords_what_it_shows_once_the_language_changes() {
+        use tgradish_core::events::Warning as Warned;
+        use tgradish_core::tgradish_tgs::normalise::Warning as Art;
+
+        use crate::item::Conversion;
+        use crate::jobs::{Done, Job, Status, Warning, failure, problems};
+        use crate::l10n::later;
+        use crate::testing::{ANY, fixed};
+
+        if std::env::var_os(REWORDING).is_none() {
+            let test = module_path!().split_once("::").map_or("", |(_, path)| path).to_owned()
+                + "::rewords_what_it_shows_once_the_language_changes";
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", &test, "--test-threads=1"])
+                .env(REWORDING, "1")
+                .env_remove(crate::l10n::VARIABLE)
+                .output()
+                .unwrap();
+            let said = String::from_utf8_lossy(&output.stdout).into_owned()
+                + &String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success() && said.contains("1 passed"), "{said}");
+            return;
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (art, other) = (dir.path().join("art.png"), dir.path().join("other.png"));
+        square(&art, [255, 0, 0, 255]);
+        square(&other, [0, 0, 255, 255]);
+        let mut config = Config::default();
+        config.gui.language = Some("uk".into());
+        config.ffmpeg.choice = tgradish_core::ffmpeg::FfmpegChoice::System;
+        config.ffmpeg.path = Some(dir.path().join("no-ffmpeg"));
+        crate::l10n::choose(config.gui.language.as_deref());
+        let mut harness = harness(config);
+        harness.state_mut().add(vec![art, other]);
+        finish(&mut harness);
+
+        // a TGS result too large, of too many layers, at 30 fps, as the
+        // one in Ukrainian whose problems stayed so
+        let layers = vec![r#"{"ty":4,"shapes":[]}"#; 2700].join(",");
+        let lottie = format!(r#"{{"fr":30,"ip":0,"op":60,"w":512,"h":512,"layers":[{layers}]}}"#);
+        let (stats, found) = tgradish_core::tgradish_tgs::check::check(lottie.as_bytes(), None)
+            .expect("the animation reads");
+        let mut issues = vec![telegram::Issue::TooBig { bytes: 73_318, max: 65_536 }];
+        issues.extend(telegram::check_lottie(found, &stats));
+        let mut job = Job::waiting(dir.path().join("art.tgs"));
+        job.progress.warnings = vec![
+            Warning::SheetRefused { frames: 8 },
+            Warning::Converting(Warned::Art(Art::ManyColours { colours: 4000 })),
+            Warning::Converting(Warned::Trimmed { max: 3.0 }),
+        ];
+        job.status = Status::Done(Box::new(Done {
+            output: dir.path().join("art.tgs"),
+            bytes: 73_318,
+            limit: 65_536,
+            changed: true,
+            attempt: None,
+            spoofed: false,
+            settled: false,
+            json_bytes: Some(1_243_648),
+            shapes: Some((2700, 0)),
+            problems: problems(&issues),
+            drawing: None,
+        }));
+        let item = &mut harness.state_mut().items[0];
+        item.made = Some(Conversion::of(job, Format::Tgs, item.choices.clone()));
+        // and another's conversion that failed
+        let mut failed = Job::waiting(dir.path().join("other.tgs"));
+        let nothing = tgradish_core::Error::NothingFits { smallest: 70_000, limit: 65_536 };
+        failed.status = Status::Failed(failure(&nothing));
+        let item = &mut harness.state_mut().items[1];
+        item.failed = Some(Conversion::of(failed, Format::Tgs, item.choices.clone()));
+        // notices along the bottom
+        let empty = tgradish_core::Error::Clipboard(tgradish_core::ClipboardError::Empty);
+        harness.state_mut().say(not_pasted(&empty));
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        harness.state_mut().say(session_unsaved(&dir.path().join("session.json"), &denied));
+        harness.state_mut().say(Message::info(later!("files-gone", count = 2_usize)));
+        // what checking the ffmpeg that isn't there finds
+        harness.state_mut().dialogs.settings.open();
+        harness.run_steps(10);
+        harness.get_by_label(&fl!("check")).click_accesskit();
+        let checked = fixed(&fl!("ffmpeg-not-found", details = ANY)).to_owned();
+        for _ in 0..500 {
+            harness.step();
+            if painted(&harness).iter().any(|text| text.contains(&checked)) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(painted(&harness).iter().any(|text| text.contains(&checked)));
+
+        let id =
+            |harness: &egui_kittest::Harness<App>, index: usize| harness.state().items[index].id;
+        let seen = |harness: &mut egui_kittest::Harness<App>| {
+            let mut texts = Vec::new();
+            for index in [1, 0] {
+                let id = id(harness, index);
+                harness.state_mut().select(id);
+                harness.run_steps(4);
+                texts.extend(painted(harness));
+            }
+            texts
+        };
+        // all of it in Ukrainian first
+        let before = seen(&mut harness);
+        assert_ne!(cyrillic(&before), Vec::<&String>::new());
+
+        // the language changed as Settings changes it
+        harness.state_mut().config.gui.language = Some("en-GB".into());
+        crate::l10n::choose(Some("en-GB"));
+        let mut after = seen(&mut harness);
+        harness.state_mut().dialogs.settings = Default::default();
+        harness.state_mut().dialogs.inspection =
+            Some(crate::inspect::Inspection::of(&dir.path().join("gone.tgs")));
+        after.extend(seen(&mut harness));
+        assert_eq!(cyrillic(&after), Vec::<&String>::new());
+        // and what it said is said again in English
+        let said = [
+            fl!("issue-too-big", size = "71.6 KiB", limit = "64.0 KiB"),
+            fl!("sheet-refused", "converted", frames = 8_usize),
+            fl!("nothing-fits", limit = "64.0 KiB", smallest = "68.4 KiB"),
+            fl!("nothing-to-paste", "why"),
+            fl!("files-gone", count = 2_usize),
+            fl!("ffmpeg-not-found", details = ANY),
+            fl!("no-such-file", name = "gone.tgs"),
+        ];
+        for said in said {
+            let said = fixed(&said).to_owned();
+            assert!(after.iter().any(|text| text.contains(&said)), "{said:?} in {after:?}");
+        }
     }
 }

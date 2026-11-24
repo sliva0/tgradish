@@ -264,7 +264,7 @@ mod tests {
             panic!("{:?}", made.job.status)
         };
         let warned = &made.job.progress.warnings;
-        let said = fl!("sheet-refused", "converted", frames = 8);
+        let said = crate::jobs::Warning::SheetRefused { frames: 8 };
         assert!(warned.contains(&said), "{warned:?}");
     }
 }

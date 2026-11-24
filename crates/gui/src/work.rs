@@ -17,7 +17,7 @@ use crate::app::App;
 use crate::files::THUMB;
 use crate::item::{Conversion, Item, Kind, Recipe, Show};
 use crate::jobs::{Done, Setup, Status};
-use crate::l10n::fl;
+use crate::l10n::{Text, fl};
 use crate::media::{self, Art, Clip, Load, Task, Video};
 use crate::outputs::Written;
 
@@ -35,7 +35,7 @@ pub(crate) struct Work {
     pub(crate) batch: usize,
     /// The ffmpeg inputs were last read with, or why there was none: when
     /// it changes, reads that failed are tried again.
-    pub(crate) read_with: Option<Result<Backend, String>>,
+    pub(crate) read_with: Option<Result<Backend, Text>>,
 }
 
 impl App {
@@ -45,8 +45,8 @@ impl App {
     pub(crate) fn setup(
         &self,
         recipe: Recipe,
-        backend: &Result<Backend, String>,
-    ) -> Result<Setup, String> {
+        backend: &Result<Backend, Text>,
+    ) -> Result<Setup, Text> {
         let settings = Settings::from(recipe);
         let threads = self.config.threads;
         match backend {
@@ -197,7 +197,7 @@ impl App {
     /// Loads higher-detail video frames for the selected item once playback or
     /// trim controls settle: the trimmed segment at full frame rate, and the
     /// current paused frame at full resolution.
-    fn load_detail(&mut self, ctx: &egui::Context, backend: &Result<Backend, String>) {
+    fn load_detail(&mut self, ctx: &egui::Context, backend: &Result<Backend, Text>) {
         let Some(id) = self.selected else { return };
         let Ok(backend) = backend else { return };
         let Some(item) = self.item_mut(id) else { return };
@@ -222,7 +222,7 @@ impl App {
         }
     }
 
-    fn convert_next(&mut self, ctx: &egui::Context, backend: &Result<Backend, String>) {
+    fn convert_next(&mut self, ctx: &egui::Context, backend: &Result<Backend, Text>) {
         let mut finished = Vec::new();
         for item in &mut self.items {
             if let Some(Conversion { job, .. }) = &mut item.job
@@ -263,7 +263,8 @@ impl App {
             let Some(item) = self.item(id) else { continue };
             // Fail queued jobs that developed a blocker after being enqueued.
             if let Some(blocker) = item.blockers.first() {
-                let why = fl!("blocked", reason = blocker.reason());
+                let blocker = blocker.clone();
+                let why = Text::worded(move || fl!("blocked", reason = blocker.reason()));
                 let item = self.item_mut(id).expect("found above");
                 if let Some(conversion) = &mut item.job {
                     conversion.job.status = Status::Failed(why);
@@ -303,7 +304,8 @@ impl App {
                 continue;
             };
             let recipe = choices.recipe(*format, &self.presets, &self.config);
-            let setup = recipe.clone().and_then(|recipe| self.setup(recipe, backend));
+            let setup =
+                recipe.clone().map_err(Text::said).and_then(|recipe| self.setup(recipe, backend));
             let overwrite = self.may_replace(id, &job.output);
             // Warn when overwriting an existing file not written for this item.
             let replaces = job.output.exists() && !self.outputs.wrote(id, &job.output);
@@ -419,7 +421,7 @@ fn check_earlier(ctx: &egui::Context, item: &mut Item) {
         let (output, format) = (earlier.job.output.clone(), earlier.format);
         let target = earlier.recipe.as_ref().map(Recipe::target).unwrap_or_default();
         load.reload(media::Task::spawn(ctx, move |_| {
-            Done::of_file(&output, format, target).ok_or_else(String::new)
+            Done::of_file(&output, format, target).ok_or_else(Text::default)
         }));
     }
     load.poll();
@@ -470,7 +472,7 @@ fn texture_options(clip: &Clip) -> egui::TextureOptions {
     if clip.pixelated { egui::TextureOptions::NEAREST } else { egui::TextureOptions::LINEAR }
 }
 
-fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backend, String>) {
+fn load_result_clip(ctx: &egui::Context, item: &mut Item, backend: &Result<Backend, Text>) {
     let Some(Conversion { job, format, .. }) = &mut item.made else { return };
     let Status::Done(done) = &mut job.status else { return };
     item.result_clip = match (format, backend) {

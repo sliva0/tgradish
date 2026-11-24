@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use eframe::egui::{self, Color32, Sense, TextStyle, vec2};
 
-use crate::l10n::fl;
+use crate::l10n::{Text, fl, later};
 use crate::theme;
 
 /// How a message reads: a warning says something didn't work.
@@ -109,13 +109,13 @@ impl Action {
 pub(crate) struct Message {
     pub(crate) severity: Severity,
     /// What happened, in a short sentence of tgradish's own.
-    pub(crate) headline: String,
+    pub(crate) headline: Text,
     /// The file it is about.
     pub(crate) file: Option<PathBuf>,
     /// Why, in tgradish's own words, in a line of its own.
-    pub(crate) reason: Option<String>,
+    pub(crate) reason: Option<Text>,
     /// What it means or what can be done, in a line of its own.
-    pub(crate) note: Option<String>,
+    pub(crate) note: Option<Text>,
     /// What a program or the system said, as it said it, in monospace
     /// and in its own lines and columns: never tgradish's own words,
     /// which are the reason's.
@@ -126,15 +126,15 @@ pub(crate) struct Message {
 }
 
 impl Message {
-    pub(crate) fn info(headline: impl Into<String>) -> Message {
+    pub(crate) fn info(headline: impl Into<Text>) -> Message {
         Message::new(Severity::Info, headline.into())
     }
 
-    pub(crate) fn warning(headline: impl Into<String>) -> Message {
+    pub(crate) fn warning(headline: impl Into<Text>) -> Message {
         Message::new(Severity::Warning, headline.into())
     }
 
-    fn new(severity: Severity, headline: String) -> Message {
+    fn new(severity: Severity, headline: Text) -> Message {
         Message {
             severity,
             headline,
@@ -151,11 +151,11 @@ impl Message {
         Message { file: Some(file.into()), ..self }
     }
 
-    pub(crate) fn reason(self, reason: impl Into<String>) -> Message {
+    pub(crate) fn reason(self, reason: impl Into<Text>) -> Message {
         Message { reason: Some(reason.into()), ..self }
     }
 
-    pub(crate) fn note(self, note: impl Into<String>) -> Message {
+    pub(crate) fn note(self, note: impl Into<Text>) -> Message {
         Message { note: Some(note.into()), ..self }
     }
 
@@ -179,11 +179,12 @@ impl Message {
         Message { subject: Some(subject), ..self }
     }
 
-    /// Everything it says, for finding fonts for it.
+    /// Everything it says now, for finding fonts for it.
     pub(crate) fn texts(&self) -> impl Iterator<Item = String> + '_ {
         let file = self.file.as_ref().map(|file| file.display().to_string());
-        let parts = [&self.reason, &self.note, &self.literal].into_iter().flatten().cloned();
-        std::iter::once(self.headline.clone()).chain(file).chain(parts)
+        let worded = [&self.reason, &self.note].into_iter().flatten().map(Text::say);
+        let parts = worded.chain(self.literal.iter().cloned());
+        std::iter::once(self.headline.say()).chain(file).chain(parts)
     }
 }
 
@@ -199,7 +200,7 @@ pub(crate) struct Said {
     since: Option<f64>,
     pub(crate) details_open: bool,
     /// What an action said of itself, as "Copied", and until when.
-    pub(crate) flash: Option<(String, f64)>,
+    pub(crate) flash: Option<(Text, f64)>,
     /// When it was first drawn, from which it fades in.
     came: Option<f64>,
     /// How tall it was last drawn, with the room after it, which closes
@@ -332,7 +333,7 @@ impl Banner {
 
     /// Shows a moment's `text` beside the buttons of `message`, or of
     /// what took its place, from `now`.
-    pub(crate) fn flash(&mut self, message: &Message, text: String, now: f64) {
+    pub(crate) fn flash(&mut self, message: &Message, text: Text, now: f64) {
         let of = |said: &&mut Said| {
             said.message == *message
                 || message.subject.is_some() && said.message.subject == message.subject
@@ -618,7 +619,7 @@ impl crate::app::App {
             Action::CopyPath => {
                 let Some(file) = &message.file else { return };
                 ctx.copy_text(copied_path(file));
-                self.banner.flash(message, fl!("copy-path", "done"), now);
+                self.banner.flash(message, later!("copy-path", "done"), now);
             }
             Action::ShowInFolder => {
                 if let Some(file) = &message.file {
@@ -636,12 +637,12 @@ impl crate::app::App {
                         }
                         self.config = config;
                         self.banner.forget(Subject::SettingsFile);
-                        self.say(Message::info(fl!("settings-read")).file(path));
+                        self.say(Message::info(later!("settings-read")).file(path));
                     }
                     Err(err) => {
                         let headline = message.headline.clone();
                         self.say(crate::app::settings_unreadable(headline, &err));
-                        self.banner.flash(message, fl!("read-again", "failed"), now);
+                        self.banner.flash(message, later!("read-again", "failed"), now);
                     }
                 }
             }
@@ -650,7 +651,7 @@ impl crate::app::App {
             Action::UndoReset => self.undo_reset(),
             Action::ReadPresetsAgain => {
                 if !self.reload_presets() {
-                    self.banner.flash(message, fl!("read-again", "failed"), now);
+                    self.banner.flash(message, later!("read-again", "failed"), now);
                 }
             }
         }
@@ -664,11 +665,11 @@ impl crate::app::App {
         match crate::settings_dialog::write(&mut self.config, &path) {
             Ok(kept) => {
                 self.banner.forget(Subject::SettingsFile);
-                let message = Message::info(fl!("fresh-settings", "saved"));
+                let message = Message::info(later!("fresh-settings", "saved"));
                 self.say(match kept {
                     Some(kept) => {
                         let name = kept.file_name().unwrap_or_default().to_string_lossy();
-                        let note = fl!("fresh-settings", "kept", name = name.into_owned());
+                        let note = later!("fresh-settings", "kept", name = name.into_owned());
                         message.file(kept).note(note).actions(&[Action::ShowInFolder])
                     }
                     None => message.file(path),
@@ -677,7 +678,7 @@ impl crate::app::App {
             Err(err) => {
                 // about the file that couldn't be read or written, where
                 // that is the copy of the old one rather than the new
-                let message = Message::warning(fl!("fresh-settings", "failed")).file(path);
+                let message = Message::warning(later!("fresh-settings", "failed")).file(path);
                 self.say(crate::app::told(message, &err));
             }
         }
@@ -719,7 +720,7 @@ fn headline(ui: &egui::Ui, said: &Said, width: f32) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     let body = TextStyle::Body.resolve(ui.style());
     job.append(
-        &said.message.headline,
+        &said.message.headline.say(),
         0.0,
         egui::TextFormat::simple(body, ui.visuals().text_color()),
     );
@@ -755,7 +756,7 @@ fn needs(ui: &egui::Ui, said: &Said, room: f32) -> f32 {
     let message = &said.message;
     let mut widest = painter.layout_job(headline(ui, said, room)).size().x;
     for line in [&message.reason, &message.note].into_iter().flatten() {
-        let job = egui::text::LayoutJob::simple(line.clone(), body.clone(), Color32::WHITE, room);
+        let job = egui::text::LayoutJob::simple(line.say(), body.clone(), Color32::WHITE, room);
         widest = widest.max(painter.layout_job(job).size().x);
     }
     if let Some(file) = &message.file {
@@ -901,7 +902,7 @@ fn text(ui: &mut egui::Ui, said: &mut Said, column: f32, now: f64, row: &mut Row
         ui.add(egui::Label::new(label).extend()).on_hover_text(file.display().to_string());
     }
     for line in [&message.reason, &message.note].into_iter().flatten() {
-        ui.add(egui::Label::new(line.as_str()).wrap());
+        ui.add(egui::Label::new(line).wrap());
     }
     let long = message.literal.as_deref().is_some_and(|detail| !short(detail));
     if !message.actions.is_empty() || long {
@@ -1366,7 +1367,7 @@ mod tests {
         let detail = message.literal.as_deref().unwrap();
         assert!(detail.starts_with("TOML parse error at line 2"), "{detail}");
         assert!(detail.ends_with("expected `from` or `path`"), "{detail}");
-        assert!(!message.headline.contains("config.toml"));
+        assert!(!message.headline.say().contains("config.toml"));
         assert_eq!(message.actions[0], Action::FreshSettings);
         // dismissed, it is said again at the next change
         harness.run_steps(2);
@@ -1399,7 +1400,7 @@ mod tests {
         use tgradish_core::{ClipboardError, Error};
         let empty = crate::app::not_pasted(&Error::Clipboard(ClipboardError::Empty));
         assert_eq!(empty.headline, fl!("nothing-to-paste"));
-        assert_eq!(empty.reason, Some(fl!("nothing-to-paste", "why")));
+        assert_eq!(empty.reason, Some(crate::l10n::later!("nothing-to-paste", "why")));
         assert_eq!(empty.literal, None);
         let said = ClipboardError::Unreadable("Unknown error while interacting".into());
         let unreadable = crate::app::not_pasted(&Error::Clipboard(said));
@@ -1414,7 +1415,13 @@ mod tests {
             stderr: "Invalid data found\n".into(),
         };
         let failed = crate::app::told(Message::warning("Failed"), &failed);
-        assert!(failed.reason.as_deref().is_some_and(|reason| reason.starts_with("ffmpeg failed")));
+        assert!(
+            failed
+                .reason
+                .as_ref()
+                .map(Text::say)
+                .is_some_and(|reason| reason.starts_with("ffmpeg failed"))
+        );
         assert_eq!(failed.literal.as_deref(), Some("Invalid data found"));
         let mut harness = crate::testing::harness(Config::default());
         harness.state_mut().say(empty);

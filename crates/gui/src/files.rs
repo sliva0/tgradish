@@ -123,7 +123,7 @@ impl App {
             Ok(Some(Picked::OutputDir(dir))) => self.config.gui.output_dir = Some(dir),
             Ok(None) => {}
             // what the task says is of a file shown, as "Reading it stopped"
-            Err(_) => self.say(crate::banner::Message::warning(fl!("pick-failed"))),
+            Err(_) => self.say(crate::banner::Message::warning(crate::l10n::later!("pick-failed"))),
         }
     }
 
@@ -632,7 +632,7 @@ impl Picker {
     }
 
     /// What the file dialog picked, once it closes, or why nothing was.
-    fn picked(&mut self) -> Option<Result<Option<Picked>, String>> {
+    fn picked(&mut self) -> Option<Result<Option<Picked>, crate::l10n::Text>> {
         let result = self.picking.as_ref().and_then(Task::poll)?;
         self.picking = None;
         Some(result)
@@ -1084,8 +1084,9 @@ mod tests {
         // as a dialog answers, a moment later, while the GUI draws on
         let (answer, picked) = std::sync::mpsc::channel();
         let ctx = harness.ctx.clone();
-        harness.state_mut().picker.picking =
-            Some(Task::spawn(&ctx, move |_| picked.recv().map_err(|err| err.to_string())));
+        harness.state_mut().picker.picking = Some(Task::spawn(&ctx, move |_| {
+            picked.recv().map_err(|err| crate::l10n::Text::said(err.to_string()))
+        }));
         harness.run_steps(3);
         // another isn't asked for meanwhile
         harness.state_mut().picker.pick(&ctx, Pick::Files);

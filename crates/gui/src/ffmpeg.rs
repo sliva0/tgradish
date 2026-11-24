@@ -39,7 +39,7 @@ impl Ffmpeg {
     }
 
     /// The ffmpeg found for [`Ffmpeg::settings`], or why there is none.
-    pub(crate) fn backend(&self, config: &FfmpegConfig) -> Result<Backend, String> {
+    pub(crate) fn backend(&self, config: &FfmpegConfig) -> Result<Backend, crate::l10n::Text> {
         let settings = self.settings(config);
         let mut found = self.found.borrow_mut();
         match &*found {
@@ -61,5 +61,5 @@ impl Ffmpeg {
 struct FoundBackend {
     settings: (FfmpegChoice, Option<PathBuf>),
     when: Instant,
-    backend: Result<Backend, String>,
+    backend: Result<Backend, crate::l10n::Text>,
 }

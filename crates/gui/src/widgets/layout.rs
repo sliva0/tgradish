@@ -359,7 +359,7 @@ pub(crate) fn problems(ui: &mut egui::Ui, problems: &[Problem]) {
         } else {
             (theme::warn(ui.visuals()), "⚠")
         };
-        ui.colored_label(colour, format!("{mark} {}", problem.text));
+        ui.colored_label(colour, format!("{mark} {}", problem.text()));
     }
 }
 

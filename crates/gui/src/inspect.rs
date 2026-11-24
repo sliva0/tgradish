@@ -22,7 +22,7 @@ pub(crate) enum Found {
     Webm { info: Box<WebmInfo>, target: Target },
     Tgs(Box<Stats>),
     Image { info: webp::Info, target: Target },
-    Failed(String),
+    Failed(crate::l10n::Text),
 }
 
 pub(crate) struct Inspection {
@@ -42,7 +42,7 @@ impl Inspection {
                 (Found::Webm { info, target }, jobs::problems(&issues))
             }
             // a kind of file the GUI doesn't know yet
-            Ok(_) => (Found::Failed(fl!("inspect-unknown")), Vec::new()),
+            Ok(_) => (Found::Failed(crate::l10n::later!("inspect-unknown")), Vec::new()),
             Err(err) => (Found::Failed(crate::jobs::failure(&err)), Vec::new()),
         };
         Inspection { path: path.to_path_buf(), found, problems }
@@ -141,7 +141,7 @@ fn of(used: impl std::fmt::Display, limit: impl std::fmt::Display) -> String {
 pub(crate) fn show(ui: &mut egui::Ui, inspection: &Inspection) {
     match &inspection.found {
         Found::Failed(message) => {
-            ui.colored_label(theme::bad(ui.visuals()), message);
+            ui.colored_label(theme::bad(ui.visuals()), message.say());
             return;
         }
         Found::Webm { info, target } => webm(ui, info, *target),

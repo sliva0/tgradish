@@ -19,7 +19,7 @@ pub(crate) fn summary(ui: &mut egui::Ui, item: &Item, queued: Option<usize>, cop
         widgets::section(ui, &fl!("last-conversion"));
         match &failed.job.status {
             Status::Failed(message) => {
-                let said = ui.colored_label(theme::bad(ui.visuals()), message);
+                let said = ui.colored_label(theme::bad(ui.visuals()), message.say());
                 // Scroll to the full error message when clicked in the bottom bar.
                 if crate::actions::pointed_at_failure(ui.ctx()) {
                     said.scroll_to_me(Some(egui::Align::Center));
@@ -518,7 +518,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
         widgets::note(ui, decision_text(decision));
     }
     for warning in &progress.warnings {
-        ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {warning}"));
+        ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {}", warning.text()));
     }
 }
 

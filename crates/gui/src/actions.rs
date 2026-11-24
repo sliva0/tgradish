@@ -316,7 +316,7 @@ impl Said {
             return Said::Blocked(blocked);
         }
         match item.failed.as_ref().map(|failed| &failed.job.status) {
-            Some(Status::Failed(message)) => Said::Failed(message.clone()),
+            Some(Status::Failed(message)) => Said::Failed(message.say()),
             Some(Status::Exists(path)) => Said::InTheWay(path.clone()),
             Some(Status::Cancelled) => Said::Stopped,
             _ => Said::Nothing,

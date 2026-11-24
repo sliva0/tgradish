@@ -237,7 +237,7 @@ pub(crate) fn make(ui: &mut egui::Ui, item: &mut Item, context: &Context) {
             };
             ui.colored_label(theme::warn(ui.visuals()), format!("⚠ {why}"));
             if known {
-                note(ui, crate::jobs::failure(&err));
+                note(ui, crate::jobs::failure(&err).say());
             }
         }
         _ if image => widgets::hint(ui, pictures),

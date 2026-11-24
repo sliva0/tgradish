@@ -21,7 +21,7 @@ use tgradish_core::webm::Options;
 
 use crate::cuts::{self, Cut};
 use crate::jobs::failure;
-use crate::l10n::fl;
+use crate::l10n::{Text, later};
 
 /// Frames of a video or animation, as straight RGBA.
 pub(crate) struct Clip {
@@ -156,14 +156,14 @@ const TGS_COLOURS: usize = 128;
 
 /// Work on another thread, cancelled when dropped.
 pub(crate) struct Task<T> {
-    receiver: Receiver<Result<T, String>>,
+    receiver: Receiver<Result<T, Text>>,
     cancel: CancelToken,
 }
 
 impl<T: Send + 'static> Task<T> {
     pub(crate) fn spawn(
         ctx: &egui::Context,
-        work: impl FnOnce(&CancelToken) -> Result<T, String> + Send + 'static,
+        work: impl FnOnce(&CancelToken) -> Result<T, Text> + Send + 'static,
     ) -> Task<T> {
         let (sender, receiver) = channel();
         let cancel = CancelToken::new();
@@ -171,7 +171,7 @@ impl<T: Send + 'static> Task<T> {
         let ctx = ctx.clone();
         std::thread::spawn(move || {
             let result = std::panic::catch_unwind(AssertUnwindSafe(|| work(&token)))
-                .unwrap_or_else(|_| Err(fl!("reading-crashed")));
+                .unwrap_or_else(|_| Err(later!("reading-crashed")));
             let _ = sender.send(result);
             ctx.request_repaint();
         });
@@ -181,11 +181,11 @@ impl<T: Send + 'static> Task<T> {
 
 impl<T> Task<T> {
     /// The result, once there is one.
-    pub(crate) fn poll(&self) -> Option<Result<T, String>> {
+    pub(crate) fn poll(&self) -> Option<Result<T, Text>> {
         match self.receiver.try_recv() {
             Ok(result) => Some(result),
             Err(TryRecvError::Empty) => None,
-            Err(TryRecvError::Disconnected) => Some(Err(fl!("reading-stopped"))),
+            Err(TryRecvError::Disconnected) => Some(Err(later!("reading-stopped"))),
         }
     }
 }
@@ -203,7 +203,7 @@ pub(crate) enum Load<T> {
     /// What was loaded last, shown until what is loading again is there.
     Reloading(T, Task<T>),
     Ready(T),
-    Failed(String),
+    Failed(Text),
 }
 
 impl<T> Load<T> {
@@ -345,13 +345,15 @@ impl Video {
             let frames =
                 backend.frames(path, &probe, &request, cancel).map_err(|err| failure(&err))?;
             if frames.frames.is_empty() {
-                return Err(fl!("no-frames"));
+                return Err(later!("no-frames"));
             }
             let starts = if probe.still_image {
                 Vec::new()
             } else {
                 match backend.frame_starts(path, &probe, cancel) {
-                    Err(err @ tgradish_core::Error::Cancelled) => return Err(err.to_string()),
+                    Err(err @ tgradish_core::Error::Cancelled) => {
+                        return Err(Text::said(err.to_string()));
+                    }
                     starts => starts.unwrap_or_default(),
                 }
             };
@@ -430,7 +432,7 @@ impl Video {
             let frames =
                 backend.frames(path, &probe, &request, cancel).map_err(|err| failure(&err))?;
             if frames.frames.is_empty() {
-                return Err(fl!("no-frames-there"));
+                return Err(later!("no-frames-there"));
             }
             Ok(Clip::from_frames(frames))
         })
@@ -460,7 +462,7 @@ impl Video {
             let frames =
                 backend.frames(path, &probe, &request, cancel).map_err(|err| failure(&err))?;
             if frames.frames.is_empty() {
-                return Err(fl!("no-frame-there"));
+                return Err(later!("no-frame-there"));
             }
             Ok(Clip::from_frames(frames))
         })
@@ -514,7 +516,7 @@ impl Art {
                     },
                 };
             if art.frames.is_empty() {
-                return Err(fl!("art-no-frames"));
+                return Err(later!("art-no-frames"));
             }
             let mut times = vec![0.0];
             let mut frames = Vec::with_capacity(art.frames.len());
@@ -599,7 +601,7 @@ pub(crate) fn load_result(ctx: &egui::Context, backend: Backend, path: &Path) ->
     Task::spawn(ctx, move |cancel| {
         let preview = backend.preview(&path, RESULT_SIDE, cancel).map_err(|err| failure(&err))?;
         if preview.frames.is_empty() {
-            return Err(fl!("result-no-frames"));
+            return Err(later!("result-no-frames"));
         }
         Ok(Clip::from_preview(preview, false))
     })

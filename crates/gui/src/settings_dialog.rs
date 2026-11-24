@@ -16,7 +16,7 @@ use tgradish_core::presets::{Format, Presets};
 
 use crate::app::App;
 use crate::file_settings;
-use crate::l10n::{self, fl};
+use crate::l10n::{self, Text, fl, later};
 use crate::media::Task;
 use crate::theme;
 use crate::widgets::{self, note, row, segments};
@@ -40,7 +40,7 @@ pub(crate) struct SettingsDialog {
     /// (cancelled if the dialog is reopened or the GUI exits).
     checking: Option<Task<Checked>>,
     /// Result of the last `config.toml` write (`Ok(message)` or `Err(error)`).
-    saved: Option<Result<String, String>>,
+    saved: Option<Result<Text, Text>>,
     /// Snapshot of `Config` as last written to disk (or when the dialog opened).
     written: Option<Config>,
     /// Snapshot of `Config` on the previous frame and the timestamp when it
@@ -130,7 +130,7 @@ impl SettingsDialog {
         let missing = tgradish_core::FfmpegMissing::NoProgram(ffmpeg.to_path_buf());
         let err = tgradish_core::Error::FfmpegNotFound(missing);
         self.ffmpeg_status = Some(checked(&err));
-        self.saved = Some(Ok(fl!("saved-to", path = saved.display().to_string())));
+        self.saved = Some(Ok(later!("saved-to", path = saved.display().to_string())));
     }
 
     /// Clears uncommitted path edits and `folder_unchosen` when resetting or
@@ -273,7 +273,7 @@ fn folder_problem(path: &Path) -> Option<String> {
 #[derive(Clone, Debug, Default)]
 struct Checked {
     ready: bool,
-    said: String,
+    said: Text,
     path: Option<String>,
 }
 
@@ -305,7 +305,8 @@ fn ffmpeg_status(ui: &mut egui::Ui, checked: &Checked, colour: egui::Color32) {
         };
         ui.painter().layout_job(job)
     };
-    let said = checked.said.as_str();
+    let said = checked.said.say();
+    let said = said.as_str();
     let shown = match &checked.path {
         Some(path) if said.contains(path.as_str()) => {
             let say = |cut: &str| said.replacen(path.as_str(), cut, 1);
@@ -361,7 +362,7 @@ fn keep(
     }
     dialog.saved = Some(match config_path {
         Some(path) => save(config, path),
-        None => Err(fl!("no-home")),
+        None => Err(later!("no-home")),
     });
     dialog.wrote = matches!(dialog.saved, Some(Ok(_)));
     // Record the attempt so a failing save is not retried every frame until
@@ -372,14 +373,14 @@ fn keep(
 /// Saves `config` to `path` and returns a localised status or error string. If
 /// `path` already exists but cannot be parsed, backs it up beside `path` first
 /// so an unreadable config file from startup is not overwritten.
-fn save(config: &mut Config, path: &Path) -> Result<String, String> {
+fn save(config: &mut Config, path: &Path) -> Result<Text, Text> {
     let shown = path.display().to_string();
     match write(config, path) {
-        Ok(None) => Ok(fl!("saved-to", path = shown)),
+        Ok(None) => Ok(later!("saved-to", path = shown)),
         Ok(Some(kept)) => {
-            Ok(fl!("saved-to", "kept", path = shown, kept = kept.display().to_string()))
+            Ok(later!("saved-to", "kept", path = shown, kept = kept.display().to_string()))
         }
-        Err(error) => Err(fl!("not-saved", error = error.to_string())),
+        Err(error) => Err(later!("not-saved", error = error.to_string())),
     }
 }
 
@@ -609,12 +610,12 @@ const SHORT: f32 = 400.0;
 
 /// Draws the save status across the full width of the dialog, from the
 /// last write of `config.toml` (`saved`), or what saving is like.
-fn footer(ui: &mut egui::Ui, saved: &Option<Result<String, String>>) {
+fn footer(ui: &mut egui::Ui, saved: &Option<Result<Text, Text>>) {
     ui.add_space(4.0);
     match saved {
-        Some(Ok(saved)) => widgets::note(ui, saved),
+        Some(Ok(saved)) => widgets::note(ui, saved.say()),
         Some(Err(error)) => {
-            ui.colored_label(theme::bad(ui.visuals()), error);
+            ui.colored_label(theme::bad(ui.visuals()), error.say());
         }
         None => widgets::note(ui, fl!("settings-note")),
     }
@@ -1078,8 +1079,8 @@ fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken)
                 _ => version,
             };
             let (ready, said) = match caps.libvpx_vp9 {
-                true => (true, fl!("ffmpeg-ready", version = version)),
-                false => (false, fl!("ffmpeg-no-vp9", version = version)),
+                true => (true, later!("ffmpeg-ready", version = version)),
+                false => (false, later!("ffmpeg-no-vp9", version = version)),
             };
             Checked { ready, said, path: None }
         }
@@ -1380,7 +1381,7 @@ mod tests {
         assert_eq!(Config::load(&path).unwrap().threads, three);
         // what is converted next runs in them
         let recipe = crate::item::Recipe::Tgs(Default::default());
-        let setup = harness.state().setup(recipe, &Err(String::new())).unwrap();
+        let setup = harness.state().setup(recipe, &Err(Text::default())).unwrap();
         assert_eq!(setup.threads, three);
         // back to automatic, and to the defaults
         automatic(&harness);
@@ -1833,12 +1834,12 @@ mod tests {
         config.gui.overwrite = true;
         let said = save(&mut config, &path).unwrap();
         let aside = dir.path().join("config.toml.unreadable");
-        assert!(said.contains("config.toml.unreadable"), "{said}");
+        assert!(said.say().contains("config.toml.unreadable"), "{said}");
         assert_eq!(std::fs::read_to_string(&aside).unwrap(), "[ffmpeg]\nuse = \"auto\"\n");
         assert!(Config::load(&path).unwrap().gui.overwrite);
         // a file that reads is written over, and nothing more is kept
         std::fs::remove_file(&aside).unwrap();
-        assert!(!save(&mut config, &path).unwrap().contains("unreadable"));
+        assert!(!save(&mut config, &path).unwrap().say().contains("unreadable"));
         assert!(!aside.exists());
     }
 
@@ -1970,7 +1971,7 @@ mod tests {
         let before = under(&harness);
         let version = "8.0.1-full_build-www.gyan.dev Copyright (c) 2000-2025";
         let status = fl!("ffmpeg-no-vp9", version = version);
-        let checked = Checked { said: status.clone(), ..Checked::default() };
+        let checked = Checked { said: Text::said(status.clone()), ..Checked::default() };
         harness.state_mut().dialogs.settings.ffmpeg_status = Some(checked);
         harness.run_steps(2);
         harness.get_by_label(&status);
@@ -2071,7 +2072,7 @@ mod tests {
         let status = harness.state().dialogs.settings.ffmpeg_status.clone();
         assert!(
             matches!(&status, Some(Checked { ready: false, said, path: Some(_) })
-                if said.starts_with("ffmpeg wasn't found")),
+                if said.say().starts_with("ffmpeg wasn't found")),
             "{status:?}"
         );
     }

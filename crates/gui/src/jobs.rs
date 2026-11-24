@@ -22,7 +22,7 @@ use tgradish_core::webm::{Decision, Params};
 use tgradish_core::webp;
 use tgradish_core::{Error, Event, FfmpegMissing, Outcome, Started, telegram};
 
-use crate::l10n::fl;
+use crate::l10n::{Text, fl, later};
 use crate::widgets;
 
 /// What a job converts with, fixed when it starts: what to make and how,
@@ -85,7 +85,7 @@ pub(crate) struct Progress {
     /// large.
     pub(crate) unchanged_bytes: Option<usize>,
     pub(crate) steps: Vec<Step>,
-    pub(crate) warnings: Vec<String>,
+    pub(crate) warnings: Vec<Warning>,
     /// For `.tgs`: what it is doing.
     pub(crate) tgs: Option<TgsStage>,
     /// For `.tgs`: the art is never changed to fit.
@@ -120,19 +120,47 @@ impl Progress {
     }
 }
 
+/// What a conversion warned of: a warning of the GUI's own, or of
+/// converting's, each worded as it is shown.
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) enum Warning {
+    /// The file is a sheet of `frames` frames of its own, which converting
+    /// refuses: it was converted as it is.
+    SheetRefused { frames: usize },
+    /// What converting warned of.
+    Converting(tgradish_core::events::Warning),
+}
+
+impl Warning {
+    /// What it says: the GUI's own in its words, converting's as core
+    /// says it.
+    pub(crate) fn text(&self) -> String {
+        match self {
+            &Warning::SheetRefused { frames } => fl!("sheet-refused", "converted", frames = frames),
+            Warning::Converting(warned) => warned.to_string(),
+        }
+    }
+}
+
 /// A problem Telegram would have with a result.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Problem {
     /// Telegram refuses it, rather than only frowning on it.
     pub(crate) refused: bool,
-    pub(crate) text: String,
+    pub(crate) issue: telegram::Issue,
 }
 
 impl Problem {
-    /// What Telegram would have with a result or a file, in the GUI's
-    /// words where it has them: refused, or only frowned on.
+    /// What Telegram would have with a result or a file: refused, or only
+    /// frowned on.
     pub(crate) fn of(issue: &telegram::Issue) -> Problem {
-        Problem { refused: issue.severity() == Severity::Error, text: issue_text(issue) }
+        Problem { refused: issue.severity() == Severity::Error, issue: issue.clone() }
+    }
+
+    /// What it says, in the GUI's words where it has them, in the
+    /// language shown now.
+    pub(crate) fn text(&self) -> String {
+        issue_text(&self.issue)
     }
 }
 
@@ -185,50 +213,56 @@ fn sizes(bytes: u64, limit: u64) -> (String, String) {
 }
 
 /// What went wrong, in the GUI's words where people meet it, and as
-/// tgradish-core says it otherwise.
-pub(crate) fn failure(err: &Error) -> String {
+/// tgradish-core says it otherwise, worded whenever it is shown.
+pub(crate) fn failure(err: &Error) -> Text {
     let name = |path: &Path| {
         let name = path.file_name().map(|name| name.to_string_lossy().into_owned());
         name.unwrap_or_else(|| path.display().to_string())
     };
     match err {
-        Error::FfmpegNotFound(FfmpegMissing::NotOnPath) => fl!("ffmpeg-not-on-path"),
-        Error::FfmpegNotFound(missing) => fl!("ffmpeg-not-found", details = missing.to_string()),
-        Error::FfmpegArgsNeedProgram => fl!("ffmpeg-args-need-program"),
+        Error::FfmpegNotFound(FfmpegMissing::NotOnPath) => later!("ffmpeg-not-on-path"),
+        Error::FfmpegNotFound(missing) => {
+            later!("ffmpeg-not-found", details = missing.to_string())
+        }
+        Error::FfmpegArgsNeedProgram => later!("ffmpeg-args-need-program"),
         Error::Ffmpeg { program, status, stderr } => {
             let program = program.to_string();
-            let failed = fl!("program-failed", program = program, status = status.as_str());
-            format!("{failed}\n{stderr}")
+            let failed = later!("program-failed", program = program, status = status.as_str());
+            let stderr = stderr.clone();
+            Text::worded(move || format!("{failed}\n{stderr}"))
         }
         Error::Unreadable { path, message } => {
-            fl!("unreadable-file", name = name(path), details = message.as_str())
+            later!("unreadable-file", name = name(path), details = message.as_str())
         }
-        Error::NoVideo(path) => fl!("no-video", name = name(path)),
-        Error::NoSuchFile(path) => fl!("no-such-file", name = name(path)),
-        Error::Undrawable { .. } => fl!("tgs-unseen"),
-        Error::NotWebm(path) => fl!("not-webm", name = name(path)),
-        Error::NotSticker(path) => fl!("not-sticker", name = name(path)),
+        Error::NoVideo(path) => later!("no-video", name = name(path)),
+        Error::NoSuchFile(path) => later!("no-such-file", name = name(path)),
+        Error::Undrawable { .. } => later!("tgs-unseen"),
+        Error::NotWebm(path) => later!("not-webm", name = name(path)),
+        Error::NotSticker(path) => later!("not-sticker", name = name(path)),
         Error::NoFrame { path, at } => {
-            fl!("no-frame-at", name = name(path), seconds = widgets::seconds(*at))
+            later!("no-frame-at", name = name(path), seconds = widgets::seconds(*at))
         }
         &Error::NothingFits { smallest, limit } => {
             let (smallest, limit) = sizes(smallest, limit);
-            fl!("nothing-fits", limit = limit, smallest = smallest)
+            later!("nothing-fits", limit = limit, smallest = smallest)
         }
-        Error::Clipboard(tgradish_core::ClipboardError::Empty) => fl!("nothing-to-paste", "why"),
-        Error::Clipboard(details) => fl!("clipboard-failed", details = details.to_string()),
-        Error::OutputIsInput(path) => fl!("output-is-input", name = name(path)),
-        Error::NothingToConvert => fl!("nothing-to-convert"),
+        Error::Clipboard(tgradish_core::ClipboardError::Empty) => {
+            later!("nothing-to-paste", "why")
+        }
+        Error::Clipboard(details) => later!("clipboard-failed", details = details.to_string()),
+        Error::OutputIsInput(path) => later!("output-is-input", name = name(path)),
+        Error::NothingToConvert => later!("nothing-to-convert"),
         // as a preset's settings are wrong: what is wrong, as core says it
         Error::InvalidOption { .. } | Error::Preset(_) | Error::Config { .. } => {
             let details = err.to_string();
             let mut chars = details.chars();
-            chars
+            let details: String = chars
                 .next()
                 .map(|first| first.to_uppercase().chain(chars).collect())
-                .unwrap_or_default()
+                .unwrap_or_default();
+            Text::said(details)
         }
-        _ => err.to_string(),
+        _ => Text::said(err.to_string()),
     }
 }
 
@@ -352,7 +386,7 @@ pub(crate) enum Status {
     Waiting,
     Running,
     Done(Box<Done>),
-    Failed(String),
+    Failed(Text),
     /// The output exists and isn't one of ours.
     Exists(PathBuf),
     Cancelled,
@@ -508,7 +542,7 @@ impl Job {
                 }
                 Message::Crashed(details) => {
                     finished = true;
-                    self.status = Status::Failed(fl!("crashed", details = details));
+                    self.status = Status::Failed(later!("crashed", details = details));
                 }
             }
         }
@@ -546,7 +580,7 @@ fn run(
             crate::media::animated(backend.as_ref(), &input, &reading, cancel)
         {
             (settings.selection.sheet, settings.selection.sheet_frames) = (None, None);
-            let said = fl!("sheet-refused", "converted", frames = frames);
+            let said = Warning::SheetRefused { frames };
             update(Box::new(move |progress| progress.warnings.push(said)));
         }
         update(Box::new(move |progress| {
@@ -652,7 +686,7 @@ fn follow(event: Event, update: Update) {
             (progress.tgs_done, progress.stage_done) = (fraction as f32, stage_fraction as f32);
         })),
         Event::Warning { message } => {
-            update(Box::new(move |progress| progress.warnings.push(message.to_string())))
+            update(Box::new(move |progress| progress.warnings.push(Warning::Converting(message))))
         }
         _ => {}
     }
@@ -740,7 +774,7 @@ mod tests {
     }
 
     fn texts(issues: &[telegram::Issue]) -> Vec<String> {
-        problems(issues).into_iter().map(|problem| problem.text).collect()
+        problems(issues).into_iter().map(|problem| problem.text()).collect()
     }
 
     #[test]
@@ -749,31 +783,27 @@ mod tests {
         // a sticker's size, and an emoji's, by what the issue says
         let sticker = Issue::WrongSize { width: 300, height: 200, side: 512, exact: false };
         let emoji = Issue::WrongSize { width: 300, height: 200, side: 100, exact: true };
+        assert!(Problem::of(&sticker).refused);
         assert_eq!(
-            Problem::of(&sticker),
-            Problem {
-                refused: true,
-                text: fl!("issue-size", "sticker", width = 300, height = 200, side = 512)
-            }
+            Problem::of(&sticker).text(),
+            fl!("issue-size", "sticker", width = 300, height = 200, side = 512)
         );
         assert_eq!(
-            Problem::of(&emoji).text,
+            Problem::of(&emoji).text(),
             fl!("issue-size", width = 300, height = 200, side = 100)
         );
         // what only a .tgs is checked for, as core says it, and refused
         // only where it is an error
         let thirty = br#"{"fr":30,"ip":0,"op":60,"w":512,"h":512,"layers":[{"ty":4,"shapes":[]}]}"#;
         let (_, found) = tgradish_core::tgradish_tgs::check::check(thirty, None).unwrap();
-        let frowned = Issue::Lottie(found[0].clone());
+        let frowned = Problem::of(&Issue::Lottie(found[0].clone()));
+        assert!(!frowned.refused);
+        assert_eq!(frowned.text(), found[0].message);
         // and a .tgs's of the kinds every format has in the GUI's words
         let narrow = br#"{"fr":60,"ip":0,"op":60,"w":512,"h":256,"layers":[{"ty":4,"shapes":[]}]}"#;
         let (stats, narrow) = tgradish_core::tgradish_tgs::check::check(narrow, None).unwrap();
         let narrow = telegram::check_lottie(narrow, &stats);
         assert_eq!(texts(&narrow), [fl!("issue-size", width = 512, height = 256, side = 512)]);
-        assert_eq!(
-            Problem::of(&frowned),
-            Problem { refused: false, text: found[0].message.clone() }
-        );
     }
 
     #[test]
@@ -794,7 +824,7 @@ mod tests {
             failure(&Error::FfmpegNotFound(FfmpegMissing::NotOnPath)),
             fl!("ffmpeg-not-on-path")
         );
-        assert!(!failure(&Error::FfmpegArgsNeedProgram).contains("ffmpeg-args"));
+        assert!(!failure(&Error::FfmpegArgsNeedProgram).say().contains("ffmpeg-args"));
         let unreadable = Error::Unreadable {
             path: PathBuf::from("/some/where/clip.mp4"),
             message: "broken".into(),

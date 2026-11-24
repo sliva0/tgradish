@@ -20,7 +20,7 @@ use crate::app::App;
 use crate::banner::{Action, Message, Subject};
 use crate::item::Item;
 use crate::jobs::failure;
-use crate::l10n::fl;
+use crate::l10n::{fl, later};
 use crate::{theme, widgets};
 
 /// Preset dialog request stored in egui temporary data.
@@ -165,7 +165,7 @@ fn problem(err: &tgradish_core::Error) -> String {
         Error::Preset(PresetError::Extended(other)) => {
             fl!("preset-extended", other = other.as_str())
         }
-        err => failure(err),
+        err => failure(err).say(),
     }
 }
 
@@ -230,7 +230,7 @@ impl App {
                 true
             }
             Err(err) => {
-                let message = Message::warning(fl!("presets-unreadable"));
+                let message = Message::warning(later!("presets-unreadable"));
                 let message = match (&self.presets_dir, crate::app::told(message, &err)) {
                     (Some(dir), message) if message.file.is_none() => message.file(dir),
                     (_, message) => message,
@@ -336,7 +336,7 @@ impl App {
                 None
             }
             Err(err) => {
-                saving.problem = Some(failure(&err));
+                saving.problem = Some(failure(&err).say());
                 Some(saving)
             }
         }
@@ -478,7 +478,7 @@ impl App {
                 let description = row.typed_description.trim().to_owned();
                 match presets::set_description(&file(&row.name), &description) {
                     Ok(()) => (row.description, row.problem) = (description, None),
-                    Err(err) => row.problem = Some(failure(&err)),
+                    Err(err) => row.problem = Some(failure(&err).say()),
                 }
             }
             Change::Delete(id) => {
@@ -555,7 +555,7 @@ impl App {
                         return;
                     }
                     Err(err) => {
-                        let message = fl!("not-put-back", name = deleted.name.as_str());
+                        let message = later!("not-put-back", name = deleted.name.as_str());
                         self.say(crate::app::told(Message::warning(message), &err));
                     }
                 }

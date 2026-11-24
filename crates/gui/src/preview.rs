@@ -310,7 +310,7 @@ fn preview(
         // If decoding the result failed, show the decode error on the disabled
         // Result segment tooltip.
         let unseen = match &item.result_clip {
-            Load::Failed(why) if item.made.is_some() => why.clone(),
+            Load::Failed(why) if item.made.is_some() => why.say(),
             _ => fl!("convert-first"),
         };
         if widgets::segments(ui, &mut show, &choices, |show| {
@@ -388,7 +388,7 @@ fn preview(
             let name = name.to_string_lossy();
             message.strip_prefix(&fl!("unreadable-file", name = name, details = ""))
         });
-        said.unwrap_or(message).to_owned()
+        said.map(str::to_owned).unwrap_or(message)
     });
     // Borrow fields directly so `item.view` and `item.choices.crop` remain
     // mutably accessible below.

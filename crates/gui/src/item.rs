@@ -910,7 +910,7 @@ impl Item {
     }
 
     /// Why the input can't be shown, if reading it failed.
-    pub(crate) fn input_error(&self) -> Option<&str> {
+    pub(crate) fn input_error(&self) -> Option<String> {
         let load = match self.format {
             Format::Webm | Format::Webp => match &self.video {
                 Load::Failed(message) => Some(message),
@@ -921,7 +921,7 @@ impl Item {
                 _ => None,
             },
         };
-        load.map(String::as_str)
+        load.map(crate::l10n::Text::say)
     }
 
     /// The range of the input that is used, in seconds.

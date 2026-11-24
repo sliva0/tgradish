@@ -224,11 +224,14 @@ fn notices(harness: &mut Harness<App>, dir: &Path) {
         panic!("an old settings file read")
     };
     let err = tgradish_core::Error::Config { path: old, message };
-    let unreadable = crate::app::settings_unreadable(fl!("setting-unsaved", "unreadable"), &err);
-    let unsaved = Message::warning(fl!("session-unsaved"))
+    let unreadable =
+        crate::app::settings_unreadable(crate::l10n::later!("setting-unsaved", "unreadable"), &err);
+    let unsaved = Message::warning(crate::l10n::later!("session-unsaved"))
         .file(dir.join("session.json"))
         .literal("Permission denied (os error 13)");
-    for message in [unreadable, unsaved, Message::info(fl!("files-gone", count = 2))] {
+    for message in
+        [unreadable, unsaved, Message::info(crate::l10n::later!("files-gone", count = 2_usize))]
+    {
         harness.state_mut().say(message);
     }
     settle(harness, None);

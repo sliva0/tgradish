@@ -283,7 +283,6 @@ fn notice_screenshots() {
 fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
     use crate::banner::Message;
     use crate::config::Theme;
-    use crate::l10n::fl;
     let dir = tempfile::tempdir().unwrap();
     let mut config = Config::default();
     config.gui.output_dir = Some(dir.path().join("out"));
@@ -320,12 +319,18 @@ fn notices(save: &mut impl FnMut(&mut Harness<App>, &str)) {
             harness.state_mut().remove(first);
             shot(&mut harness, save, &name("one-short"));
             // two at once, and more than are shown
-            harness.state_mut().say(Message::info(fl!("files-gone", count = 2)));
+            harness
+                .state_mut()
+                .say(Message::info(crate::l10n::later!("files-gone", count = 2_usize)));
             shot(&mut harness, save, &name("two"));
             let settings = dir.path().join("config.toml");
-            harness.state_mut().say(Message::info(fl!("settings-read")).file(settings));
+            harness
+                .state_mut()
+                .say(Message::info(crate::l10n::later!("settings-read")).file(settings));
             let session = dir.path().join("session.json.unreadable");
-            let unreadable = Message::info(fl!("files-unreadable", count = 3)).file(session);
+            let unreadable =
+                Message::info(crate::l10n::later!("files-unreadable", count = 3_usize))
+                    .file(session);
             let show = [crate::banner::Action::ShowInFolder];
             harness.state_mut().say(unreadable.actions(&show));
             shot(&mut harness, save, &name("many"));
@@ -663,7 +668,7 @@ fn moments(save: &mut impl FnMut(&mut Harness<App>, &str)) {
         settle(&mut harness);
         save(&mut harness, &name("list-end"));
         // a notice passing in, a few frames on
-        harness.state_mut().say(Message::info(fl!("files-gone", count = 2)));
+        harness.state_mut().say(Message::info(crate::l10n::later!("files-gone", count = 2_usize)));
         harness.run_steps(4);
         save(&mut harness, &name("notice-fading"));
         harness.state_mut().banner = Default::default();
@@ -1792,7 +1797,8 @@ fn banners(
     let home = std::env::home_dir().unwrap_or_else(|| dir.to_path_buf());
     let path = home.join(".config").join("tgradish").join("config.toml");
     let err = tgradish_core::Error::Config { path: path.clone(), message };
-    let unreadable = crate::app::settings_unreadable(fl!("setting-unsaved", "unreadable"), &err);
+    let unreadable =
+        crate::app::settings_unreadable(crate::l10n::later!("setting-unsaved", "unreadable"), &err);
     let show = |harness: &mut Harness<App>, messages: &[Message]| {
         harness.state_mut().banner = Default::default();
         for message in messages {
@@ -1811,13 +1817,13 @@ fn banners(
     save(harness, "banner-config");
     details(harness);
     save(harness, "banner-config-details");
-    show(harness, &[Message::info(fl!("files-gone", count = 2))]);
+    show(harness, &[Message::info(crate::l10n::later!("files-gone", count = 2_usize))]);
     save(harness, "banner-info");
     let state = home.join(".local").join("state").join("tgradish").join("session.json");
-    let unsaved = Message::warning(fl!("session-unsaved"))
+    let unsaved = Message::warning(crate::l10n::later!("session-unsaved"))
         .file(state)
         .literal("Permission denied (os error 13)");
-    let gone = Message::info(fl!("files-gone", count = 1));
+    let gone = Message::info(crate::l10n::later!("files-gone", count = 1_usize));
     show(harness, &[unreadable.clone(), unsaved, gone]);
     save(harness, "banner-stacked");
     let empty = tgradish_core::Error::Clipboard(tgradish_core::ClipboardError::Empty);

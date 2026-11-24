@@ -51,6 +51,214 @@ macro_rules! fl {
 }
 pub(crate) use fl;
 
+/// A message as `fl!` takes it, kept as a [`Text`] to be worded in the
+/// GUI's language each time it is shown, rather than in the one shown
+/// when it was made: for what is said and shown later, as notices,
+/// failures and a result's problems, which a change of language words
+/// again at once. Its arguments are taken when it is made.
+macro_rules! later {
+    ($id:literal) => {
+        $crate::l10n::Text::worded(move || $crate::l10n::fl!($id))
+    };
+    ($id:literal, $attribute:literal) => {
+        $crate::l10n::Text::worded(move || $crate::l10n::fl!($id, $attribute))
+    };
+    ($id:literal, $attribute:literal, $($name:ident = $value:expr),+ $(,)?) => {{
+        $(let $name = $crate::l10n::Keep::keep($value);)+
+        $crate::l10n::Text::worded(move || {
+            $crate::l10n::fl!($id, $attribute, $($name = $crate::l10n::Kept::give(&$name)),+)
+        })
+    }};
+    ($id:literal, $($name:ident = $value:expr),+ $(,)?) => {{
+        $(let $name = $crate::l10n::Keep::keep($value);)+
+        $crate::l10n::Text::worded(move || {
+            $crate::l10n::fl!($id, $($name = $crate::l10n::Kept::give(&$name)),+)
+        })
+    }};
+}
+pub(crate) use later;
+
+/// Words shown, kept to be shown later: tgradish's own, worded in the
+/// language shown whenever they are (see [`later!`]), or what came from
+/// elsewhere, as a program or the system said it, as it is. Two are the
+/// same where they say the same now.
+#[derive(Clone)]
+pub(crate) enum Text {
+    Said(std::sync::Arc<str>),
+    Worded(std::sync::Arc<dyn Fn() -> String + Send + Sync>),
+}
+
+impl Text {
+    /// Words of tgradish's own, as `word` words them when shown.
+    pub(crate) fn worded(word: impl Fn() -> String + Send + Sync + 'static) -> Text {
+        Text::Worded(std::sync::Arc::new(word))
+    }
+
+    /// What came from elsewhere, as a program, the system or core said
+    /// it, shown as it is: never tgradish's own words, which [`later!`]
+    /// keeps.
+    pub(crate) fn said(said: impl Into<String>) -> Text {
+        Text::Said(said.into().into())
+    }
+
+    /// What it says, in the language shown now.
+    pub(crate) fn say(&self) -> String {
+        match self {
+            Text::Said(said) => said.to_string(),
+            Text::Worded(word) => word(),
+        }
+    }
+}
+
+impl Default for Text {
+    /// Nothing.
+    fn default() -> Text {
+        Text::from("")
+    }
+}
+
+impl std::fmt::Display for Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.say())
+    }
+}
+
+impl std::fmt::Debug for Text {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.say())
+    }
+}
+
+impl PartialEq for Text {
+    fn eq(&self, other: &Text) -> bool {
+        self.say() == other.say()
+    }
+}
+
+impl Eq for Text {}
+
+impl PartialEq<str> for Text {
+    fn eq(&self, other: &str) -> bool {
+        self.say() == other
+    }
+}
+
+impl PartialEq<&str> for Text {
+    fn eq(&self, other: &&str) -> bool {
+        self.say() == *other
+    }
+}
+
+impl PartialEq<String> for Text {
+    fn eq(&self, other: &String) -> bool {
+        self.say() == *other
+    }
+}
+
+// No `From<String>`: what `fl!` gives is in the language shown as it is
+// given, and kept, it would stay in it. `Text::said` takes what came from
+// elsewhere, and `later!` tgradish's own words.
+
+impl From<&str> for Text {
+    fn from(said: &str) -> Text {
+        Text::Said(said.into())
+    }
+}
+
+impl From<&Text> for eframe::egui::WidgetText {
+    fn from(text: &Text) -> eframe::egui::WidgetText {
+        text.say().into()
+    }
+}
+
+impl From<Text> for eframe::egui::WidgetText {
+    fn from(text: Text) -> eframe::egui::WidgetText {
+        text.say().into()
+    }
+}
+
+/// An argument of [`later!`], as it is kept until worded: owned.
+pub(crate) trait Keep {
+    type Kept: Kept;
+    fn keep(self) -> Self::Kept;
+}
+
+/// An argument of [`later!`] as kept, which gives Fluent its value each
+/// time it is worded.
+pub(crate) trait Kept: Send + Sync + 'static {
+    type Given;
+    fn give(&self) -> Self::Given;
+}
+
+impl Keep for &str {
+    type Kept = String;
+    fn keep(self) -> String {
+        self.to_owned()
+    }
+}
+
+impl Keep for &String {
+    type Kept = String;
+    fn keep(self) -> String {
+        self.clone()
+    }
+}
+
+impl Keep for String {
+    type Kept = String;
+    fn keep(self) -> String {
+        self
+    }
+}
+
+impl Kept for String {
+    type Given = String;
+    fn give(&self) -> String {
+        self.clone()
+    }
+}
+
+impl Keep for Text {
+    type Kept = Text;
+    fn keep(self) -> Text {
+        self
+    }
+}
+
+impl Keep for &Text {
+    type Kept = Text;
+    fn keep(self) -> Text {
+        self.clone()
+    }
+}
+
+impl Kept for Text {
+    type Given = String;
+    fn give(&self) -> String {
+        self.say()
+    }
+}
+
+/// Numbers are kept as they are.
+macro_rules! keep_numbers {
+    ($($number:ty),*) => {$(
+        impl Keep for $number {
+            type Kept = $number;
+            fn keep(self) -> $number {
+                self
+            }
+        }
+
+        impl Kept for $number {
+            type Given = $number;
+            fn give(&self) -> $number {
+                *self
+            }
+        }
+    )*};
+}
+keep_numbers!(u8, u16, u32, u64, usize, i32, i64, f32, f64);
+
 /// The language asked for by `TGRADISH_LANG` instead of the config's and
 /// the system's: a tag such as `de`, or `pseudo` for English with its
 /// letters accented and its vowels doubled, to see where longer words
@@ -893,14 +1101,17 @@ mod tests {
         kept
     }
 
-    /// What `fl!` asks for in `code`, as `id` or `id.attribute`.
+    /// What `fl!` and `later!` ask for in `code`, as `id` or
+    /// `id.attribute`.
     fn asked_for(code: &str) -> Vec<String> {
         let literal = |rest: &str| -> Option<String> {
             let rest = rest.trim_start().strip_prefix('"')?;
             Some(rest[..rest.find('"')?].to_owned())
         };
         let mut asked = Vec::new();
-        for call in code.split("fl!(").skip(1) {
+        // worded at once, or kept and worded as shown
+        let calls = code.split("fl!(").skip(1).chain(code.split("later!(").skip(1));
+        for call in calls {
             let Some(id) = literal(call) else { continue };
             let rest = call.trim_start()[id.len() + 2..].trim_start();
             match rest.strip_prefix(',').and_then(literal) {
@@ -926,17 +1137,18 @@ mod tests {
             #[cfg(test)]
             mod more;
             const AFTER: &str = fl!("after", count = 2);
+            fn later() -> Text { later!("later", "hint", count = 2_usize) }
             #[cfg(test)]
             mod tests { #[test] fn it() { fl!("in-tests"); } }
         "##;
         let code = without_tests(code);
         assert!(code.contains("kept: &'static str") && !code.contains("field"), "{code}");
-        assert_eq!(asked_for(&code), ["shown", "also.hint", "after"]);
+        assert_eq!(asked_for(&code), ["shown", "also.hint", "after", "later.hint"]);
     }
 
     /// Every message English has, and each of its attributes, is shown
-    /// somewhere: asked for by `fl!` in the GUI's code, other than its
-    /// tests', or put in another message. `fl!` itself fails to build for
+    /// somewhere: asked for by `fl!` or `later!` in the GUI's code, other
+    /// than its tests', or put in another message. `fl!` itself fails to build for
     /// a message or attribute English doesn't have.
     #[test]
     fn every_english_message_is_used() {
