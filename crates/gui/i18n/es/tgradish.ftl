@@ -484,7 +484,7 @@ fit-length = Duración
     .hint = Ajusta la duración con calidad constante, cortando el final
 fit-off = Sin ajuste
     .hint = Codifica una vez con los valores de abajo, aunque quede demasiado grande
-encoder = Esfuerzo del codificador
+encoder = Esfuerzo al codificar
     .hint = Una codificación más rápida se ve peor con el mismo tamaño
 encoder-fast = Rápido
     .hint = Tarda segundos, pero se ve claramente peor con el mismo tamaño
@@ -529,7 +529,7 @@ bitrate-auto = Según el límite de tamaño
 
 ## Settings: size and quality of a TGS animation
 
-tgs-encoder = Esfuerzo del codificador
+tgs-encoder = Esfuerzo al codificar
     .hint = Cuánto esforzarse en buscar una codificación pequeña
 tgs-fast = Rápido
     .hint = Tarda menos de un segundo; ocupa un pequeño porcentaje más
