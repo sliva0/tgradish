@@ -1009,11 +1009,7 @@ notice-font = { $subsets ->
 }
 notice-crates = Crates do Rust
 notice-crates-licence = { $licence }: { $crates }
-    .more = { $more ->
-        [one] { $licence }: { $crates } e mais { $more }
-        [many] { $licence }: { $crates } e mais { $more }
-       *[other] { $licence }: { $crates } e mais { $more }
-    }
+    .more = { $licence }: { $crates } e mais { $more }
 ffmpeg-sources = O código-fonte exato do ffmpeg embutido, com esta versão
 
 

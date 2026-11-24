@@ -90,7 +90,8 @@ settings-file-note = It may have been edited by hand or by another version of tg
 # A button that writes the settings in use in place of a settings
 # file that can't be read. .saved and .kept say it did: the file shown is
 # the old one, kept beside the new under the name given. .failed says it
-# couldn't, why under it.
+# couldn't, why under it. In .kept, "them" are the fresh settings: the old
+# file is renamed to { $name } in the folder the new one is written to.
 fresh-settings = Start with fresh settings
     .hint = Write the settings in use now as a new settings file; the old one is kept beside it
     .saved = Fresh settings are saved
@@ -320,6 +321,9 @@ replaces-earlier = Replaces an earlier result
 reading-crashed = tgradish crashed while reading this
 reading-stopped = Reading it stopped
 no-frames = ffmpeg found no frames in it
+# Where reading a video again in more detail finds nothing:
+# no-frames-there in the part of it in use, between where it is cut;
+# no-frame-there at the time shown, its one frame read at full size.
 no-frames-there = ffmpeg found no frames there
 no-frame-there = ffmpeg found no frame there
 art-no-frames = It has no frames
@@ -480,8 +484,6 @@ margin-right = Right margin: pixels cut off the right
 margin-bottom = Bottom margin: pixels cut off the bottom
 width = Width
 height = Height
-# Under the crop's fields, and what screen readers call the cross on the
-# crop's size over the preview, which does the same.
 # What screen readers call the crop over the preview, which the keyboard's
 # focus goes to, and what its keys do.
 crop-keys = Crop: the arrows move it, Ctrl+arrows resize it; with Shift, by ten pixels
@@ -886,6 +888,9 @@ copy = Copy
 commands-posix = The same conversion on the command line, for a POSIX shell:
 commands-powershell = The same conversion on the command line, for PowerShell:
 pasted-temporary = A pasted image is kept in a temporary folder, gone when tgradish closes
+# Over the commands for the system's ffmpeg. "The rate" is the bitrate, or
+# the quality (CRF) where fitting tries qualities instead, as the encodes'
+# column of kbit/s shows either.
 ffmpeg-commands = The ffmpeg commands of the first encode; fitting changes the rate, and maybe the frame rate, between encodes:
     .builtin = What the built-in ffmpeg does for the first encode, as commands for the system's ffmpeg; fitting changes the rate, and maybe the frame rate, between encodes:
 no-ffmpeg-commands = No ffmpeg commands: { $why }
@@ -948,6 +953,10 @@ threads-auto = Automatic
 results = Results
 save-results = Save them
 next-to-input = Next to each input
+# Under the field of the folder, what keeps what is typed in it from being
+# used: .relative while it isn't a whole path, from the top of the disk, as
+# /home/me/stickers or C:\Stickers, until when results still go to the folder
+# in use; .file where it names a file.
 in-a-folder = In a folder
     .unchosen = Until a folder is chosen, results are saved next to each input
     .relative = Write the whole path, from the top, so the folder in use can change
@@ -1273,10 +1282,7 @@ notice-crates = Rust crates
 # "anyhow, arboard"; where there are more than three, three of them and how
 # many more.
 notice-crates-licence = { $licence }: { $crates }
-    .more = { $more ->
-        [one] { $licence }: { $crates } and { $more } more
-       *[other] { $licence }: { $crates } and { $more } more
-    }
+    .more = { $licence }: { $crates } and { $more } more
 # In the notice of ffmpeg's sources, a link to them.
 ffmpeg-sources = The exact sources of the ffmpeg built in, with this release
 
