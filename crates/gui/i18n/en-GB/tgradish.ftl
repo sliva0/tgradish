@@ -55,6 +55,12 @@ count-tracks = { $count ->
     [one] { $count } track
    *[other] { $count } tracks
 }
+# Every percentage shown, as a result's size as a share of the file size
+# limit, how much an encode looks like the input, how large the preview,
+# the result and everything are shown, and the changes made to fit a TGS.
+# The number is written with a point in every language; only where the
+# sign goes, and any space before it, is the language's.
+percent = { $number }%
 # How much of a limit something uses, over a bar: a result's size, or a
 # sticker's length.
 of-limit = { $used } of { $limit }
@@ -337,11 +343,10 @@ result-no-frames = The result has no frames
 inset-label = Result at { $scale }
     .plain = Result
     .drag = Drag it to another corner
-# How large it is shown: as a share of its own pixels, or, where it is
-# shown pixel for pixel larger, as so many times its size. On Zoom out too,
-# how large the pixels of what the preview shows are.
-inset-scale = { $percent }%
-    .times = { $times }×
+# How large it is shown, where it is shown pixel for pixel larger, as so
+# many times its size; smaller, it is a percentage, as percent says it. On
+# Zoom out too, how large the pixels of what the preview shows are.
+inset-scale = { $times }×
 # .same, on hover, where the next size would show it no otherwise, as it
 # shows at its own size in both, or there is none.
 inset-smaller = Smaller
@@ -995,8 +1000,6 @@ scale = Scale
 scale-smaller = Smaller
 scale-larger = Larger
 scale-reset = Back to 100%
-# The scale, as a percentage.
-scale-percent = { $percent }%
 # The first of the accent colours, "As the system" again.
 accent-system = { as-the-system }
     .hint = The desktop's accent colour, or Breeze's blue where it has none
@@ -1017,10 +1020,10 @@ accent-own = A colour of your own
     .chosen = A colour of your own, { $colour }
 # What screen readers call the two parts of the colour picker: a square of
 # the shades of one colour, and a strip of the colours of the rainbow. The
-# square's value is how saturated and how bright its shade is, from 0 to
-# 100; the arrow keys change them.
+# square's value is how saturated and how bright its shade is, each as a
+# percentage, as percent says it; the arrow keys change them.
 accent-shade = Shade
-    .value = { $saturation }% saturated, { $value }% bright
+    .value = { $saturation } saturated, { $value } bright
 accent-hue = Hue
 # Beside a field of the colour picked, as #rrggbb.
 accent-hex = Hex
@@ -1100,12 +1103,13 @@ art-shapes = { $layers } of { $rectangles }, { $size } unpacked
 art-before-fitting = About { $size } as it is; changed to fit:
 # A change made to fit, then the size after it.
 art-step = { $change }, about { $size } after
+# The changes, with their percentages as percent says them.
 step-snapped = pixels snapped to a grid of { $scale }
-step-colours = colours closer than { $distance }% merged
-step-frames = frames that change under { $changed }% merged
-step-dropped = { $share }% of frames dropped
+step-colours = colours closer than { $distance } merged
+step-frames = frames that change under { $changed } merged
+step-dropped = { $share } of frames dropped
 step-specks = single stray pixels removed
-step-resolution = resolution lowered to { $factor }%
+step-resolution = resolution lowered to { $factor }
 # The table of a WebM's encodes; the headers' hovers say what each column is.
 column-number = Each encode in turn; ✔ the one kept
 column-fps = Frames a second
@@ -1118,7 +1122,8 @@ column-alike = alike
 rate-quality-short = q { $crf }
 # Under the table: why fitting stopped where it did, or tried a lower
 # frame rate. Shares are of the file size limit, as the table's
-# sizes; "looks … like the input" is the table's alike.
+# sizes; "looks … like the input" is the table's alike. Each share and
+# likeness is a percentage, as percent says it.
 decided-in-band = Stopped: encode { $number } uses { $share } of the limit, at least the { $least } aimed for
 decided-alike-enough = Stopped: encode { $number } already looks { $alike } like the input, so more bits would only make it larger
 decided-alike-unchanged = Stopped: encode { $number } looks { $alike } like the input, hardly more than encode { $than } with fewer bits

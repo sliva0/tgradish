@@ -24,7 +24,7 @@ pub(crate) use dialog::{
     dialog_room, dialog_title, title_text,
 };
 pub(crate) use format::{
-    FPS_DECIMALS, SPEED_DECIMALS, fixed, fps, kib, parse_seconds, seconds, speed, trimmed,
+    FPS_DECIMALS, SPEED_DECIMALS, fixed, fps, kib, parse_seconds, percent, seconds, speed, trimmed,
     trimmed_to, widest_seconds, zeros,
 };
 pub(crate) use layout::{

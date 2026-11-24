@@ -152,15 +152,16 @@ pub(crate) fn colour_picker(ui: &mut egui::Ui, colour: &mut Color32) -> bool {
     }
     hsv.h = (hsv.h + picker_steps(ui, &strip_response, false).x).clamp(0.0, 1.0);
     // Expose both controls to screen readers as sliders with current values.
-    let percent = |value: f32| (value * 100.0).round();
+    let percent = |value: f32| f64::from((value * 100.0).round());
+    let said = |value: f32| super::percent(percent(value), 0);
     square_response.widget_info(|| egui::WidgetInfo {
         current_text_value: Some(fl!(
             "accent-shade",
             "value",
-            saturation = percent(hsv.s),
-            value = percent(hsv.v)
+            saturation = said(hsv.s),
+            value = said(hsv.v)
         )),
-        ..egui::WidgetInfo::slider(enabled, f64::from(percent(hsv.v)), fl!("accent-shade"))
+        ..egui::WidgetInfo::slider(enabled, percent(hsv.v), fl!("accent-shade"))
     });
     let hue = f64::from((hsv.h * 360.0).round());
     strip_response.widget_info(|| egui::WidgetInfo::slider(enabled, hue, fl!("accent-hue")));

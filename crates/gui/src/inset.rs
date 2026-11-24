@@ -336,9 +336,9 @@ pub(crate) fn scale_text(scale: f32) -> String {
     // from twice as large as it rounds, so that a hair under it is not 200%
     let percent = (scale * 100.0).round();
     if percent >= 200.0 {
-        fl!("inset-scale", "times", times = scale.round())
+        fl!("inset-scale", times = scale.round())
     } else {
-        fl!("inset-scale", percent = percent)
+        widgets::percent(f64::from(percent), 0)
     }
 }
 

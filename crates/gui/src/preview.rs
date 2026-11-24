@@ -926,7 +926,7 @@ mod tests {
             let out = fl!("zoom-out");
             let times = harness.get_by_label_contains(&out).accesskit_node().label();
             let times = times.unwrap_or_default();
-            assert!(times.ends_with(&fl!("inset-scale", "times", times = "")), "{times}");
+            assert!(times.ends_with(&fl!("inset-scale", times = "")), "{times}");
             // the buttons at the right stay, and the segments at the left
             let (out, preview, result) = place(&harness);
             assert_eq!((out, preview), (before.0, before.1), "{width}");

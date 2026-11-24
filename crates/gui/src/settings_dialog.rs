@@ -937,8 +937,8 @@ fn scale(ui: &mut egui::Ui, scale: &mut f64) -> Option<egui::Rect> {
             stepped = Some(smaller.rect);
         }
         // Fix the percentage label width to its widest value ("500%") so `+` never shifts.
-        let percent = fl!("scale-percent", percent = (*scale * 100.0).round());
-        let widest = fl!("scale-percent", percent = 500);
+        let percent = widgets::percent((*scale * 100.0).round(), 0);
+        let widest = widgets::percent(500.0, 0);
         let width = widgets::text_width(ui, &widgets::zeros(&widest), 4.0);
         ui.add_sized(egui::vec2(width, side), egui::Label::new(percent));
         let most = *scale >= *config::SCALES.end() - 1e-6;
@@ -1485,7 +1485,7 @@ mod tests {
         };
         harness.state_mut().dialogs.settings.open();
         settle(&mut harness);
-        harness.get_by_label(&fl!("scale-percent", percent = 100));
+        harness.get_by_label(&widgets::percent(100.0, 0));
         // its keys said as other shortcuts are, Ctrl++ rather than Ctrl+=
         let (larger, smaller, reset) = ("Ctrl++", "Ctrl+-", "Ctrl+0");
         let keys = fl!("scale", "keys", larger = larger, smaller = smaller, reset = reset);
@@ -1498,7 +1498,7 @@ mod tests {
         for percent in [110, 120, 130] {
             harness.get_by_label(&fl!("scale-larger")).click_accesskit();
             settle(&mut harness);
-            harness.get_by_label(&fl!("scale-percent", percent = percent));
+            harness.get_by_label(&widgets::percent(f64::from(percent), 0));
             let now = pixel(&harness, &fl!("scale-larger"));
             assert!((now - under).length() < 1.5, "at {percent}%: {now:?}, not {under:?}");
         }

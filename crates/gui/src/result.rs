@@ -175,7 +175,7 @@ fn progress_column(ui: &mut egui::Ui, job: &Job, queued: Option<usize>) {
             number = number,
             fps = fps.as_str(),
             rate = rate.as_str(),
-            size = if progress.webm.is_some() { "100.0%" } else { "1000.0 KiB" }
+            size = if progress.webm.is_some() { percent(1.0) } else { widgets::kib(1000 * 1024) }
         ));
         match attempt.bytes {
             Some(bytes) => {
@@ -466,7 +466,7 @@ pub(crate) fn details(ui: &mut egui::Ui, item: &Item) {
                     size,
                 ];
                 if scored {
-                    let alike = attempt.ssim.map(|ssim| format!("{:.1}%", ssim * 100.0));
+                    let alike = attempt.ssim.map(percent);
                     row.push((RichText::new(alike.unwrap_or_default()), String::new()));
                 }
                 rows.push(row);
@@ -529,7 +529,7 @@ fn share(bytes: u64, limit: u64) -> String {
 
 /// Formats a `0.0..=1.0` ratio or SSIM score as a percentage with one decimal place.
 fn percent(share: f64) -> String {
-    format!("{:.1}%", share * 100.0)
+    widgets::percent(share * 100.0, 1)
 }
 
 /// Formats a WebM fitting [`Decision`](tgradish_core::webm::Decision) for the GUI.
@@ -586,17 +586,17 @@ fn reduction(reduction: &tgradish_core::tgradish_tgs::reduce::Reduction) -> Stri
     match *reduction {
         Reduction::SnapToGrid { scale } => fl!("step-snapped", scale = scale),
         Reduction::MergeColours { distance } => {
-            fl!("step-colours", distance = format!("{:.0}", distance * 100.0))
+            fl!("step-colours", distance = widgets::percent(distance * 100.0, 0))
         }
         Reduction::MergeFrames { changed } => {
-            fl!("step-frames", changed = format!("{:.1}", changed * 100.0))
+            fl!("step-frames", changed = widgets::percent(changed * 100.0, 1))
         }
         Reduction::DropFrames { share } => {
-            fl!("step-dropped", share = format!("{:.0}", share * 100.0))
+            fl!("step-dropped", share = widgets::percent(share * 100.0, 0))
         }
         Reduction::Despeckle => fl!("step-specks"),
         Reduction::Downscale { factor } => {
-            fl!("step-resolution", factor = format!("{:.0}", factor * 100.0))
+            fl!("step-resolution", factor = widgets::percent(factor * 100.0, 0))
         }
         // Fallback for any future `#[non_exhaustive]` Reduction variant.
         other => format!("{other:?}"),

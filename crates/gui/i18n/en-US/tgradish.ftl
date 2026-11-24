@@ -97,7 +97,7 @@ accent-own = A color of your own
 
 ## The result, beside the preview
 
-step-colours = colors closer than { $distance }% merged
+step-colours = colors closer than { $distance } merged
 
 
 ## What went wrong, as converting or reading a file reports it

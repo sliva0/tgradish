@@ -51,6 +51,13 @@ pub(crate) fn fixed(value: f64, decimals: usize) -> String {
     format!("{value:.decimals$}")
 }
 
+/// Formats `value`, a percentage, with `decimals` fixed decimal places and
+/// the sign as the language shown writes it: `99.9%`, or `%99.9` in Turkish.
+/// Every percentage the GUI shows is written so, its sign in one place.
+pub(crate) fn percent(value: f64, decimals: usize) -> String {
+    crate::l10n::fl!("percent", number = fixed(value, decimals))
+}
+
 /// Formats a speed factor without the `×` prefix (`1.50`).
 pub(crate) fn speed(value: f64) -> String {
     fixed(value, SPEED_DECIMALS)
