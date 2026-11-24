@@ -796,8 +796,8 @@ motion = Movimento
     .hint = Quando o sistema pede menos movimento, nada se move de qualquer forma
 motion-on = Suavizar a rolagem, e esmaecer e mover o que muda
 new-files = Novos arquivos
-preset-for-webm = Predefinição para WebM
-preset-for-tgs = Predefinição para TGS
+preset-for-webm = Predefinição WebM
+preset-for-tgs = Predefinição TGS
 
 
 ## The result, beside the preview
@@ -859,7 +859,7 @@ column-fps = Quadros por segundo
 column-rate = Taxa de bits, ou a qualidade usada na codificação
 column-size = tamanho
     .hint = Fração do limite de tamanho do arquivo, em verde quando cabe
-column-alike = semelhança
+column-alike = similar
     .hint = O quanto ela se parece com a entrada, medido pelo SSIM (similaridade estrutural)
 rate-quality-short = q { $crf }
 decided-in-band = Parou: a codificação { $number } usa { $share } do limite, pelo menos os { $least } pretendidos
