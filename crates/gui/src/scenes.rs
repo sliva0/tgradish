@@ -545,8 +545,10 @@ const FIT_REPORT: &str = "TGRADISH_FIT_REPORT";
 /// it goes and as it usually opens, in every scene [`walk`] goes through:
 /// none cut short, cut off where it is drawn, drawn over another, or,
 /// where English's go on one line, wrapped in a narrow column or on what
-/// is pressed, and nothing pressed pushed to the window's edge. Every dialog also fits a window as small as the GUI goes at
-/// each of [`SCALES`]: its frame within the window, what it holds within
+/// is pressed, no row's label crowding what is beside it, no row of alike
+/// controls wrapped leaving one alone, and nothing pressed pushed to the
+/// window's edge. Every dialog also fits a window as small as the GUI
+/// goes at each of [`SCALES`]: its frame within the window, what it holds within
 /// the frame's margins side to side, its buttons and the cross that
 /// closes it in sight, what doesn't fit scrolling, and no bar's words cut
 /// short. Each language is checked in a process of its own, some at once;
@@ -735,8 +737,10 @@ fn words(text: &str) -> String {
 
 /// Notes in `found` what of the words drawn last doesn't fit, `at` saying
 /// where: cut short, cut off at the edge of what it is drawn within, or
-/// drawn over other words, and what is pressed pushed to the window's
-/// edge; and the lines each message drawn took. Names
+/// drawn over other words, a row's label nearer than [`BREATH`] to what is
+/// beside it, what is pressed alone on the last line of a row of its kind,
+/// and what is pressed pushed to the window's edge; and the lines each
+/// message drawn took. Names
 /// of files may be cut short, as may what isn't a message, as numbers and
 /// paths, but on what is pressed.
 fn unfit(harness: &Harness<App>, at: &str, found: &mut Vec<String>) {
@@ -843,6 +847,114 @@ fn unfit(harness: &Harness<App>, at: &str, found: &mut Vec<String>) {
             found.push(format!("unfit\t{at}\t{name} is pushed to the edge of the window"));
         }
     }
+    // a row's label, its column's width, no nearer than [`BREATH`] to
+    // what is beside it in its row
+    let nodes = nodes(harness);
+    let labels = drawn.iter().filter(|drawn| {
+        (drawn.wrap - crate::widgets::LABELS).abs() < 0.5
+            && !pressables.iter().any(|(rect, _)| rect.contains(drawn.rect.center()))
+    });
+    for label in labels {
+        let Some(node) = nodes
+            .iter()
+            .filter(|node| {
+                node.role == egui::accesskit::Role::Label && node.rect.contains(label.rect.center())
+            })
+            .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+        else {
+            continue;
+        };
+        let row = &node.containers[..node.containers.len().min(ONE_ROW)];
+        let gap = label
+            .lines
+            .iter()
+            .flat_map(|line| {
+                nodes
+                    .iter()
+                    .filter(|other| {
+                        control(other.role)
+                            && other.rect.y_range().intersects(line.y_range())
+                            && other.rect.left() > line.center().x
+                            && other.containers.iter().any(|up| row.contains(up))
+                    })
+                    .map(|other| other.rect.left() - line.right())
+            })
+            .fold(f32::INFINITY, f32::min);
+        if gap < BREATH {
+            let name = match message(&label.text) {
+                Some((id, said)) => format!("{id} {said:?}"),
+                None => format!("{:?}", label.text),
+            };
+            found.push(format!("unfit\t{at}\t{name} ends {gap:.0} points from what is beside it"));
+        }
+    }
+    for lone in lone(&nodes) {
+        found.push(format!("unfit\t{at}\t{lone} is alone on the last line of its row"));
+    }
+}
+
+/// How far a row's label keeps from what is beside it, at the least: a
+/// row keeps its items' spacing, 6 points, after its label's column, and
+/// a label as wide as the column looks run up against what follows.
+const BREATH: f32 = 10.0;
+
+/// The roles of controls, which a row's label is beside.
+fn control(role: egui::accesskit::Role) -> bool {
+    use egui::accesskit::Role;
+    pressable(role)
+        || matches!(role, Role::SpinButton | Role::TextInput | Role::ComboBox | Role::Slider)
+}
+
+/// What screen readers are told of: its role, where it is, its name, and
+/// the containers it is in, innermost first.
+struct Node<Id> {
+    role: egui::accesskit::Role,
+    rect: Rect,
+    label: String,
+    containers: Vec<Id>,
+}
+
+/// Each of what screen readers are told of that is drawn somewhere.
+fn nodes(harness: &Harness<App>) -> Vec<Node<impl PartialEq + use<>>> {
+    harness
+        .query_all(by())
+        .filter_map(|node| {
+            let containers = std::iter::successors(node.parent(), |up| up.parent())
+                .map(|up| up.accesskit_node().id())
+                .collect();
+            let node = node.accesskit_node();
+            let (role, label) = (node.role(), node.label().unwrap_or_default());
+            Some(Node { role, rect: rect_of(node.bounding_box()?), label, containers })
+        })
+        .collect()
+}
+
+/// The names of what is pressed or picked, of `nodes`, that is alone on
+/// the last line of a row of its kind, as swatches, wrapped: of one row
+/// with at least two of its role and size on the line just over it, and
+/// with none on its own line.
+fn lone<Id: PartialEq>(nodes: &[Node<Id>]) -> Vec<String> {
+    // as far apart as lines of one row are, and more
+    const NEAR: f32 = 8.0;
+    let mut found = Vec::new();
+    for one in nodes.iter().filter(|node| pressable(node.role)) {
+        let alike = nodes.iter().filter(|other| {
+            !std::ptr::eq(*other, one)
+                && other.role == one.role
+                && (other.rect.size() - one.rect.size()).length() < 0.5
+                && one_row(&one.containers, &other.containers)
+        });
+        let (mut beside, mut over) = (false, 0);
+        for other in alike {
+            let up = one.rect.top() - other.rect.bottom();
+            beside |= (other.rect.top() - one.rect.top()).abs() < 0.5;
+            over += usize::from((0.0..=NEAR).contains(&up));
+        }
+        if !beside && over >= 2 {
+            found.push(format!("{:?} {:?}", one.role, one.label));
+        }
+    }
+    found
 }
 
 /// Notes in `found` what of the dialog shown, the one of the area `id`,
