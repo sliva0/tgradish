@@ -78,10 +78,10 @@ files-gone = { $count ->
     [one] { $count } Datei vom letzten Mal ist nicht mehr vorhanden
    *[other] { $count } Dateien vom letzten Mal sind nicht mehr vorhanden
 }
-session-unreadable = Die Dateien vom letzten Mal konnten nicht gelesen werden, daher ist keine geöffnet; ihre Liste wurde beiseitegelegt
+session-unreadable = Die Dateien vom letzten Mal konnten nicht gelesen werden, daher ist keine geöffnet; ihre Liste wurde gesichert
 files-unreadable = { $count ->
-    [one] { $count } Datei vom letzten Mal konnte nicht gelesen werden und fehlt; die bisherige Liste wurde beiseitegelegt
-   *[other] { $count } Dateien vom letzten Mal konnten nicht gelesen werden und fehlen; die bisherige Liste wurde beiseitegelegt
+    [one] { $count } Datei vom letzten Mal konnte nicht gelesen werden und wurde ausgelassen; die bisherige Liste wurde gesichert
+   *[other] { $count } Dateien vom letzten Mal konnten nicht gelesen werden und wurden ausgelassen; die bisherige Liste wurde gesichert
 }
 session-unsaved = Die geöffneten Dateien konnten nicht für das nächste Mal gespeichert werden
 nothing-to-paste = Nichts zum Einfügen
@@ -253,13 +253,13 @@ preview-divider = Trennlinie unter der Vorschau
 play = Abspielen
     .pause = Pause
 play-keys =
-    Leertaste — abspielen oder pausieren
-    ← / → — einen Frame zurück oder vor
-    Umschalt+← / → — zehn Frames zurück oder vor
-    Pos1 / Ende — erster oder letzter verwendeter Frame
-    {"["} / ] — Abschnitt beim angezeigten Frame beginnen oder enden lassen
-    Strg+← / → — Beginn des Abschnitts verschieben
-    Alt+← / → — Ende des Abschnitts verschieben
+    Leertaste – abspielen oder pausieren
+    ← / → – einen Frame zurück oder vor
+    Umschalt+← / → – zehn Frames zurück oder vor
+    Pos1 / Ende – erster oder letzter verwendeter Frame
+    {"["} / ] – Abschnitt beim angezeigten Frame beginnen oder enden lassen
+    Strg+← / → – Beginn des Abschnitts verschieben
+    Alt+← / → – Ende des Abschnitts verschieben
 nothing-to-play = Nur ein Frame wird verwendet: Es gibt nichts abzuspielen
 in-seconds = Sekunden
     .hint = Zeiten in Sekunden
@@ -433,7 +433,7 @@ fit-3-s = In 3 s einpassen
     .hint = Das Tempo so setzen, dass der Abschnitt in 3 Sekunden abläuft
 plays = Läuft { $played }
 plays-cut = Läuft { $kept } von { $used }: Der Rest wird abgeschnitten
-plays-spoofed = Läuft ganze { $played }: Telegram wird eine kürzere Dauer gemeldet
+plays-spoofed = Läuft die vollen { $played }: Telegram wird eine kürzere Dauer gemeldet
 frame-rate = Framerate
     .hint = Weniger Frames pro Sekunde lassen jedem mehr Bytes; mehr als bei der Quelle würden sie nur wiederholen
     .sequence = Wie schnell die Frames der Sequenz ablaufen
@@ -594,14 +594,14 @@ add-option = Option hinzufügen
 examples = Beispiele:
 example-tune-content = Flache Grafiken und Bildschirmaufnahmen: schärfere Kanten
 example-aq-mode = Setzt Bits dort ein, wo das Bild komplex ist
-example-sharpness = Erhält mehr feine Details, auf Kosten etwas Glätte
+example-sharpness = Erhält mehr feine Details auf Kosten von etwas Glätte
 example-arnr-strength = Weniger Rauschminderung über Frames hinweg
 example-g = Mindestens alle 60 Frames ein Keyframe
 example-qmax = Nirgends schlechter als Qualität 50
 ffmpeg-arguments = ffmpeg-Argumente
     .hint = Rohe Argumente vor der Ausgabe, aufgeteilt wie in einer Shell
     .placeholder = Zum Beispiel: -qmin 4
-    .unfinished = Ein Anführungszeichen oder Backslash ist offen: Bis es geschlossen ist, gelten die Argumente wie zuletzt gelesen
+    .unfinished = Ein Anführungszeichen oder Backslash ist offen: Bis das behoben ist, gelten die Argumente wie zuletzt gelesen
     .system = Nur mit dem ffmpeg des Systems, das in „{ settings }“ gewählt werden kann
 
 
@@ -658,14 +658,14 @@ plan-tag-reverse = Als Tag „{ $tag }“ rückwärts abgespielt
 plan-tag-ping-pong = Als Tag „{ $tag }“ hin und zurück abgespielt
 plan-tag-pong-ping = Als Tag „{ $tag }“ zurück und hin abgespielt
 plan-cropped = Auf { $width } × { $height } zugeschnitten
-plan-frame = Frame bei { $time } entnommen
+plan-frame = Bei { $time } entnommen
 plan-scaled = Auf { $width } × { $height } skaliert
 plan-stretched-across = Horizontal um ×{ $factor } gestreckt
 plan-stretched-down = Vertikal um ×{ $factor } gestreckt
-plan-middle-cut = Mitte auf { $width } × { $height } zugeschnitten
+plan-middle-cut = Mittig auf { $width } × { $height } zugeschnitten
 plan-padded = Auf { $width } × { $height } aufgefüllt
 plan-trimmed = Auf die sichtbaren Pixel zugeschnitten
-plan-grid = Pixel an einem Raster von { $scale } × { $scale } ausgerichtet
+plan-grid = An einem Raster von { $scale } × { $scale } ausgerichtet
 plan-square-crop = Quadratisch zugeschnitten
 plan-square-stretch = Quadratisch gestreckt
 plan-square-pad = Quadratisch aufgefüllt
@@ -673,8 +673,8 @@ plan-cut = Auf { $from }–{ $to } von { $length } gekürzt
 plan-faster = Um ×{ $factor } beschleunigt
 plan-slower = Um ×{ $factor } verlangsamt
 plan-cut-3-s = Bei 3 s von { $played } abgeschnitten
-plan-spoofed = Dauer gefälscht, damit alle { $played } abgespielt werden
-plan-spoofed-anyway = Dauer gefälscht, obwohl { $played } kurz genug ist
+plan-spoofed = Mit gefälschter Dauer versehen, damit die vollen { $played } abgespielt werden
+plan-spoofed-anyway = Mit gefälschter Dauer versehen, obwohl { $played } kurz genug ist
 plan-saved = Als { $name } gespeichert
 
 
@@ -685,8 +685,8 @@ copy = Kopieren
 commands-posix = Dieselbe Konvertierung auf der Kommandozeile, für eine POSIX-Shell:
 commands-powershell = Dieselbe Konvertierung auf der Kommandozeile, für PowerShell:
 pasted-temporary = Ein eingefügtes Bild liegt in einem temporären Ordner, der beim Beenden von tgradish gelöscht wird
-ffmpeg-commands = Die ffmpeg-Befehle der ersten Kodierung; die Größenanpassung ändert zwischen den Kodierungen die Rate und eventuell die Framerate:
-    .builtin = Was das integrierte ffmpeg bei der ersten Kodierung tut, als Befehle für das ffmpeg des Systems; die Größenanpassung ändert zwischen den Kodierungen die Rate und eventuell die Framerate:
+ffmpeg-commands = Die ffmpeg-Befehle der ersten Kodierung; die Größenanpassung ändert zwischen den Kodierungen die Bitrate oder Qualität und eventuell die Framerate:
+    .builtin = Was das integrierte ffmpeg bei der ersten Kodierung tut, als Befehle für das ffmpeg des Systems; die Größenanpassung ändert zwischen den Kodierungen die Bitrate oder Qualität und eventuell die Framerate:
 no-ffmpeg-commands = Keine ffmpeg-Befehle: { $why }
     .unread = Die Quelle ist noch nicht gelesen
     .art = ffmpeg liest ein PNG, das jede Konvertierung aus der Pixel-Art zeichnet
@@ -733,7 +733,7 @@ save-results = Speichern
 next-to-input = Neben jeder Quelldatei
 in-a-folder = In einem Ordner
     .unchosen = Bis ein Ordner gewählt ist, werden Ergebnisse neben jeder Quelldatei gespeichert
-    .relative = Den vollständigen Pfad ab der obersten Ebene eingeben, damit der verwendete Ordner wechseln kann
+    .relative = Den vollständigen Pfad eingeben, damit sich der verwendete Ordner ändern kann
     .file = Das ist eine Datei, kein Ordner, daher bleibt der verwendete Ordner unverändert
 existing-files = Vorhandene Dateien
     .hint = Von tgradish erstellte Ergebnisse werden beim erneuten Erstellen immer ersetzt
@@ -829,7 +829,7 @@ art-size = { $width } × { $height } Grafikpixel
 art-summary = { $size }; { $colours }, { $frames }
 art-tempo = Tempo ×{ $tempo } gegenüber der Quelle
 art-off-grid = Das meiste sieht nach { $scale }×-Pixel-Art aus, mit einigen Pixeln außerhalb des Rasters; eine Grafikpixelgröße von { $scale } richtet sie aus
-art-shapes = { $layers } aus { $rectangles }, { $size } entpackt
+art-shapes = { $layers }, { $rectangles }, { $size } entpackt
 art-before-fitting = Unverändert etwa { $size }; zum Einpassen geändert:
 art-step = { $change }, danach etwa { $size }
 step-snapped = Pixel an einem Raster von { $scale } ausgerichtet
@@ -1095,4 +1095,4 @@ mouse-pan = Mit rechter oder mittlerer Taste ziehen
 mouse-pan-across = Umschalt+Mausrad
     .does = Seitwärts verschieben, wenn hineingezoomt
 mouse-slide = Umschalt+Klammer ziehen
-    .does = Abschnitt auf der Zeitleiste verschieben, seine Länge bleibt
+    .does = Abschnitt auf der Zeitleiste bei gleicher Länge verschieben
