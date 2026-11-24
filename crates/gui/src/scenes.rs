@@ -854,39 +854,17 @@ fn unfit(harness: &Harness<App>, at: &str, found: &mut Vec<String>) {
         (drawn.wrap - crate::widgets::LABELS).abs() < 0.5
             && !pressables.iter().any(|(rect, _)| rect.contains(drawn.rect.center()))
     });
-    for label in labels {
-        let Some(node) = nodes
-            .iter()
-            .filter(|node| {
-                node.role == egui::accesskit::Role::Label && node.rect.contains(label.rect.center())
-            })
-            .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
-        else {
-            continue;
+    // the layer over the panels uppermost at `at`, by its container
+    let top = |at| {
+        let layer = harness.ctx.layer_id_at(at)?;
+        (layer.order != egui::Order::Background).then(|| layer.id.accesskit_id())
+    };
+    for (label, gap) in crowded(labels, &nodes, top) {
+        let name = match message(label) {
+            Some((id, said)) => format!("{id} {said:?}"),
+            None => format!("{label:?}"),
         };
-        let row = &node.containers[..node.containers.len().min(ONE_ROW)];
-        let gap = label
-            .lines
-            .iter()
-            .flat_map(|line| {
-                nodes
-                    .iter()
-                    .filter(|other| {
-                        control(other.role)
-                            && other.rect.y_range().intersects(line.y_range())
-                            && other.rect.left() > line.center().x
-                            && other.containers.iter().any(|up| row.contains(up))
-                    })
-                    .map(|other| other.rect.left() - line.right())
-            })
-            .fold(f32::INFINITY, f32::min);
-        if gap < BREATH {
-            let name = match message(&label.text) {
-                Some((id, said)) => format!("{id} {said:?}"),
-                None => format!("{:?}", label.text),
-            };
-            found.push(format!("unfit\t{at}\t{name} ends {gap:.0} points from what is beside it"));
-        }
+        found.push(format!("unfit\t{at}\t{name} ends {gap:.0} points from what is beside it"));
     }
     for lone in lone(&nodes) {
         found.push(format!("unfit\t{at}\t{lone} is alone on the last line of its row"));
@@ -898,6 +876,117 @@ fn unfit(harness: &Harness<App>, at: &str, found: &mut Vec<String>) {
 /// a label as wide as the column looks run up against what follows.
 const BREATH: f32 = 10.0;
 
+/// Each of `labels`, rows' labels, that ends nearer than [`BREATH`] to
+/// what is beside it in its row, of `nodes`, with how near: to the
+/// controls of its own row, so of its own layer, that begin past the
+/// middle of one of its lines, level with it. What is under another
+/// layer, as the window is under a dialog, is left out, `top` saying of
+/// a point the container of the layer uppermost there, where one is over
+/// the panels.
+fn crowded<'a, Id: PartialEq>(
+    labels: impl IntoIterator<Item = &'a Drawn>,
+    nodes: &[Node<Id>],
+    top: impl Fn(egui::Pos2) -> Option<Id>,
+) -> Vec<(&'a str, f32)> {
+    // what of `node` at `at` is under a layer it isn't in
+    let hidden = |node: &Node<Id>, at: egui::Pos2| {
+        top(at).is_some_and(|top| !node.containers.contains(&top))
+    };
+    let mut found = Vec::new();
+    for label in labels {
+        // its own, saying what it does, not another's it is under
+        let text = words(&label.text);
+        let Some(node) = nodes
+            .iter()
+            .filter(|node| {
+                node.role == egui::accesskit::Role::Label
+                    && words(&node.label) == text
+                    && node.rect.contains(label.rect.center())
+            })
+            .min_by(|a, b| a.rect.area().total_cmp(&b.rect.area()))
+        else {
+            continue;
+        };
+        let row = &node.containers[..node.containers.len().min(ONE_ROW)];
+        let beside = |other: &&Node<Id>| {
+            control(other.role)
+                && other.containers.iter().any(|up| row.contains(up))
+                && !hidden(other, other.rect.center())
+        };
+        let gap = label
+            .lines
+            .iter()
+            .filter(|line| !hidden(node, line.center()))
+            .flat_map(|line| {
+                nodes
+                    .iter()
+                    .filter(beside)
+                    .filter(|other| {
+                        other.rect.y_range().intersects(line.y_range())
+                            && other.rect.left() > line.center().x
+                    })
+                    .map(|other| other.rect.left() - line.right())
+            })
+            .fold(f32::INFINITY, f32::min);
+        if gap < BREATH {
+            found.push((label.text.as_str(), gap));
+        }
+    }
+    found
+}
+
+/// As it was with ffmpeg built in, German and the window 920 points wide:
+/// the side panel's label "Quadratisch machen" under the settings dialog,
+/// whose scale row's "100 %" and "Größer" lay over its end.
+#[test]
+fn finds_a_label_crowded_by_its_own_row_alone_and_in_sight() {
+    use egui::accesskit::Role;
+    let rect = |x0, y0, x1, y1| Rect::from_min_max(egui::pos2(x0, y0), egui::pos2(x1, y1));
+    let node = |role, label: &str, rect, containers: &[u32]| Node {
+        role,
+        rect,
+        label: label.to_owned(),
+        containers: containers.to_vec(),
+    };
+    let label = |text: &str, at: Rect| Drawn {
+        text: text.to_owned(),
+        shown: text.to_owned(),
+        rect: at,
+        clip: rect(268.0, 450.0, 900.0, 750.0),
+        elided: false,
+        lines: vec![at],
+        wrap: crate::widgets::LABELS,
+    };
+    // the window's row, of the containers 10, 11 and 12, its checkbox 26
+    // points after its label, all in 1, all there is; the dialog's row
+    // in the layer 100, its "100 %" a label too
+    let square = rect(276.0, 671.0, 404.0, 687.0);
+    let window = [
+        node(Role::Label, "Quadratisch machen", square, &[10, 11, 12, 13, 1]),
+        node(Role::CheckBox, "", rect(430.0, 665.0, 450.0, 693.0), &[20, 11, 12, 13, 1]),
+    ];
+    let hundred = rect(337.0, 663.2, 379.5, 691.2);
+    let dialog = [
+        node(Role::Label, "100 %", hundred, &[30, 31, 100, 1]),
+        node(Role::Button, "Größer", rect(382.5, 663.2, 410.5, 691.2), &[32, 31, 100, 1]),
+    ];
+    let mut nodes: Vec<_> = window.into_iter().chain(dialog).collect();
+    let (square, hundred) = (label("Quadratisch machen", square), label("100 %", hundred));
+    // the layer `top` over all, if any
+    let near = |nodes: &[Node<u32>], label, top| crowded([label], nodes, |_| top);
+    // the dialog over it, or not, what is beside the label in the dialog
+    // isn't in its row
+    assert!(near(&nodes, &square, Some(100)).is_empty());
+    assert!(near(&nodes, &square, None).is_empty());
+    // its own, nearer
+    nodes[1].rect = rect(410.0, 665.0, 430.0, 693.0);
+    assert_eq!(near(&nodes, &square, None), [("Quadratisch machen", 6.0)]);
+    // not where the dialog is over both
+    assert!(near(&nodes, &square, Some(100)).is_empty());
+    // the dialog's own label, by its own button
+    assert_eq!(near(&nodes, &hundred, Some(100)), [("100 %", 3.0)]);
+}
+
 /// The roles of controls, which a row's label is beside.
 fn control(role: egui::accesskit::Role) -> bool {
     use egui::accesskit::Role;
@@ -905,8 +994,8 @@ fn control(role: egui::accesskit::Role) -> bool {
         || matches!(role, Role::SpinButton | Role::TextInput | Role::ComboBox | Role::Slider)
 }
 
-/// What screen readers are told of: its role, where it is, its name, and
-/// the containers it is in, innermost first.
+/// What screen readers are told of: its role, where it is, its name (a
+/// label's words), and the containers it is in, innermost first.
 struct Node<Id> {
     role: egui::accesskit::Role,
     rect: Rect,
@@ -914,17 +1003,20 @@ struct Node<Id> {
     containers: Vec<Id>,
 }
 
-/// Each of what screen readers are told of that is drawn somewhere.
-fn nodes(harness: &Harness<App>) -> Vec<Node<impl PartialEq + use<>>> {
+/// Each of what screen readers are told of that is drawn somewhere, its
+/// containers by the ids egui gave them: of a layer's, as a dialog's, its
+/// layer's.
+fn nodes(harness: &Harness<App>) -> Vec<Node<egui::accesskit::NodeId>> {
     harness
         .query_all(by())
         .filter_map(|node| {
             let containers = std::iter::successors(node.parent(), |up| up.parent())
-                .map(|up| up.accesskit_node().id())
+                .map(|up| up.accesskit_node().locate().0)
                 .collect();
             let node = node.accesskit_node();
-            let (role, label) = (node.role(), node.label().unwrap_or_default());
-            Some(Node { role, rect: rect_of(node.bounding_box()?), label, containers })
+            // egui tells a label's words as its value
+            let label = node.label().or_else(|| node.value()).unwrap_or_default();
+            Some(Node { role: node.role(), rect: rect_of(node.bounding_box()?), label, containers })
         })
         .collect()
 }
