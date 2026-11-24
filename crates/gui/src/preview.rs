@@ -448,9 +448,7 @@ fn preview(
                 let picture = Picture { clip, frame, size, square: false };
                 // Reserve space for the result inset beside the input (sized for its
                 // widest label) and ease between layouts when toggled, resized, or moved.
-                let widest = inset::widest_label(item.format != Format::Tgs);
-                let text = ui.visuals().text_color();
-                let label = ui.painter().layout_no_wrap(widest, inset::INSET_LABEL, text);
+                let label = inset::widest_label(ui.painter(), item.format != Format::Tgs);
                 // User-facing size steps are 1-based.
                 let largest = inset::INSET_SIZES.len() as u8;
                 let step = usize::from(look.size.clamp(1, largest)) - 1;
@@ -458,7 +456,7 @@ fn preview(
                 let (beside, room) = inset::split(
                     rect,
                     size,
-                    inset::label_box(label.size()),
+                    inset::label_box(label),
                     inset::INSET_SIZES[step],
                     corner,
                 );

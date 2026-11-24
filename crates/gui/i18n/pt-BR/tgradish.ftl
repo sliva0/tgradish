@@ -226,6 +226,7 @@ result-no-frames = O resultado não tem quadros
 ## The result's small picture over the preview
 
 inset-label = Resultado em { $scale }
+    .times = Resultado ampliado { $scale }
     .plain = Resultado
     .drag = Arraste para outro canto
 inset-scale = { $times }×

@@ -225,6 +225,7 @@ result-no-frames = Le résultat ne contient aucune image
 ## The result's small picture over the preview
 
 inset-label = Résultat à { $scale }
+    .times = Résultat { $scale }
     .plain = Résultat
     .drag = Faites-le glisser vers un autre coin
 inset-scale = ×{ $times }

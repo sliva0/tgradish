@@ -193,6 +193,7 @@ result-no-frames = Sonucun hiç karesi yok
 ## The result's small picture over the preview
 
 inset-label = Sonuç: { $scale }
+    .times = Sonuç: { $scale }
     .plain = Sonuç
     .drag = Başka bir köşeye sürükleyin
 inset-scale = { $times }×

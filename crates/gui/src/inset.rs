@@ -169,16 +169,14 @@ impl Inset {
         // pixels takes
         let label = match details {
             Some(details) => {
-                format!("{}\n{details}", fl!("inset-label", scale = scale_text(scale)))
+                format!("{}\n{details}", scale_label(scale))
             }
             None => fl!("inset-label", "plain"),
         };
         let galley = painter.layout_no_wrap(label, INSET_LABEL, Color32::PLACEHOLDER);
         // as wide as its widest, so the buttons at its end stay put as the
         // scale or the size in it changes
-        let widest = widest_label(details.is_some());
-        let widest = painter.layout_no_wrap(widest, INSET_LABEL, Color32::PLACEHOLDER);
-        let boxed = label_box(galley.size().max(widest.size()));
+        let boxed = label_box(galley.size().max(widest_label(&painter, details.is_some())));
         let label_at = label_place(view, boxed, corner);
         // the size buttons at the end of the label at `at`
         let buttons_at = |at: Pos2| {
@@ -330,15 +328,28 @@ fn shown_scale(room: Vec2, full: Vec2, ppp: f32, whole_times: bool) -> f32 {
     if whole_times && fit >= 2.0 { fit.floor() } else { fit.min(1.0) }
 }
 
+/// Whether a result shown at `scale` is said as so many times its size:
+/// from twice as large as it rounds, so that a hair under it is not 200%.
+fn in_times(scale: f32) -> bool {
+    (scale * 100.0).round() >= 200.0
+}
+
 /// How large a result shows, as `scale` says: as a share of its size, or
 /// as so many times it. The preview's zoom says so too.
 pub(crate) fn scale_text(scale: f32) -> String {
-    // from twice as large as it rounds, so that a hair under it is not 200%
-    let percent = (scale * 100.0).round();
-    if percent >= 200.0 {
-        fl!("inset-scale", times = scale.round())
-    } else {
-        widgets::percent(f64::from(percent), 0)
+    match in_times(scale) {
+        true => fl!("inset-scale", times = scale.round()),
+        false => widgets::percent(f64::from((scale * 100.0).round()), 0),
+    }
+}
+
+/// The first line of the small picture's label: the result, shown at
+/// `scale`, worded apart for a share of its size and so many times it.
+fn scale_label(scale: f32) -> String {
+    let said = scale_text(scale);
+    match in_times(scale) {
+        true => fl!("inset-label", "times", scale = said),
+        false => fl!("inset-label", scale = said),
     }
 }
 
@@ -380,14 +391,17 @@ pub(crate) fn label_box(text: Vec2) -> Vec2 {
     vec2(GRIP + text.x + 6.0 + SIZE_BUTTONS, text.y.max(SIZE_BUTTON))
 }
 
-/// The longest the small picture's label gets, with the result's scale and
-/// size in it, `detailed`, or without: as wide as any it shows, as its
-/// digits are all as wide as each other.
-pub(crate) fn widest_label(detailed: bool) -> String {
-    match detailed {
-        true => format!("{}\n{}", fl!("inset-label", scale = scale_text(1.0)), "512 × 512 px"),
-        false => fl!("inset-label", "plain"),
-    }
+/// The size of the longest the small picture's label gets, as `painter`
+/// lays it out, with the result's scale and size in it, `detailed`, or
+/// without: as large as any it shows, at 100% or at up to 99 times its
+/// size, as its digits are all as wide as each other.
+pub(crate) fn widest_label(painter: &egui::Painter, detailed: bool) -> Vec2 {
+    let labels = match detailed {
+        true => [1.0, 10.0].map(|scale| format!("{}\n512 × 512 px", scale_label(scale))),
+        false => [fl!("inset-label", "plain"), String::new()],
+    };
+    let size = |label| painter.layout_no_wrap(label, INSET_LABEL, Color32::PLACEHOLDER).size();
+    labels.map(size).into_iter().fold(Vec2::ZERO, Vec2::max)
 }
 
 /// Where the label of a box `boxed` large goes by a small picture docked
@@ -659,9 +673,7 @@ mod tests {
     fn shown_in(view: Vec2, corner: Corner, size: usize) -> egui_kittest::Harness<'static, Shown> {
         let show = |ui: &mut egui::Ui, shown: &mut Shown| {
             let view = ui.max_rect();
-            let widest =
-                ui.painter().layout_no_wrap(widest_label(true), INSET_LABEL, Color32::WHITE);
-            let label = label_box(widest.size());
+            let label = label_box(widest_label(ui.painter(), true));
             let share = INSET_SIZES[shown.size];
             shown.rooms = Corner::ALL.map(|corner| split(view, (640, 360), label, share, corner).1);
             let corner = shown.corner;
@@ -702,9 +714,7 @@ mod tests {
         // rooms, twice its size in the next two, three times in the last
         let show = |ui: &mut egui::Ui, (inset, size): &mut (Inset, usize)| {
             let view = ui.max_rect();
-            let widest =
-                ui.painter().layout_no_wrap(widest_label(true), INSET_LABEL, Color32::WHITE);
-            let label = label_box(widest.size());
+            let label = label_box(widest_label(ui.painter(), true));
             let room = split(view, (640, 360), label, INSET_SIZES[*size], Corner::BottomRight).1;
             let place = ((view, room, vec2(1.0, 1.0)), (Corner::BottomRight, *size, true));
             let red = |_| egui::ColorImage::filled([100, 100], Color32::RED);

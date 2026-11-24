@@ -217,6 +217,7 @@ result-no-frames = Das Ergebnis enthält keine Frames
 ## The result's small picture over the preview
 
 inset-label = Ergebnis bei { $scale }
+    .times = Ergebnis { $scale } vergrößert
     .plain = Ergebnis
     .drag = In eine andere Ecke ziehen
 inset-scale = { $times }×

@@ -224,7 +224,8 @@ result-no-frames = El resultado no tiene fotogramas
 
 ## The result's small picture over the preview
 
-inset-label = Resultado ({ $scale })
+inset-label = Resultado al { $scale }
+    .times = Resultado ampliado { $scale }
     .plain = Resultado
     .drag = Arrastrarlo a otra esquina
 inset-scale = { $times }×

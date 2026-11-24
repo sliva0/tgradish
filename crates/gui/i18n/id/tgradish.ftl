@@ -191,6 +191,7 @@ result-no-frames = Hasilnya tidak punya frame
 ## The result's small picture over the preview
 
 inset-label = Hasil ({ $scale })
+    .times = Hasil ({ $scale })
     .plain = Hasil
     .drag = Seret ke sudut lain
 inset-scale = { $times }×

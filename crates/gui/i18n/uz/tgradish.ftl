@@ -217,6 +217,7 @@ result-no-frames = Natijada kadr yoʻq
 ## The result's small picture over the preview
 
 inset-label = Natija, { $scale }
+    .times = Natija, { $scale }
     .plain = Natija
     .drag = Boshqa burchakka sudrang
 inset-scale = { $times }×
