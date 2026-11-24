@@ -898,6 +898,36 @@ issue-too-big = Он занимает { $size }, больше лимита в { 
 issue-too-long = По метаданным он длится { $seconds }, больше лимита в { $limit }
 issue-too-many-fps = Его частота кадров { $fps } fps, больше лимита в { $limit } fps
 issue-animated = Он анимирован, а статичный стикер — это одна картинка
+issue-frame-rate = Его частота кадров { $fps } fps, а Telegram принимает { $required } fps
+    .accepted = Его частота кадров { $fps } fps: это против правил Telegram, хотя Telegram её принимает
+issue-no-frames = В нём нет кадров
+issue-unpacked = Без сжатия он занимает { $size }, больше лимита Telegram Desktop в { $limit }
+issue-count =
+    .layers = Слоёв: { $count }, больше лимита в { $limit }
+    .shapes-per-layer = Максимум фигур в слое: { $count }, больше лимита в { $limit }
+    .paint-points = Максимум точек контура в одной заливке: { $count }, больше лимита в { $limit }
+    .paints-per-layer = Максимум заливок и обводок в слое: { $count }, больше лимита приложений Telegram в { $limit }
+    .paint-sources = Максимум закрашенных фигур в слое: { $count }, больше лимита приложений Telegram в { $limit }
+    .path-points = Максимум точек в контуре: { $count }, больше лимита приложений Telegram в { $limit }
+    .keyframes = Максимум ключевых кадров у свойства: { $count }, больше лимита приложений Telegram в { $limit }
+    .assets = Ресурсов: { $count }, больше лимита приложений Telegram в { $limit }
+    .expanded-layers = Слоёв с развёрнутыми прекомпозициями: { $count }, больше лимита приложений Telegram в { $limit }
+    .nesting = Уровней вложенности в JSON: { $count }, больше лимита приложений Telegram в { $limit }
+    .group-depth = Уровней групп в группах: { $count }, больше лимита приложений Telegram в { $limit }
+issue-cost = Стоимость отрисовки: { $cost }, больше лимита в { $limit }; фигур: { $shapes }, слоёв: { $layers }, по { $each } за каждый
+issue-empty-tangents = Контуров с пустыми касательными ([]), которые Telegram не принимает: { $count }; [0,0] работает
+issue-path-coordinate = Наибольшая координата контура: { $coordinate }, больше лимита приложений Telegram в { $limit }
+issue-precomp-loop = Его прекомпозиции ссылаются друг на друга по кругу
+issue-feature = { $feature }: против правил Telegram, хотя Telegram это принимает
+    .undrawn = { $feature }: против правил Telegram; Telegram это принимает, но его приложения это не рисуют
+    .ignored = { $feature }: приложения Telegram это не рисуют
+warned-fewer-frames = Прочитано с частотой { $fps } fps: больше кадров размером { $width } × { $height } не поместилось бы в память
+warned-many-colours = В нём { $colours }: это необычно для пиксель-арта, так что стикер будет большим
+warned-length-capped = Длины, которые пробует подгонка, обрезаны до { $length }: она только укорачивает
+warned-input-shorter = После точки начала исходник длится лишь { $length }: он использован целиком
+warned-trimmed = Обрезано до { $length }: подмена выключена, а более длинные видео Telegram не принимает
+warned-left-out = Записан без имени tgradish в метаданных, так как аргументы ffmpeg не оставили для него места: { $details }
+    .duration = Записан без подменённой длительности в метаданных, так как аргументы ffmpeg не оставили для неё места: { $details }
 
 
 ## Проверка стикера

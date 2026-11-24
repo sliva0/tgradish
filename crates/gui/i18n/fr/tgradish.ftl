@@ -878,6 +878,36 @@ issue-too-big = Il pèse { $size }, au-delà de la limite de { $limit }
 issue-too-long = Ses métadonnées indiquent une durée de { $seconds }, au-delà de la limite de { $limit }
 issue-too-many-fps = Sa fréquence d'images est de { $fps } fps, au-delà de la limite de { $limit } fps
 issue-animated = Il est animé, alors qu'un sticker statique est une seule image
+issue-frame-rate = Sa fréquence d'images est de { $fps } fps, alors que Telegram attend { $required } fps
+    .accepted = Sa fréquence d'images est de { $fps } fps : contraire aux règles de Telegram, même si Telegram l'accepte
+issue-no-frames = Il ne contient aucune image
+issue-unpacked = Décompressé, il pèse { $size }, au-delà de la limite de { $limit } de Telegram Desktop
+issue-count =
+    .layers = Calques : { $count }, au-delà de la limite de { $limit }
+    .shapes-per-layer = Formes max dans un calque : { $count }, au-delà de la limite de { $limit }
+    .paint-points = Points de tracé max dans un remplissage : { $count }, au-delà de la limite de { $limit }
+    .paints-per-layer = Remplissages et contours max dans un calque : { $count }, au-delà de la limite de { $limit } des applis Telegram
+    .paint-sources = Formes peintes max dans un calque : { $count }, au-delà de la limite de { $limit } des applis Telegram
+    .path-points = Points max dans un tracé : { $count }, au-delà de la limite de { $limit } des applis Telegram
+    .keyframes = Images clés max d'une propriété : { $count }, au-delà de la limite de { $limit } des applis Telegram
+    .assets = Ressources : { $count }, au-delà de la limite de { $limit } des applis Telegram
+    .expanded-layers = Calques une fois les précompositions développées : { $count }, au-delà de la limite de { $limit } des applis Telegram
+    .nesting = Niveaux d'imbrication de son JSON : { $count }, au-delà de la limite de { $limit } des applis Telegram
+    .group-depth = Niveaux de groupes dans des groupes : { $count }, au-delà de la limite de { $limit } des applis Telegram
+issue-cost = Coût de rendu : { $cost }, au-delà de la limite de { $limit } ; formes : { $shapes }, calques : { $layers }, { $each } chacun
+issue-empty-tangents = Tracés aux tangentes vides ([]), que Telegram refuse : { $count } ; [0,0] fonctionne
+issue-path-coordinate = Plus grande coordonnée de tracé : { $coordinate }, au-delà de la limite de { $limit } des applis Telegram
+issue-precomp-loop = Ses précompositions se réfèrent les unes aux autres en boucle
+issue-feature = { $feature } : contraire aux règles de Telegram, même si Telegram l'accepte
+    .undrawn = { $feature } : contraire aux règles de Telegram ; Telegram l'accepte, mais ses applis ne le dessinent pas
+    .ignored = { $feature } : les applis Telegram ne le dessinent pas
+warned-fewer-frames = Lu à { $fps } fps, car davantage d'images en { $width } × { $height } ne tiendraient pas en mémoire
+warned-many-colours = Il contient { $colours }, ce qui est inhabituel pour du pixel art : le sticker sera lourd
+warned-length-capped = Les durées que l'ajustement essaie sont limitées à { $length }, car il ne fait que raccourcir
+warned-input-shorter = La source ne dure que { $length } après son début : elle est utilisée en entier
+warned-trimmed = Coupé à { $length } : la falsification est désactivée, et Telegram refuse les vidéos plus longues
+warned-left-out = Écrit sans le nom de tgradish dans ses métadonnées, faute de place laissée par les arguments ffmpeg bruts : { $details }
+    .duration = Écrit sans la durée falsifiée dans ses métadonnées, faute de place laissée par les arguments ffmpeg bruts : { $details }
 
 
 ## Inspecting a sticker

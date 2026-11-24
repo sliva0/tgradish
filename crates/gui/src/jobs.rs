@@ -14,7 +14,7 @@ use tgradish_core::input::Input;
 use tgradish_core::options::Settings;
 use tgradish_core::presets::Format;
 use tgradish_core::presets::FormatOptions;
-use tgradish_core::tgradish_tgs::check::Severity;
+use tgradish_core::tgradish_tgs::check::{self, Severity};
 use tgradish_core::tgradish_tgs::normalise::Report;
 use tgradish_core::tgradish_tgs::sticker::Step;
 use tgradish_core::tgs;
@@ -132,12 +132,40 @@ pub(crate) enum Warning {
 }
 
 impl Warning {
-    /// What it says: the GUI's own in its words, converting's as core
+    /// What it says, in the GUI's words where it has them, else as core
     /// says it.
     pub(crate) fn text(&self) -> String {
+        use tgradish_core::events::{LeftOut, Warning as Warned};
+        use tgradish_core::tgradish_tgs::normalise::Warning as Art;
         match self {
             &Warning::SheetRefused { frames } => fl!("sheet-refused", "converted", frames = frames),
-            Warning::Converting(warned) => warned.to_string(),
+            Warning::Converting(warned) => match warned {
+                &Warned::FewerFrames { fps, width, height } => {
+                    let fps = format!("{fps:.1}");
+                    fl!("warned-fewer-frames", fps = fps, width = width, height = height)
+                }
+                Warned::Art(Art::ManyColours { colours }) => {
+                    let count = *colours;
+                    let colours = fl!("count-colours", count = count);
+                    fl!("warned-many-colours", colours = colours)
+                }
+                &Warned::LengthRangeCapped { length } => {
+                    fl!("warned-length-capped", length = widgets::seconds(length))
+                }
+                &Warned::InputShorter { available } => {
+                    fl!("warned-input-shorter", length = widgets::seconds(available))
+                }
+                &Warned::Trimmed { max } => fl!("warned-trimmed", length = widgets::seconds(max)),
+                Warned::LeftOut { what, error } => match what {
+                    LeftOut::Name => fl!("warned-left-out", details = error.as_str()),
+                    _ => fl!("warned-left-out", "duration", details = error.as_str()),
+                },
+                // what the GUI never meets, as it sets aside what has no
+                // effect before converting and keeps no intermediate
+                // files, and what it has no words of its own for, as core
+                // says it
+                warned => warned.to_string(),
+            },
         }
     }
 }
@@ -169,9 +197,8 @@ pub(crate) fn problems(issues: &[telegram::Issue]) -> Vec<Problem> {
     issues.iter().map(Problem::of).collect()
 }
 
-/// What Telegram would have with a result, in the GUI's words: of the
-/// kinds every format has, its own; of what only a `.tgs` is checked for,
-/// as core says it.
+/// What Telegram would have with a result, in the GUI's words, which have
+/// all core checks for; anything newer as core says it.
 fn issue_text(issue: &telegram::Issue) -> String {
     use telegram::Issue;
     match issue {
@@ -199,9 +226,84 @@ fn issue_text(issue: &telegram::Issue) -> String {
             fl!("issue-too-many-fps", fps = widgets::trimmed(fps), limit = widgets::trimmed(max))
         }
         Issue::Animated => fl!("issue-animated"),
-        // what only a .tgs is checked for, and what the GUI has no words
-        // of its own for yet, as core says it
+        Issue::Lottie(found) => lottie_text(found),
+        // what the GUI has no words of its own for yet, as core says it
         issue => issue.to_string(),
+    }
+}
+
+/// What only a `.tgs` is checked for, in the GUI's words, by what the
+/// check measured; what the GUI has no words for yet as core says it.
+fn lottie_text(found: &check::Issue) -> String {
+    use check::{Finding, IssueKind as Kind};
+    let trimmed = widgets::trimmed;
+    match (&found.finding, found.kind) {
+        // a canvas not a whole number of pixels on a side
+        (&Finding::Canvas { width, height, side }, _) => {
+            fl!("issue-size", width = trimmed(width), height = trimmed(height), side = side)
+        }
+        (&Finding::FrameRate { fps, .. }, _) if found.severity == Severity::Warning => {
+            fl!("issue-frame-rate", "accepted", fps = trimmed(fps))
+        }
+        (&Finding::FrameRate { fps, required }, _) => {
+            fl!("issue-frame-rate", fps = trimmed(fps), required = required)
+        }
+        (&Finding::Length { frames, fps, max }, _) => fl!(
+            "issue-too-long",
+            seconds = format!("{:.3} s", frames / fps),
+            limit = widgets::seconds(max)
+        ),
+        (Finding::NoFrames, _) => fl!("issue-no-frames"),
+        (&Finding::Count { count, limit }, Kind::FileSize) => {
+            let (size, limit) = sizes(count as u64, limit as u64);
+            fl!("issue-too-big", size = size, limit = limit)
+        }
+        (&Finding::Count { count, limit }, Kind::JsonSize) => {
+            let (size, limit) = sizes(count as u64, limit as u64);
+            fl!("issue-unpacked", size = size, limit = limit)
+        }
+        (&Finding::Count { count, limit }, kind) => match kind {
+            Kind::Layers => fl!("issue-count", "layers", count = count, limit = limit),
+            Kind::ShapesPerLayer => {
+                fl!("issue-count", "shapes-per-layer", count = count, limit = limit)
+            }
+            Kind::PaintPoints => fl!("issue-count", "paint-points", count = count, limit = limit),
+            Kind::PaintsPerLayer => {
+                fl!("issue-count", "paints-per-layer", count = count, limit = limit)
+            }
+            Kind::PaintSources => {
+                fl!("issue-count", "paint-sources", count = count, limit = limit)
+            }
+            Kind::PathPoints => fl!("issue-count", "path-points", count = count, limit = limit),
+            Kind::Keyframes => fl!("issue-count", "keyframes", count = count, limit = limit),
+            Kind::Assets => fl!("issue-count", "assets", count = count, limit = limit),
+            Kind::ExpandedLayers => {
+                fl!("issue-count", "expanded-layers", count = count, limit = limit)
+            }
+            Kind::Nesting => fl!("issue-count", "nesting", count = count, limit = limit),
+            Kind::GroupDepth => fl!("issue-count", "group-depth", count = count, limit = limit),
+            _ => found.message.clone(),
+        },
+        (&Finding::Cost { shapes, layers, cost, layer_cost, limit }, _) => fl!(
+            "issue-cost",
+            cost = cost,
+            limit = limit,
+            shapes = shapes,
+            layers = layers,
+            each = layer_cost
+        ),
+        (&Finding::EmptyTangents { paths }, _) => fl!("issue-empty-tangents", count = paths),
+        (&Finding::PathCoordinate { coordinate, limit }, _) => {
+            fl!("issue-path-coordinate", coordinate = trimmed(coordinate), limit = trimmed(limit))
+        }
+        (Finding::PrecompLoop, _) => fl!("issue-precomp-loop"),
+        // the feature by the name Lottie gives it, as Inspect lists them
+        (&Finding::Feature { name, against_rules, drawn }, _) => match (against_rules, drawn) {
+            (true, true) => fl!("issue-feature", feature = name),
+            (true, false) => fl!("issue-feature", "undrawn", feature = name),
+            (false, _) => fl!("issue-feature", "ignored", feature = name),
+        },
+        _ => found.message.clone(),
     }
 }
 
@@ -792,18 +894,41 @@ mod tests {
             Problem::of(&emoji).text(),
             fl!("issue-size", width = 300, height = 200, side = 100)
         );
-        // what only a .tgs is checked for, as core says it, and refused
-        // only where it is an error
+        // what only a .tgs is checked for, in the GUI's words too, and
+        // refused only where it is an error
         let thirty = br#"{"fr":30,"ip":0,"op":60,"w":512,"h":512,"layers":[{"ty":4,"shapes":[]}]}"#;
         let (_, found) = tgradish_core::tgradish_tgs::check::check(thirty, None).unwrap();
         let frowned = Problem::of(&Issue::Lottie(found[0].clone()));
         assert!(!frowned.refused);
-        assert_eq!(frowned.text(), found[0].message);
+        assert_eq!(frowned.text(), fl!("issue-frame-rate", "accepted", fps = "30"));
         // and a .tgs's of the kinds every format has in the GUI's words
         let narrow = br#"{"fr":60,"ip":0,"op":60,"w":512,"h":256,"layers":[{"ty":4,"shapes":[]}]}"#;
         let (stats, narrow) = tgradish_core::tgradish_tgs::check::check(narrow, None).unwrap();
         let narrow = telegram::check_lottie(narrow, &stats);
         assert_eq!(texts(&narrow), [fl!("issue-size", width = 512, height = 256, side = 512)]);
+    }
+
+    /// Every check of a `.tgs` that core makes, worded by the GUI rather
+    /// than as core's English says it.
+    #[test]
+    fn words_every_check_of_a_tgs() {
+        use tgradish_core::tgradish_tgs::check::{IssueKind, check};
+        // too many layers and no frames, at a frame rate Telegram refuses,
+        // on a canvas not a whole number of pixels wide, with a feature
+        // against Telegram's rules and one its apps don't draw
+        let layers: Vec<String> = (0..1501).map(|_| r#"{"ty":4,"shapes":[]}"#.into()).collect();
+        let many = format!(
+            r#"{{"fr":24,"ip":0,"op":0,"w":512.5,"h":512,"layers":[{},
+                {{"ty":4,"masksProperties":[{{}}],"shapes":[{{"ty":"zz"}},{{"ty":"tm"}}]}}]}}"#,
+            layers.join(",")
+        );
+        let (stats, found) = check(many.as_bytes(), None).unwrap();
+        let kinds: Vec<IssueKind> = found.iter().map(|issue| issue.kind).collect();
+        assert!(kinds.contains(&IssueKind::Layers) && kinds.contains(&IssueKind::NoFrames));
+        for issue in telegram::check_lottie(found, &stats) {
+            let text = Problem::of(&issue).text();
+            assert_ne!(text, issue.to_string(), "{issue:?} is worded as core says it");
+        }
     }
 
     #[test]

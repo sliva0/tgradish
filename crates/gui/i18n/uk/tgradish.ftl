@@ -898,6 +898,36 @@ issue-too-big = Він займає { $size }, більше за ліміт у {
 issue-too-long = За метаданими він триває { $seconds }, більше за ліміт у { $limit }
 issue-too-many-fps = Його частота кадрів { $fps } fps, більше за ліміт у { $limit } fps
 issue-animated = Він анімований, а статична наліпка — це одна картинка
+issue-frame-rate = Його частота кадрів { $fps } fps, а Telegram приймає { $required } fps
+    .accepted = Його частота кадрів { $fps } fps: це проти правил Telegram, хоча Telegram її приймає
+issue-no-frames = У ньому немає кадрів
+issue-unpacked = Без стиснення він займає { $size }, більше за ліміт Telegram Desktop у { $limit }
+issue-count =
+    .layers = Шарів: { $count }, більше за ліміт у { $limit }
+    .shapes-per-layer = Найбільше фігур у шарі: { $count }, більше за ліміт у { $limit }
+    .paint-points = Найбільше точок контуру в одній заливці: { $count }, більше за ліміт у { $limit }
+    .paints-per-layer = Найбільше заливок і обведень у шарі: { $count }, більше за ліміт застосунків Telegram у { $limit }
+    .paint-sources = Найбільше зафарбованих фігур у шарі: { $count }, більше за ліміт застосунків Telegram у { $limit }
+    .path-points = Найбільше точок у контурі: { $count }, більше за ліміт застосунків Telegram у { $limit }
+    .keyframes = Найбільше ключових кадрів у властивості: { $count }, більше за ліміт застосунків Telegram у { $limit }
+    .assets = Ресурсів: { $count }, більше за ліміт застосунків Telegram у { $limit }
+    .expanded-layers = Шарів із розгорнутими прекомпозиціями: { $count }, більше за ліміт застосунків Telegram у { $limit }
+    .nesting = Рівнів вкладеності в JSON: { $count }, більше за ліміт застосунків Telegram у { $limit }
+    .group-depth = Рівнів груп у групах: { $count }, більше за ліміт застосунків Telegram у { $limit }
+issue-cost = Вартість малювання: { $cost }, більше за ліміт у { $limit }; фігур: { $shapes }, шарів: { $layers }, по { $each } за кожен
+issue-empty-tangents = Контурів із порожніми дотичними ([]), яких Telegram не приймає: { $count }; [0,0] працює
+issue-path-coordinate = Найбільша координата контуру: { $coordinate }, більше за ліміт застосунків Telegram у { $limit }
+issue-precomp-loop = Його прекомпозиції посилаються одна на одну по колу
+issue-feature = { $feature }: проти правил Telegram, хоча Telegram це приймає
+    .undrawn = { $feature }: проти правил Telegram; Telegram це приймає, але його застосунки цього не малюють
+    .ignored = { $feature }: застосунки Telegram цього не малюють
+warned-fewer-frames = Прочитано з частотою { $fps } fps: більше кадрів розміром { $width } × { $height } не вмістилося б у пам’ять
+warned-many-colours = У ньому { $colours }: це незвично для піксель-арту, тож наліпка буде великою
+warned-length-capped = Довжини, які пробує підгонка, обрізано до { $length }: вона лише вкорочує
+warned-input-shorter = Після точки початку оригінал триває лише { $length }: його використано повністю
+warned-trimmed = Обрізано до { $length }: підміну вимкнено, а довших відео Telegram не приймає
+warned-left-out = Записано без імені tgradish у метаданих, бо аргументи ffmpeg не лишили для нього місця: { $details }
+    .duration = Записано без підміненої тривалості в метаданих, бо аргументи ffmpeg не лишили для неї місця: { $details }
 
 
 ## Перевірка наліпки

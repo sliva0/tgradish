@@ -837,6 +837,36 @@ issue-too-big = Boyutu { $size }, { $limit } sınırını aşıyor
 issue-too-long = Meta verisine göre { $seconds } sürüyor, { $limit } sınırını aşıyor
 issue-too-many-fps = Kare hızı { $fps } fps, { $limit } fps sınırını aşıyor
 issue-animated = Hareketli, oysa statik çıkartmalar tek bir görüntüdür
+issue-frame-rate = Kare hızı { $fps } fps, oysa Telegram { $required } fps kabul ediyor
+    .accepted = Kare hızı { $fps } fps: Telegram'ın kurallarına aykırı, ama Telegram yine de kabul ediyor
+issue-no-frames = Hiç karesi yok
+issue-unpacked = Açılmış hâlde boyutu { $size }, Telegram Desktop'ın { $limit } sınırını aşıyor
+issue-count =
+    .layers = Katmanlar: { $count }, { $limit } sınırını aşıyor
+    .shapes-per-layer = Bir katmanda en çok şekil: { $count }, { $limit } sınırını aşıyor
+    .paint-points = Bir dolguda en çok yol noktası: { $count }, { $limit } sınırını aşıyor
+    .paints-per-layer = Bir katmanda en çok dolgu ve kontur: { $count }, Telegram uygulamalarının { $limit } sınırını aşıyor
+    .paint-sources = Bir katmanda en çok boyanan şekil: { $count }, Telegram uygulamalarının { $limit } sınırını aşıyor
+    .path-points = Bir yolda en çok nokta: { $count }, Telegram uygulamalarının { $limit } sınırını aşıyor
+    .keyframes = Bir özellikte en çok anahtar kare: { $count }, Telegram uygulamalarının { $limit } sınırını aşıyor
+    .assets = Varlıklar: { $count }, Telegram uygulamalarının { $limit } sınırını aşıyor
+    .expanded-layers = Ön kompozisyonlar açılınca katmanlar: { $count }, Telegram uygulamalarının { $limit } sınırını aşıyor
+    .nesting = JSON'undaki iç içe geçme düzeyleri: { $count }, Telegram uygulamalarının { $limit } sınırını aşıyor
+    .group-depth = İç içe grup düzeyleri: { $count }, Telegram uygulamalarının { $limit } sınırını aşıyor
+issue-cost = Çizim maliyeti: { $cost }, { $limit } sınırını aşıyor; şekiller: { $shapes }, katmanlar: { $layers }, her biri { $each }
+issue-empty-tangents = Telegram'ın reddettiği boş teğetli ([]) yollar: { $count }; [0,0] çalışır
+issue-path-coordinate = En büyük yol koordinatı: { $coordinate }, Telegram uygulamalarının { $limit } sınırını aşıyor
+issue-precomp-loop = Ön kompozisyonları döngü hâlinde birbirine başvuruyor
+issue-feature = { $feature }: Telegram'ın kurallarına aykırı, ama Telegram yine de kabul ediyor
+    .undrawn = { $feature }: Telegram'ın kurallarına aykırı; Telegram kabul ediyor ama uygulamaları bunu çizmiyor
+    .ignored = { $feature }: Telegram uygulamaları bunu çizmiyor
+warned-fewer-frames = { $fps } fps ile okundu, çünkü { $width } × { $height } boyutunda daha fazla kare belleğe sığmazdı
+warned-many-colours = { $colours } içeriyor; bu piksel sanatı için alışılmadık, bu yüzden çıkartma büyük olacak
+warned-length-capped = Sığdırmanın denediği süreler { $length } ile sınırlandı, çünkü sığdırma yalnızca kısaltır
+warned-input-shorter = Girdi, başlangıcından sonra yalnızca { $length } sürüyor: tamamı kullanılıyor
+warned-trimmed = { $length } olarak kesildi: süre değiştirme kapalı ve Telegram daha uzun videoları reddediyor
+warned-left-out = Meta verisinde tgradish'in adı olmadan yazıldı, çünkü ham ffmpeg argümanları ona yer bırakmadı: { $details }
+    .duration = Meta verisinde değiştirilmiş süre olmadan yazıldı, çünkü ham ffmpeg argümanları ona yer bırakmadı: { $details }
 
 
 ## Inspecting a sticker

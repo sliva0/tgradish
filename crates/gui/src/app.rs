@@ -1662,7 +1662,8 @@ mod tests {
 
     /// What the GUI said and keeps showing, made in Ukrainian, is all in
     /// English once the language changes, as Settings changes it: a
-    /// result's problems and warnings; a failure; the notices along the bottom; what
+    /// result's problems and warnings, as converting a TGS too large for
+    /// Telegram finds them; a failure; the notices along the bottom; what
     /// checking ffmpeg found; and a sticker inspected. The language is the
     /// whole process's, so the test runs itself in a process of its own,
     /// where no other test runs meanwhile.
@@ -1770,9 +1771,19 @@ mod tests {
             }
             texts
         };
-        // all of it in Ukrainian first
+        // all of it in Ukrainian first, the problems as the GUI words them
         let before = seen(&mut harness);
-        assert_ne!(cyrillic(&before), Vec::<&String>::new());
+        let cost = || {
+            fl!(
+                "issue-cost",
+                cost = 24_300_usize,
+                limit = 24_000_usize,
+                shapes = 0_usize,
+                layers = 2700_usize,
+                each = 9_usize
+            )
+        };
+        assert!(before.iter().any(|text| text.contains(&cost())), "{before:?}");
 
         // the language changed as Settings changes it
         harness.state_mut().config.gui.language = Some("en-GB".into());
@@ -1785,8 +1796,11 @@ mod tests {
         assert_eq!(cyrillic(&after), Vec::<&String>::new());
         // and what it said is said again in English
         let said = [
+            cost(),
             fl!("issue-too-big", size = "71.6 KiB", limit = "64.0 KiB"),
-            fl!("sheet-refused", "converted", frames = 8_usize),
+            fl!("issue-count", "layers", count = 2700_usize, limit = 1500_usize),
+            fl!("issue-frame-rate", "accepted", fps = "30"),
+            fl!("warned-trimmed", length = crate::widgets::seconds(3.0)),
             fl!("nothing-fits", limit = "64.0 KiB", smallest = "68.4 KiB"),
             fl!("nothing-to-paste", "why"),
             fl!("files-gone", count = 2_usize),

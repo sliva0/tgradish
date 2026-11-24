@@ -826,6 +826,36 @@ issue-too-big = Ukurannya { $size }, melebihi batas { $limit }
 issue-too-long = Metadatanya menyatakan durasi { $seconds }, melebihi batas { $limit }
 issue-too-many-fps = Laju bingkainya { $fps } fps, melebihi batas { $limit } fps
 issue-animated = Ini beranimasi, padahal stiker statis hanya satu gambar
+issue-frame-rate = Laju bingkainya { $fps } fps, sedangkan Telegram menerima { $required } fps
+    .accepted = Laju bingkainya { $fps } fps: melanggar aturan Telegram, meski Telegram menerimanya
+issue-no-frames = Tidak ada bingkai di dalamnya
+issue-unpacked = Tanpa kompresi, ukurannya { $size }, melebihi batas { $limit } Telegram Desktop
+issue-count =
+    .layers = Lapisan: { $count }, melebihi batas { $limit }
+    .shapes-per-layer = Bentuk terbanyak dalam satu lapisan: { $count }, melebihi batas { $limit }
+    .paint-points = Titik jalur terbanyak dalam satu isian: { $count }, melebihi batas { $limit }
+    .paints-per-layer = Isian dan goresan terbanyak dalam satu lapisan: { $count }, melebihi batas { $limit } di aplikasi Telegram
+    .paint-sources = Bentuk yang diwarnai terbanyak dalam satu lapisan: { $count }, melebihi batas { $limit } di aplikasi Telegram
+    .path-points = Titik terbanyak dalam satu jalur: { $count }, melebihi batas { $limit } di aplikasi Telegram
+    .keyframes = Keyframe terbanyak pada satu properti: { $count }, melebihi batas { $limit } di aplikasi Telegram
+    .assets = Aset: { $count }, melebihi batas { $limit } di aplikasi Telegram
+    .expanded-layers = Lapisan setelah precomp dijabarkan: { $count }, melebihi batas { $limit } di aplikasi Telegram
+    .nesting = Tingkat penyarangan dalam JSON-nya: { $count }, melebihi batas { $limit } di aplikasi Telegram
+    .group-depth = Tingkat grup di dalam grup: { $count }, melebihi batas { $limit } di aplikasi Telegram
+issue-cost = Beban gambar: { $cost }, melebihi batas { $limit }; bentuk: { $shapes }, lapisan: { $layers }, masing-masing { $each }
+issue-empty-tangents = Jalur dengan tangen kosong ([]), yang ditolak Telegram: { $count }; [0,0] berfungsi
+issue-path-coordinate = Koordinat jalur terbesar: { $coordinate }, melebihi batas { $limit } di aplikasi Telegram
+issue-precomp-loop = Precomp-nya saling merujuk dalam lingkaran
+issue-feature = { $feature }: melanggar aturan Telegram, meski Telegram menerimanya
+    .undrawn = { $feature }: melanggar aturan Telegram; Telegram menerimanya, tetapi aplikasinya tidak menggambarnya
+    .ignored = { $feature }: aplikasi Telegram tidak menggambarnya
+warned-fewer-frames = Dibaca pada { $fps } fps, karena lebih banyak bingkai { $width } × { $height } tidak akan muat di memori
+warned-many-colours = Ada { $colours }, tidak biasa untuk pixel art, jadi stikernya akan besar
+warned-length-capped = Durasi yang dicoba penyesuaian dipangkas menjadi { $length }, karena penyesuaian hanya memendekkan
+warned-input-shorter = Input hanya berdurasi { $length } setelah titik awalnya: semuanya dipakai
+warned-trimmed = Dipotong menjadi { $length }: pemalsuan nonaktif, dan Telegram menolak video yang lebih panjang
+warned-left-out = Ditulis tanpa nama tgradish di metadatanya, karena argumen ffmpeg mentah tidak menyisakan ruang untuknya: { $details }
+    .duration = Ditulis tanpa durasi palsu di metadatanya, karena argumen ffmpeg mentah tidak menyisakan ruang untuknya: { $details }
 
 
 ## Inspecting a sticker

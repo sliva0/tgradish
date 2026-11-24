@@ -873,6 +873,36 @@ issue-too-big = Uning hajmi { $size }, bu { $limit } chegarasidan ortiq
 issue-too-long = Metamaʼlumotlariga koʻra u { $seconds } davom etadi, bu { $limit } chegarasidan ortiq
 issue-too-many-fps = Uning kadr chastotasi { $fps } fps, bu { $limit } fps chegarasidan ortiq
 issue-animated = U animatsiyali, statik stiker esa bitta tasvir boʻladi
+issue-frame-rate = Uning kadr chastotasi { $fps } fps, Telegram esa { $required } fps qabul qiladi
+    .accepted = Uning kadr chastotasi { $fps } fps: bu Telegram qoidalariga zid, garchi Telegram uni qabul qilsa ham
+issue-no-frames = Unda kadrlar yoʻq
+issue-unpacked = Siqilmagan holda uning hajmi { $size }, bu Telegram Desktop uchun { $limit } chegarasidan ortiq
+issue-count =
+    .layers = Qatlamlar: { $count }, bu { $limit } chegarasidan ortiq
+    .shapes-per-layer = Qatlamdagi eng koʻp shakl: { $count }, bu { $limit } chegarasidan ortiq
+    .paint-points = Bitta toʻldirishdagi eng koʻp kontur nuqtasi: { $count }, bu { $limit } chegarasidan ortiq
+    .paints-per-layer = Qatlamdagi eng koʻp toʻldirish va chiziq: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
+    .paint-sources = Qatlamdagi eng koʻp boʻyalgan shakl: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
+    .path-points = Konturdagi eng koʻp nuqta: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
+    .keyframes = Xususiyatdagi eng koʻp kalit kadr: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
+    .assets = Resurslar: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
+    .expanded-layers = Prekompozitsiyalar ochilgandagi qatlamlar: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
+    .nesting = JSON dagi ichma-ich darajalar: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
+    .group-depth = Guruh ichidagi guruhlar darajalari: { $count }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
+issue-cost = Chizish narxi: { $cost }, bu { $limit } chegarasidan ortiq; shakllar: { $shapes }, qatlamlar: { $layers }, har biri { $each }
+issue-empty-tangents = Telegram rad etadigan boʻsh tangensli ([]) konturlar: { $count }; [0,0] ishlaydi
+issue-path-coordinate = Eng katta kontur koordinatasi: { $coordinate }, bu Telegram ilovalaridagi { $limit } chegarasidan ortiq
+issue-precomp-loop = Uning prekompozitsiyalari bir-biriga aylana boʻylab havola qiladi
+issue-feature = { $feature }: Telegram qoidalariga zid, garchi Telegram uni qabul qilsa ham
+    .undrawn = { $feature }: Telegram qoidalariga zid; Telegram uni qabul qiladi, lekin uning ilovalari buni chizmaydi
+    .ignored = { $feature }: Telegram ilovalari buni chizmaydi
+warned-fewer-frames = { $fps } fps da oʻqildi, chunki { $width } × { $height } oʻlchamli koʻproq kadr xotiraga sigʻmas edi
+warned-many-colours = Unda { $colours } bor, bu piksel-art uchun odatiy emas, shuning uchun stiker katta boʻladi
+warned-length-capped = Sigʻdirish sinaydigan davomiyliklar { $length } gacha qisqartirildi, chunki u faqat qisqartiradi
+warned-input-shorter = Manba boshlanishidan keyin atigi { $length } davom etadi: hammasi ishlatiladi
+warned-trimmed = { $length } gacha kesildi: soxtalashtirish oʻchirilgan, Telegram esa uzunroq videolarni rad etadi
+warned-left-out = Metamaʼlumotlarida tgradish nomisiz yozildi, chunki xom ffmpeg argumentlari unga joy qoldirmadi: { $details }
+    .duration = Metamaʼlumotlarida soxta davomiyliksiz yozildi, chunki xom ffmpeg argumentlari unga joy qoldirmadi: { $details }
 
 
 ## Inspecting a sticker

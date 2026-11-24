@@ -1136,6 +1136,57 @@ issue-too-big = It is { $size }, over the limit of { $limit }
 issue-too-long = Its metadata says it lasts { $seconds }, over the limit of { $limit }
 issue-too-many-fps = Its frame rate is { $fps } fps, over the limit of { $limit } fps
 issue-animated = It is animated, where static stickers are one picture
+# Telegram's problems with a TGS animation, which only it is checked for.
+# .accepted is only frowned on: Telegram takes it, against its rules.
+issue-frame-rate = Its frame rate is { $fps } fps, where Telegram takes { $required } fps
+    .accepted = Its frame rate is { $fps } fps: against Telegram's rules, though Telegram takes it
+issue-no-frames = It has no frames
+# The size of its JSON before it is compressed, as Inspect's Unpacked.
+issue-unpacked = Unpacked, it is { $size }, over the limit of { $limit } of Telegram Desktop
+# Counts in a TGS animation over Telegram's limits; those after
+# .paint-points are over the limits of the renderer in Telegram's apps.
+# Each names what is counted, as Inspect does, then the count.
+issue-count =
+    .layers = Layers: { $count }, over the limit of { $limit }
+    .shapes-per-layer = Most shapes in a layer: { $count }, over the limit of { $limit }
+    .paint-points = Most path points in one fill: { $count }, over the limit of { $limit }
+    .paints-per-layer = Most fills and strokes in a layer: { $count }, over the limit of { $limit } in Telegram's apps
+    .paint-sources = Most shapes painted in a layer: { $count }, over the limit of { $limit } in Telegram's apps
+    .path-points = Most points in a path: { $count }, over the limit of { $limit } in Telegram's apps
+    .keyframes = Most keyframes of a property: { $count }, over the limit of { $limit } in Telegram's apps
+    .assets = Assets: { $count }, over the limit of { $limit } in Telegram's apps
+    .expanded-layers = Layers with precomps expanded: { $count }, over the limit of { $limit } in Telegram's apps
+    .nesting = Levels of nesting in its JSON: { $count }, over the limit of { $limit } in Telegram's apps
+    .group-depth = Levels of groups in groups: { $count }, over the limit of { $limit } in Telegram's apps
+# The drawing cost, as Inspect's: its shapes plus { $each } for each of its
+# layers.
+issue-cost = Drawing cost: { $cost }, over the limit of { $limit }; shapes: { $shapes }, layers: { $layers }, { $each } each
+# Paths written with empty tangents, [], as pixelart2tgs 1.x wrote them;
+# [0,0] works.
+issue-empty-tangents = Paths with empty tangents ([]), which Telegram refuses: { $count }; [0,0] works
+issue-path-coordinate = Largest path coordinate: { $coordinate }, over the limit of { $limit } in Telegram's apps
+issue-precomp-loop = Its precomps refer to each other in a loop
+# A Lottie feature, by the name Lottie gives it, as Inspect's Features lists
+# it: against Telegram's rules though Telegram takes it; .undrawn, and
+# Telegram's apps don't draw it either; .ignored, only that they don't.
+issue-feature = { $feature }: against Telegram's rules, though Telegram takes it
+    .undrawn = { $feature }: against Telegram's rules; Telegram takes it, but its apps don't draw it
+    .ignored = { $feature }: Telegram's apps don't draw it
+# Warnings of a conversion, under its result. The pixel art read from a
+# video at a lower frame rate than it has, as more frames of its size
+# wouldn't fit in memory.
+warned-fewer-frames = Read at { $fps } fps, as more frames of { $width } × { $height } wouldn't fit in memory
+# { $colours } is count-colours.
+warned-many-colours = It has { $colours }, unusual for pixel art, so the sticker will be large
+# Fitting the length only shortens: the longest it tries is the length.
+warned-length-capped = The lengths fitting tries are cut to { $length }, as it only shortens
+warned-input-shorter = The input lasts only { $length } after its start: all of it is used
+warned-trimmed = Trimmed to { $length }: spoofing is off, and Telegram refuses longer videos
+# Raw ffmpeg arguments left no room in the WebM's metadata for tgradish's
+# name, or, .duration, for the spoofed duration; why, as tgradish's reader
+# of WebM says it, follows.
+warned-left-out = Written without tgradish's name in its metadata, which raw ffmpeg arguments left no room for: { $details }
+    .duration = Written without the spoofed duration in its metadata, which raw ffmpeg arguments left no room for: { $details }
 
 
 ## Inspecting a sticker
