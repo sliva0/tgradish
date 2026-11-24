@@ -412,15 +412,24 @@ mod tests {
     }
 
     /// What `pattern` holds: its text, the arguments it takes, the
-    /// messages and terms it puts in, as `id` or `id.attribute`, and the
-    /// plural forms each choice by a count has, as `one` and `other`.
+    /// messages and terms it puts in, as `id` or `id.attribute`, the
+    /// plural forms each choice by a count has, as `one` and `other`, and
+    /// the counts chosen by so that none of the choices shows.
     #[derive(Default)]
     struct Parts {
         text: String,
         arguments: BTreeSet<String>,
         references: BTreeSet<String>,
         plurals: Vec<BTreeSet<String>>,
+        unshown: Vec<String>,
     }
+
+    /// Messages that choose plural forms by a count they don't show, as it
+    /// is shown beside them: `attempts-times`, after the field of the
+    /// number of encodes. Others that don't show it choose by `[1]`,
+    /// exactly one, as a plural form such as Ukrainian's `[one]` is 21's
+    /// too.
+    const SHOWN_BESIDE: [&str; 1] = ["attempts-times"];
 
     /// The names of plural forms, as Unicode's rules for counting name them.
     const PLURAL_FORMS: [&str; 6] = ["zero", "one", "two", "few", "many", "other"];
@@ -468,6 +477,16 @@ mod tests {
                 let forms = PLURAL_FORMS.iter().filter(|form| **form != "other");
                 if forms.into_iter().any(|form| names.contains(*form)) {
                     into.plurals.push(names);
+                    if let ast::InlineExpression::VariableReference { id } = selector {
+                        let shows = |variant: &ast::Variant<String>| {
+                            let mut shown = Parts::default();
+                            parts(&variant.value, &mut shown);
+                            shown.arguments.contains(&id.name)
+                        };
+                        if !variants.iter().any(shows) {
+                            into.unshown.push(id.name.clone());
+                        }
+                    }
                 }
                 for variant in variants {
                     parts(&variant.value, into);
@@ -640,6 +659,12 @@ mod tests {
                     ));
                 }
             }
+            for count in found.unshown.iter().filter(|_| !SHOWN_BESIDE.contains(&id.as_str())) {
+                problems.push(format!(
+                    "{id} chooses plural forms by {{ ${count} }}, which it doesn't show: choose \
+                     [1] for exactly one, and *[other] otherwise"
+                ));
+            }
         }
         if !had.contains("language-name") {
             problems.push("language-name, the language's name for itself, is missing".into());
@@ -726,7 +751,8 @@ mod tests {
             count-frames = { $count ->\n    [one] a\n   *[other] b\n}\n\
             unknown = x\n\
             broken = { $ }\n\
-            close = again\n";
+            close = again\n\
+            no-font = { $count ->\n    [one] { $codes }\n    [few] c\n    [many] d\n   *[other] e\n}\n";
         let said = problems("uk", text, &english);
         let has = |part: &str| said.iter().any(|problem| problem.contains(part));
         for part in [
@@ -736,6 +762,7 @@ mod tests {
             "close puts in { never }, which English hasn't",
             "close puts in { save }, which isn't given here",
             "count-frames counts with [one] [other] but not [few] [many], a plural form of uk",
+            "no-font chooses plural forms by { $count }, which it doesn't show",
             "unknown isn't a message English has",
             "close is given twice",
             "save is missing; English says \"Save\"",

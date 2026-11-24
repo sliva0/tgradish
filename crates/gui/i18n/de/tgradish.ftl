@@ -163,7 +163,7 @@ name-pasted = eingefügtes Bild
 name-frames = { $name } (Frames)
 name-and-more = { $name } und { $more } weitere
 no-font = { $count ->
-    [one] Für { $codes } wurde keine Schriftart gefunden, weder unter denen von tgradish noch unter denen des Systems, daher wird es als Code angezeigt. Die Datei selbst ist in Ordnung
+    [1] Für { $codes } wurde keine Schriftart gefunden, weder unter denen von tgradish noch unter denen des Systems, daher wird es als Code angezeigt. Die Datei selbst ist in Ordnung
    *[other] Für { $codes } wurde keine Schriftart gefunden, weder unter denen von tgradish noch unter denen des Systems, daher werden sie als Codes angezeigt. Die Datei selbst ist in Ordnung
 }
 

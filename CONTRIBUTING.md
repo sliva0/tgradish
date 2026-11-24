@@ -43,7 +43,7 @@ To add a language, copy `en-GB/tgradish.ftl` into a directory named after its ta
 - Have every message and attribute `en-GB` has. Only a regional variant of English, such as `en-US`, leaves out what it says the same, and falls back on `en-GB` for it.
 - Have nothing `en-GB` lacks, and use only the arguments (`{ $name }`) the same message in `en-GB` uses.
 - Have whatever its messages put in: `{ other-message }` puts in a message of the same file, and `{ -term }` a term it defines itself.
-- Give counts (`{ $count -> … }`) a variant for each plural form of the language, such as `[one]`, `[few]`, `[many]` and `*[other]` in Ukrainian; use `[1]` for "exactly one" where the number itself isn't shown.
+- Give counts (`{ $count -> … }`) a variant for each plural form of the language, such as `[one]`, `[few]`, `[many]` and `*[other]` in Ukrainian; use `[1]` for "exactly one" where the number itself isn't shown, as a plural form such as Ukrainian's `[one]` covers 21 too.
 - Use only characters the bundled fonts draw. To draw more, add them to `crates/gui/assets/fonts/subset.py` and run it with `uv run crates/gui/assets/fonts/subset.py`.
 
 Check every file with `cargo test -p tgradish-gui every_language_file_is_sound`, which `cargo test --workspace` runs too: it lists every problem of every file, with the English of each message missing. Keep the names of programs, formats and units as they are (tgradish, Telegram, ffmpeg, WebM, WebP, TGS, VP9, CRF, SSIM, Aseprite, `s`, `px`, `fps`, `KiB`); key names such as Ctrl may follow the language's keyboards.

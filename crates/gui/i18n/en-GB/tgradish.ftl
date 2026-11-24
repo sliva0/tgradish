@@ -263,7 +263,7 @@ name-and-more = { $name } and { $more } more
 # When a file's name has characters no font, tgradish's or the system's,
 # can draw: each is shown by its code, as U+2FE0.
 no-font = { $count ->
-    [one] No font was found for { $codes }, neither among tgradish's own nor the system's, so it is shown by its code. The file itself is fine
+    [1] No font was found for { $codes }, neither among tgradish's own nor the system's, so it is shown by its code. The file itself is fine
    *[other] No font was found for { $codes }, neither among tgradish's own nor the system's, so they are shown by their codes. The file itself is fine
 }
 
@@ -659,7 +659,9 @@ attempts = Encodes up to
     .hint = How many times fitting may encode, at most
 attempts-default = Default
     .hint = Enough to land within a few percent of the file size limit for most inputs
-# After the number of encodes, which its field shows alone.
+# After the number of encodes, which its field shows alone: the number is
+# shown, in the field before it, so its plural forms are those of a number
+# shown, as [one] for 1 and 21 in Ukrainian, not [1] for exactly one.
 attempts-times = { $count ->
     [one] time
    *[other] times
@@ -800,7 +802,7 @@ blocked-sheet = the sprite sheet's cells don't divide the picture
 blocked-tag = the file has no tag "{ $tag }"
 # The layers, each in quotes, apart by commas.
 blocked-layers = { $count ->
-    [one] the file has no layer { $layers }
+    [1] the file has no layer { $layers }
    *[other] the file has no layers { $layers }
 }
 blocked-ffmpeg = ffmpeg wasn't found
@@ -816,7 +818,7 @@ sheet-nearest = Nearest that divides: { $columns } × { $rows }
 # Under the tags and layers, where the file has no longer what was chosen.
 tag-missing = This file has no tag "{ $tag }"
 layers-missing = { $count ->
-    [one] This file has no layer { $layers }
+    [1] This file has no layer { $layers }
    *[other] This file has no layers { $layers }
 }
 layers-as-file = Show layers as in the file
@@ -1262,7 +1264,7 @@ notice-sources = { $name }: what is built in, and its sources
 # The licence of a font of which tgradish has a subset built in, or more
 # than one: of Ubuntu Light and of Ubuntu Medium.
 notice-font = { $subsets ->
-    [one] Font: { $name }, a subset
+    [1] Font: { $name }, a subset
    *[other] Font: { $name }, subsets
 }
 notice-crates = Rust crates
