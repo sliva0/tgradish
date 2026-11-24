@@ -78,7 +78,7 @@ pub enum Severity {
     Warning,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 /// A problem found in a sticker by [`check`].
 #[non_exhaustive]
@@ -89,6 +89,100 @@ pub struct Issue {
     pub kind: IssueKind,
     /// Plain-English description including the measured numbers.
     pub message: String,
+    /// What was measured, for wording the issue other than `message`
+    /// does, as a translated front-end does. Not serialised.
+    #[serde(skip)]
+    pub finding: Finding,
+}
+
+/// What a check found that makes an [`Issue`], with the numbers it
+/// measured and the limit they are held to. [`Issue::kind`] says what
+/// was checked, which tells apart the issues of the same shape here.
+#[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
+pub enum Finding {
+    /// The canvas is `width` × `height` pixels, where Telegram requires
+    /// `side` × `side`.
+    Canvas {
+        /// Canvas width.
+        width: f64,
+        /// Canvas height.
+        height: f64,
+        /// The side Telegram requires.
+        side: u32,
+    },
+    /// `fps` frames a second, where Telegram requires `required`: an
+    /// error, or a warning at 30 fps, which Telegram accepts against its
+    /// rules.
+    FrameRate {
+        /// The animation's frame rate.
+        fps: f64,
+        /// The frame rate Telegram requires.
+        required: u32,
+    },
+    /// `frames` frames at `fps` frames a second, longer than `max`
+    /// seconds.
+    Length {
+        /// Frame count.
+        frames: f64,
+        /// Frame rate.
+        fps: f64,
+        /// Longest allowed, in seconds.
+        max: f64,
+    },
+    /// The animation has no frames.
+    NoFrames,
+    /// `count` of what [`Issue::kind`] counts, more than `limit`: bytes of
+    /// the file ([`IssueKind::FileSize`]) or of its JSON
+    /// ([`IssueKind::JsonSize`]), layers, shapes in a layer, path points
+    /// under one fill, fills and strokes in a layer, shapes painted in a
+    /// layer, points in a path, keyframes in a property, assets, layers
+    /// with precomps expanded, or levels of nesting or of group nesting.
+    Count {
+        /// What was counted.
+        count: usize,
+        /// The most allowed.
+        limit: usize,
+    },
+    /// `shapes` shapes in `layers` layers come to a complexity of `cost`,
+    /// each layer counting as `layer_cost` shapes, more than `limit`.
+    Cost {
+        /// Shape count.
+        shapes: usize,
+        /// Layer count.
+        layers: usize,
+        /// Their complexity.
+        cost: usize,
+        /// What each layer counts as.
+        layer_cost: usize,
+        /// The most Telegram allows.
+        limit: usize,
+    },
+    /// `paths` paths use empty tangents (`[]`), which Telegram rejects.
+    EmptyTangents {
+        /// How many.
+        paths: usize,
+    },
+    /// A path coordinate of `coordinate`, more than `limit`.
+    PathCoordinate {
+        /// The largest absolute coordinate.
+        coordinate: f64,
+        /// The most Telegram's renderer allows.
+        limit: f64,
+    },
+    /// Precomps reference each other in a loop.
+    PrecompLoop,
+    /// The Lottie feature `name` (as [`Stats::features`] names it): against
+    /// Telegram's rules where `against_rules`, though Telegram accepts it,
+    /// and drawn by Telegram's apps where `drawn`.
+    Feature {
+        /// The feature's English name.
+        name: &'static str,
+        /// It is against Telegram's rules.
+        against_rules: bool,
+        /// Telegram's apps draw it.
+        drawn: bool,
+    },
 }
 
 /// Category of a validation [`Issue`].
@@ -282,6 +376,7 @@ pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>
             None => issues.push(error(
                 IssueKind::PrecompLoop,
                 "precomps reference each other in a loop".into(),
+                Finding::PrecompLoop,
             )),
         }
     }
@@ -290,23 +385,32 @@ pub fn check(json: &[u8], tgs_bytes: Option<usize>) -> Result<(Stats, Vec<Issue>
     Ok((stats, issues))
 }
 
-fn error(kind: IssueKind, message: String) -> Issue {
-    Issue { severity: Severity::Error, kind, message }
+fn error(kind: IssueKind, message: String, finding: Finding) -> Issue {
+    Issue { severity: Severity::Error, kind, message, finding }
 }
 
 fn rules(stats: &Stats) -> Vec<Issue> {
     let mut issues = Vec::new();
-    let mut fail = |kind: IssueKind, message: String| issues.push(error(kind, message));
+    let mut fail = |kind: IssueKind, message: String, finding: Finding| {
+        issues.push(error(kind, message, finding));
+    };
     let canvas = f64::from(telegram::CANVAS);
     if (stats.width, stats.height) != (canvas, canvas) {
+        let (width, height, side) = (stats.width, stats.height, telegram::CANVAS);
         fail(
             IssueKind::Canvas,
-            format!("canvas is {}×{}; Telegram requires 512×512", stats.width, stats.height),
+            format!("canvas is {width}×{height}; Telegram requires {side}×{side}"),
+            Finding::Canvas { width, height, side },
         );
     }
     // 30 fps was accepted too, and the limit is in seconds
-    if stats.fps != f64::from(telegram::FPS) && stats.fps != 30.0 {
-        fail(IssueKind::FrameRate, format!("{} fps; Telegram requires 60 fps", stats.fps));
+    let required = telegram::FPS;
+    if stats.fps != f64::from(required) && stats.fps != 30.0 {
+        fail(
+            IssueKind::FrameRate,
+            format!("{} fps; Telegram requires {required} fps", stats.fps),
+            Finding::FrameRate { fps: stats.fps, required },
+        );
     }
     let max_seconds = f64::from(telegram::MAX_FRAMES) / f64::from(telegram::FPS);
     if stats.fps > 0.0 && stats.frames / stats.fps > max_seconds + 1e-9 {
@@ -318,15 +422,17 @@ fn rules(stats: &Stats) -> Vec<Issue> {
                 stats.fps,
                 stats.frames / stats.fps
             ),
+            Finding::Length { frames: stats.frames, fps: stats.fps, max: max_seconds },
         );
     }
     if stats.frames <= 0.0 {
-        fail(IssueKind::NoFrames, "animation has no frames".into());
+        fail(IssueKind::NoFrames, "animation has no frames".into(), Finding::NoFrames);
     }
     if let Some(bytes) = stats.tgs_bytes.filter(|&bytes| bytes > telegram::MAX_BYTES) {
         fail(
             IssueKind::FileSize,
             format!("file is {bytes} bytes; maximum is {} bytes", telegram::MAX_BYTES),
+            Finding::Count { count: bytes, limit: telegram::MAX_BYTES },
         );
     }
     let cost = telegram::cost(stats.shapes, stats.layers);
@@ -341,6 +447,13 @@ fn rules(stats: &Stats) -> Vec<Issue> {
                 telegram::LAYER_COST,
                 telegram::MAX_COST
             ),
+            Finding::Cost {
+                shapes: stats.shapes,
+                layers: stats.layers,
+                cost,
+                layer_cost: telegram::LAYER_COST,
+                limit: telegram::MAX_COST,
+            },
         );
     }
     // Telegram's own limits are below tlottie's for these
@@ -361,7 +474,8 @@ fn rules(stats: &Stats) -> Vec<Issue> {
     ];
     for (kind, what, count, limit) in server {
         if count > limit {
-            fail(kind, format!("{count} {what}; Telegram allows at most {limit}"));
+            let message = format!("{count} {what}; Telegram allows at most {limit}");
+            fail(kind, message, Finding::Count { count, limit });
         }
     }
     if stats.empty_tangent_paths > 0 {
@@ -372,6 +486,7 @@ fn rules(stats: &Stats) -> Vec<Issue> {
                  Telegram now rejects; `[0,0]` works",
                 stats.empty_tangent_paths
             ),
+            Finding::EmptyTangents { paths: stats.empty_tangent_paths },
         );
     }
     if stats.json_bytes > MAX_RAW_JSON {
@@ -381,6 +496,7 @@ fn rules(stats: &Stats) -> Vec<Issue> {
                 "{} bytes of JSON; Telegram Desktop allows at most {MAX_RAW_JSON}",
                 stats.json_bytes
             ),
+            Finding::Count { count: stats.json_bytes, limit: MAX_RAW_JSON },
         );
     }
     let limits = [
@@ -420,16 +536,19 @@ fn rules(stats: &Stats) -> Vec<Issue> {
     ];
     for (kind, what, count, limit) in limits {
         if count > limit {
-            fail(kind, format!("{count} {what}; Telegram's renderer allows at most {limit}"));
+            let message = format!("{count} {what}; Telegram's renderer allows at most {limit}");
+            fail(kind, message, Finding::Count { count, limit });
         }
     }
-    if stats.max_path_coordinate > f64::from(TLOTTIE.max_path_coordinate_abs) {
+    let coordinate = stats.max_path_coordinate;
+    if coordinate > f64::from(TLOTTIE.max_path_coordinate_abs) {
+        let limit = TLOTTIE.max_path_coordinate_abs;
         fail(
             IssueKind::PathCoordinate,
             format!(
-                "a path coordinate of {}; Telegram's renderer allows at most {}",
-                stats.max_path_coordinate, TLOTTIE.max_path_coordinate_abs
+                "a path coordinate of {coordinate}; Telegram's renderer allows at most {limit}"
             ),
+            Finding::PathCoordinate { coordinate, limit: f64::from(limit) },
         );
     }
     if stats.fps == 30.0 {
@@ -437,6 +556,7 @@ fn rules(stats: &Stats) -> Vec<Issue> {
             severity: Severity::Warning,
             kind: IssueKind::FrameRate,
             message: "30 fps: against Telegram's rules, but Telegram accepts it".into(),
+            finding: Finding::FrameRate { fps: stats.fps, required },
         });
     }
     for &(feature, forbidden, drawn) in FEATURES {
@@ -452,7 +572,13 @@ fn rules(stats: &Stats) -> Vec<Issue> {
             ),
             (false, _) => format!("{feature}: Telegram's apps ignore this"),
         };
-        issues.push(Issue { severity: Severity::Warning, kind: IssueKind::Feature, message });
+        let finding = Finding::Feature { name: feature, against_rules: forbidden, drawn };
+        issues.push(Issue {
+            severity: Severity::Warning,
+            kind: IssueKind::Feature,
+            message,
+            finding,
+        });
     }
     issues
 }
@@ -760,6 +886,24 @@ mod tests {
     }
 
     #[test]
+    fn says_what_it_measured() {
+        let json = br#"{"fr":25,"ip":0,"op":200,"w":512,"h":256,"layers":[
+            {"ty":4,"masksProperties":[{}],"shapes":[]}]}"#;
+        let (_, issues) = check(json, Some(70_000)).unwrap();
+        let findings: Vec<&Finding> = issues.iter().map(|issue| &issue.finding).collect();
+        assert_eq!(
+            findings,
+            [
+                &Finding::Canvas { width: 512.0, height: 256.0, side: 512 },
+                &Finding::FrameRate { fps: 25.0, required: 60 },
+                &Finding::Length { frames: 200.0, fps: 25.0, max: 3.0 },
+                &Finding::Count { count: 70_000, limit: 65_536 },
+                &Finding::Feature { name: "masks", against_rules: true, drawn: true },
+            ]
+        );
+    }
+
+    #[test]
     fn takes_30_fps_for_3_seconds() {
         let sticker = |op: u32| {
             format!(
@@ -772,7 +916,8 @@ mod tests {
             [Issue {
                 severity: Severity::Warning,
                 kind: IssueKind::FrameRate,
-                message: "30 fps: against Telegram's rules, but Telegram accepts it".into()
+                message: "30 fps: against Telegram's rules, but Telegram accepts it".into(),
+                finding: Finding::FrameRate { fps: 30.0, required: 60 },
             }]
         );
         let (_, issues) = check(sticker(180).as_bytes(), None).unwrap();
@@ -810,6 +955,10 @@ mod tests {
                 "24018 shapes in 6 layers have complexity 24072 (each layer counts as 9); Telegram allows at most 24000"
             ]
         );
+        let json = animation(6, 4000).to_json(Style::default());
+        let (_, issues) = check(json.as_bytes(), None).unwrap();
+        let (shapes, layers, cost, layer_cost, limit) = (24_018, 6, 24_072, 9, 24_000);
+        assert_eq!(issues[0].finding, Finding::Cost { shapes, layers, cost, layer_cost, limit });
         assert_eq!(errors(&animation(6, 3980)), Vec::<String>::new());
         // a layer of as many shapes as were accepted, and of one more
         assert_eq!(errors(&animation(1, telegram::MAX_SHAPES_PER_LAYER - 3)), Vec::<String>::new());
