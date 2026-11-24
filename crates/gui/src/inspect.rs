@@ -59,31 +59,55 @@ const BUDGET: f32 = 300.0;
 fn grid(ui: &mut egui::Ui, id: &str, rows: impl FnOnce(&mut egui::Ui)) {
     // a grid's cells are as narrow as its least column as it is first laid
     // out, which its rows' heights would keep: what they say is given the
-    // room the dialog has instead, and neither column is kept wider
-    let room = (ui.available_width() - NAMES - BETWEEN).max(0.0);
-    ui.data_mut(|data| data.insert_temp(room_id(), room));
-    let least = NAMES.min(room);
+    // room the dialog has instead, and neither column is kept wider. The
+    // names are as wide as the widest of them last drawn, where that
+    // leaves the bars their width, as many languages' are longer.
+    let available = ui.available_width();
+    let widest = ui.data(|data| data.get_temp(widest_id(false))).unwrap_or(NAMES);
+    let names = widest.min(available - BETWEEN - BUDGET).max(NAMES);
+    let room = (available - names - BETWEEN).max(0.0);
+    ui.data_mut(|data| {
+        data.insert_temp(room_id(), (names, room));
+        data.insert_temp(widest_id(true), 0.0_f32);
+    });
+    let least = names.min(room);
     egui::Grid::new(id).num_columns(2).min_col_width(least).spacing([BETWEEN, 7.0]).show(ui, rows);
+    ui.data_mut(|data| {
+        let drawn: f32 = data.get_temp(widest_id(true)).unwrap_or(NAMES);
+        data.insert_temp(widest_id(false), drawn);
+    });
 }
 
-/// Where [`grid`] keeps the room its rows have for what they say, an
-/// `f32`: written by each grid of the dialog as it is drawn, and read by
-/// its rows with [`room`].
+/// Where [`grid`] keeps the room its rows have for their names and for
+/// what they say, an `(f32, f32)`: written by each grid of the dialog as
+/// it is drawn, and read by its rows with [`room`].
 fn room_id() -> egui::Id {
     egui::Id::new("inspect room")
 }
 
+/// Where [`grid`] keeps how wide the widest name of its rows is, unwrapped,
+/// an `f32`: as last drawn, or as its rows `drawn` now note it.
+fn widest_id(drawn: bool) -> egui::Id {
+    egui::Id::new(("inspect widest name", drawn))
+}
+
 /// The room [`grid`] gives what a row says.
 fn room(ui: &egui::Ui) -> f32 {
-    ui.data(|data| data.get_temp(room_id())).unwrap_or(BUDGET)
+    ui.data(|data| data.get_temp::<(f32, f32)>(room_id())).map_or(BUDGET, |(_, room)| room)
 }
 
 /// A row's name, with `hint` on hover where there is one, wrapping where it
 /// is wider than the column of names, which would leave less room than
 /// [`grid`] gave what the row says.
 fn label(ui: &mut egui::Ui, text: &str, hint: &str) {
+    let width = widgets::text_width(ui, text, 0.0).ceil();
+    let names = ui.data_mut(|data| {
+        let widest = data.get_temp_mut_or(widest_id(true), 0.0_f32);
+        *widest = widest.max(width);
+        data.get_temp::<(f32, f32)>(room_id()).map_or(NAMES, |(names, _)| names)
+    });
     ui.scope(|ui| {
-        ui.set_max_width(NAMES);
+        ui.set_max_width(names);
         let label = ui.add(egui::Label::new(text).wrap());
         if !hint.is_empty() {
             label.on_hover_text(hint);
