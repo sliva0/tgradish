@@ -8,7 +8,7 @@ language-name = Français
 
 close = Fermer
 back-to-preset = Revenir à la valeur du préréglage
-custom = Personnalisé
+custom = Sur mesure
     .hint = Choisissez « { custom } » pour le définir
 webm-sticker = Sticker WebM
 webm-emoji = Émoji WebM
