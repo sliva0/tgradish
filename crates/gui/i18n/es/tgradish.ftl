@@ -18,27 +18,27 @@ image-sticker = Sticker estático
 image-emoji = Emoji estático
 count-colours = { $count ->
     [one] { $count } color
-    [many] { $count } de colores
+    [many] { $count } colores
    *[other] { $count } colores
 }
 count-frames = { $count ->
     [one] { $count } fotograma
-    [many] { $count } de fotogramas
+    [many] { $count } fotogramas
    *[other] { $count } fotogramas
 }
 count-layers = { $count ->
     [one] { $count } capa
-    [many] { $count } de capas
+    [many] { $count } capas
    *[other] { $count } capas
 }
 count-rectangles = { $count ->
     [one] { $count } rectángulo
-    [many] { $count } de rectángulos
+    [many] { $count } rectángulos
    *[other] { $count } rectángulos
 }
 count-tracks = { $count ->
     [one] { $count } pista
-    [many] { $count } de pistas
+    [many] { $count } pistas
    *[other] { $count } pistas
 }
 of-limit = { $used } de { $limit }
@@ -69,7 +69,7 @@ copy-path = Copiar ruta
     .done = Copiada
 files-removed = { $count ->
     [one] Se quitó { $count } archivo
-    [many] Se quitaron { $count } de archivos
+    [many] Se quitaron { $count } archivos
    *[other] Se quitaron { $count } archivos
 }
 undo-removing = Deshacer
@@ -82,13 +82,13 @@ folder-of = Mostrar en carpeta
 presets-unreadable = No se pudieron leer los preajustes propios, así que solo se ofrecen los integrados
 files-gone = { $count ->
     [one] { $count } archivo de la última vez ya no está
-    [many] { $count } de archivos de la última vez ya no están
+    [many] { $count } archivos de la última vez ya no están
    *[other] { $count } archivos de la última vez ya no están
 }
 session-unreadable = No se pudieron leer los archivos de la última vez, así que no hay ninguno abierto; su lista se guardó aparte
 files-unreadable = { $count ->
     [one] { $count } archivo de la última vez no se pudo leer y se omite; la lista tal como estaba se guardó aparte
-    [many] { $count } de archivos de la última vez no se pudieron leer y se omiten; la lista tal como estaba se guardó aparte
+    [many] { $count } archivos de la última vez no se pudieron leer y se omiten; la lista tal como estaba se guardó aparte
    *[other] { $count } archivos de la última vez no se pudieron leer y se omiten; la lista tal como estaba se guardó aparte
 }
 session-unsaved = No se pudieron guardar los archivos abiertos para la próxima vez
@@ -156,7 +156,7 @@ stop-all = Detener todo
 remove = Quitar
 remove-file = Quitarlo de la lista
 convert = Convertir
-    .hint = Crear su sticker o emoji
+    .hint = Crear el sticker o emoji
 row-convert-again = Desactualizado: convertir de nuevo
 row-next = siguiente
 row-waiting = en espera, { $ahead } por delante
@@ -214,7 +214,7 @@ replaces-earlier = Reemplaza un resultado anterior
 
 reading-crashed = tgradish falló al leer esto
 reading-stopped = Se detuvo la lectura
-no-frames = ffmpeg no encontró fotogramas en él
+no-frames = ffmpeg no encontró fotogramas en este archivo
 no-frames-there = ffmpeg no encontró fotogramas ahí
 no-frame-there = ffmpeg no encontró ningún fotograma ahí
 art-no-frames = No tiene fotogramas
@@ -223,7 +223,7 @@ result-no-frames = El resultado no tiene fotogramas
 
 ## The result's small picture over the preview
 
-inset-label = Resultado al { $scale }
+inset-label = Resultado ({ $scale })
     .plain = Resultado
     .drag = Arrastrarlo a otra esquina
 inset-scale = { $percent }%
@@ -478,7 +478,7 @@ fit-bitrate = Tasa de bits
     .hint = Ajusta la tasa de bits a la frecuencia de fotogramas elegida
 fit-crf = Calidad
     .hint = Ajusta el valor de calidad constante (CRF)
-fit-fps = Fotogramas
+fit-fps = FPS
     .hint = Ajusta la frecuencia de fotogramas con calidad constante
 fit-length = Duración
     .hint = Ajusta la duración con calidad constante, cortando el final
@@ -498,7 +498,7 @@ attempts-default = Predeterminado
     .hint = Suficiente para quedar a pocos puntos porcentuales del límite de tamaño de archivo con la mayoría de las entradas
 attempts-times = { $count ->
     [one] vez
-    [many] de veces
+    [many] veces
    *[other] veces
 }
 search-within = Buscar entre
@@ -605,12 +605,12 @@ vp9-options = Opciones del codificador por nombre, como tune-content = screen pa
 add-option = Añadir una opción
 examples = Ejemplos:
 example-tune-content = Gráficos planos y grabaciones de pantalla: bordes más nítidos
-example-aq-mode = Gasta más bits donde la imagen es compleja
+example-aq-mode = Asigna más bits donde la imagen es compleja
 example-sharpness = Conserva más detalle fino, a costa de algo de suavidad
 example-arnr-strength = Menos reducción de ruido entre fotogramas
 example-g = Un fotograma clave al menos cada 60 fotogramas
 example-qmax = Nunca peor que la calidad 50 en ningún punto
-ffmpeg-arguments = Argumentos de ffmpeg
+ffmpeg-arguments = Argumentos ffmpeg
     .hint = Argumentos sin procesar que se añaden antes de la salida, separados como lo haría un shell
     .placeholder = Por ejemplo: -qmin 4
     .unfinished = Hay una comilla o una barra invertida sin cerrar: los argumentos se quedan como se leyeron por última vez hasta que se cierre
@@ -784,7 +784,7 @@ accent-violet = Violeta
 accent-grey = Gris
 accent-own = Un color propio
     .chosen = Un color propio, { $colour }
-accent-shade = Tono
+accent-shade = Saturación y brillo
     .value = Saturación { $saturation }%, brillo { $value }%
 accent-hue = Matiz
 accent-hex = Hex
@@ -816,7 +816,7 @@ stage-reading = Leyendo el pixel art
 stage-drawing = Convirtiendo a vectores
 stage-fitting-steps = { $count ->
     [one] Ajustando a 64 KiB: { $count } paso, unos { $size }
-    [many] Ajustando a 64 KiB: { $count } de pasos, unos { $size }
+    [many] Ajustando a 64 KiB: { $count } pasos, unos { $size }
    *[other] Ajustando a 64 KiB: { $count } pasos, unos { $size }
 }
 stage-fitting-from = Ajustando a 64 KiB desde { $size }
@@ -836,7 +836,7 @@ rate-quality = calidad { $crf }
 rate-lossless = sin pérdida
 encodes-up-to = { $count ->
     [one] Como máximo { $count } codificación, hasta que una quede justo por debajo del límite de tamaño de archivo
-    [many] Como máximo { $count } de codificaciones, hasta que una quede justo por debajo del límite de tamaño de archivo
+    [many] Como máximo { $count } codificaciones, hasta que una quede justo por debajo del límite de tamaño de archivo
    *[other] Como máximo { $count } codificaciones, hasta que una quede justo por debajo del límite de tamaño de archivo
 }
 art-size = { $width } × { $height } píxeles de arte
@@ -844,7 +844,7 @@ art-size = { $width } × { $height } píxeles de arte
 art-summary = { $size }; { $colours }, { $frames }
 art-tempo = Se reproduce a ×{ $tempo } la velocidad de la entrada
 art-off-grid = Casi todo parece pixel art a { $scale }× con algunos píxeles fuera de la cuadrícula; un tamaño de píxel de arte de { $scale } los ajusta a ella
-art-shapes = { $layers } de { $rectangles }, { $size } sin comprimir
+art-shapes = { $layers } con { $rectangles }, { $size } sin comprimir
 art-before-fitting = Unos { $size } tal como está; cambios para caber:
 art-step = { $change }, unos { $size } después
 step-snapped = píxeles ajustados a una cuadrícula de { $scale }
@@ -869,7 +869,7 @@ decided-too-large-at-least = Detenido: incluso el mínimo del rango, en la codif
 decided-nothing-left = Detenido: no queda ningún ajuste que valga la pena probar
 decided-out-of-attempts = { $count ->
     [one] Detenido: se hizo { $count } codificación, la única permitida
-    [many] Detenido: se hicieron las { $count } de codificaciones permitidas
+    [many] Detenido: se hicieron las { $count } codificaciones permitidas
    *[other] Detenido: se hicieron las { $count } codificaciones permitidas
 }
 decided-lowers-to-fit = Probando { $fps } fps: nada cupo a { $from } fps
@@ -882,14 +882,14 @@ issue-not-vp9 = Su códec es { $codec }, no VP9
 issue-audio = Tiene una pista de audio
 issue-size = Mide { $width } × { $height } px, y Telegram admite { $side } × { $side } px
     .sticker = Mide { $width } × { $height } px, y Telegram admite un lado de { $side } px y el otro como mucho igual
-issue-too-big = Pesa { $size }, más que el límite de { $limit }
+issue-too-big = Ocupa { $size }, más que el límite de { $limit }
 issue-too-long = Sus metadatos dicen que dura { $seconds }, más que el límite de { $limit }
 issue-too-many-fps = Su frecuencia de fotogramas es de { $fps } fps, más que el límite de { $limit } fps
 issue-animated = Es animado, y los stickers estáticos son una sola imagen
 issue-frame-rate = Su frecuencia de fotogramas es de { $fps } fps, y Telegram admite { $required } fps
     .accepted = Su frecuencia de fotogramas es de { $fps } fps: va contra las reglas de Telegram, aunque Telegram la admite
 issue-no-frames = No tiene fotogramas
-issue-unpacked = Sin comprimir pesa { $size }, más que el límite de { $limit } de Telegram Desktop
+issue-unpacked = Sin comprimir ocupa { $size }, más que el límite de { $limit } de Telegram Desktop
 issue-count =
     .layers = Capas: { $count }, más que el límite de { $limit }
     .shapes-per-layer = Máximo de formas en una capa: { $count }, más que el límite de { $limit }
@@ -913,7 +913,7 @@ warned-fewer-frames = Se leyó a { $fps } fps, porque más fotogramas de { $widt
 warned-many-colours = Tiene { $colours }, algo poco común en el pixel art, así que el sticker será grande
 warned-length-capped = Las duraciones que prueba el ajuste se recortan a { $length }, porque el ajuste solo acorta
 warned-input-shorter = La entrada dura solo { $length } desde su inicio: se usa entera
-warned-trimmed = Recortado a { $length }: la falsificación está desactivada y Telegram rechaza videos más largos
+warned-trimmed = Cortado a { $length }: el falseo de duración está desactivado y Telegram rechaza videos más largos
 warned-left-out = Se escribió sin el nombre de tgradish en los metadatos, porque los argumentos de ffmpeg sin procesar no le dejaron sitio: { $details }
     .duration = Se escribió sin la duración falseada en los metadatos, porque los argumentos de ffmpeg sin procesar no le dejaron sitio: { $details }
 
@@ -983,7 +983,7 @@ unreadable-file = No se pudo leer { $name }: { $details }
 no-video = { $name } no contiene video
 no-such-file = { $name } ya no está
 not-webm = { $name } no es un archivo WebM
-not-sticker = { $name } no es un sticker: un archivo WebM, WebP o .tgs
+not-sticker = { $name } no es un sticker (un archivo WebM, WebP o .tgs)
 no-frame-at = { $name } no tiene ningún fotograma en { $seconds }
 nothing-fits = Nada cabe en el límite de { $limit }: la codificación más pequeña ocupó { $smallest }. Puede ayudar una parte usada más corta, una frecuencia de fotogramas más baja o un rango de búsqueda más amplio
 clipboard-failed = No se pudo pegar del portapapeles: { $details }
