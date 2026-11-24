@@ -615,6 +615,10 @@ blocked = Hozircha aylantirib boʻlmaydi: { $reason }
 blocked-crop = qirqim tasvirdan tashqarida
 blocked-sheet = sprayt varagʻi kataklari tasvirni teng boʻlmaydi
 blocked-tag = faylda «{ $tag }» tegi yoʻq
+quoted-names = «{ $name }»
+    .two = «{ $first }» va «{ $second }»
+    .last = «{ $first }» va «{ $second }»
+    .more = «{ $name }», { $rest }
 blocked-layers = { $count ->
     [1] faylda { $layers } qatlami yoʻq
    *[other] faylda { $layers } qatlamlari yoʻq

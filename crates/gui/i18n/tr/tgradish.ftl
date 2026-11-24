@@ -588,6 +588,10 @@ blocked = Henüz dönüştürülemiyor: { $reason }
 blocked-crop = kırpma görüntünün dışında
 blocked-sheet = sprite sayfasının hücreleri görüntüyü tam bölmüyor
 blocked-tag = dosyada “{ $tag }” etiketi yok
+quoted-names = “{ $name }”
+    .two = “{ $first }” ve “{ $second }”
+    .last = “{ $first }” ve “{ $second }”
+    .more = “{ $name }”, { $rest }
 blocked-layers = { $count ->
     [1] dosyada { $layers } katmanı yok
    *[other] dosyada { $layers } katmanları yok

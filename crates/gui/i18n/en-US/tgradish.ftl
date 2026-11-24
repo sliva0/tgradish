@@ -77,6 +77,13 @@ tag =
     .hint = Picks the frames of a tag: as where it starts and ends, or read in its own order where it plays backward or there and back
 
 
+## What keeps a file from being converted as it is, and the ways out
+
+quoted-names =
+    .last = "{ $first }," and "{ $second }"
+    .more = "{ $name }," { $rest }
+
+
 ## The Settings dialog
 
 accent = Accent color

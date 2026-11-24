@@ -625,6 +625,10 @@ blocked = Ainda não dá para converter: { $reason }
 blocked-crop = o recorte está fora da imagem
 blocked-sheet = as células da folha de sprites não dividem a imagem
 blocked-tag = o arquivo não tem a tag “{ $tag }”
+quoted-names = “{ $name }”
+    .two = “{ $first }” e “{ $second }”
+    .last = “{ $first }” e “{ $second }”
+    .more = “{ $name }”, { $rest }
 blocked-layers = { $count ->
     [1] o arquivo não tem a camada { $layers }
    *[other] o arquivo não tem as camadas { $layers }

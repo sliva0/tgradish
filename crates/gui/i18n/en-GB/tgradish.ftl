@@ -802,7 +802,15 @@ blocked = Can't convert yet: { $reason }
 blocked-crop = the crop is outside the picture
 blocked-sheet = the sprite sheet's cells don't divide the picture
 blocked-tag = the file has no tag "{ $tag }"
-# The layers, each in quotes, apart by commas.
+# The names of the layers a file lacks, in blocked-layers and in
+# layers-missing, each in the quotation marks the tag has beside them, and
+# listed: one name; two; or, for three or more, the last two (.last), with
+# each before them put in front of the rest (.more), as "a", "b" and "c".
+quoted-names = "{ $name }"
+    .two = "{ $first }" and "{ $second }"
+    .last = "{ $first }" and "{ $second }"
+    .more = "{ $name }", { $rest }
+# The layers, as quoted-names lists them.
 blocked-layers = { $count ->
     [1] the file has no layer { $layers }
    *[other] the file has no layers { $layers }

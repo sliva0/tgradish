@@ -632,6 +632,10 @@ blocked = Поки що не можна конвертувати: { $reason }
 blocked-crop = обрізка виходить за межі картинки
 blocked-sheet = картинка не ділиться на комірки спрайт-листа
 blocked-tag = у файлі немає тегу «{ $tag }»
+quoted-names = «{ $name }»
+    .two = «{ $first }» і «{ $second }»
+    .last = «{ $first }» і «{ $second }»
+    .more = «{ $name }», { $rest }
 blocked-layers = { $count ->
     [1] у файлі немає шару { $layers }
    *[other] у файлі немає шарів { $layers }

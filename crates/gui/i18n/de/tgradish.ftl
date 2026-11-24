@@ -612,6 +612,10 @@ blocked = Noch nicht konvertierbar: { $reason }
 blocked-crop = Der Zuschnitt liegt außerhalb des Bildes
 blocked-sheet = Die Zellen des Spritesheets teilen das Bild nicht gleichmäßig auf
 blocked-tag = Die Datei hat keinen Tag „{ $tag }“
+quoted-names = „{ $name }“
+    .two = „{ $first }“ und „{ $second }“
+    .last = „{ $first }“ und „{ $second }“
+    .more = „{ $name }“, { $rest }
 blocked-layers = { $count ->
     [1] Die Datei hat keine Ebene { $layers }
    *[other] Die Datei hat keine Ebenen { $layers }

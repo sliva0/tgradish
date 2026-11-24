@@ -620,6 +620,10 @@ blocked = Conversion impossible pour l'instant : { $reason }
 blocked-crop = le cadre sort de l'image
 blocked-sheet = les cellules de la feuille de sprites ne divisent pas l'image
 blocked-tag = le fichier n'a pas d'étiquette « { $tag } »
+quoted-names = « { $name } »
+    .two = « { $first } » et « { $second } »
+    .last = « { $first } » et « { $second } »
+    .more = « { $name } », { $rest }
 blocked-layers = { $count ->
     [1] le fichier n'a pas de calque { $layers }
    *[other] le fichier n'a pas de calques { $layers }

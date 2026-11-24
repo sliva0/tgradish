@@ -650,9 +650,24 @@ impl Blocker {
     }
 }
 
-/// Names each in quotes, apart by commas: "sketch", "shadow".
+/// Names each in the quotation marks of the language shown, listed as it
+/// lists them: "sketch", "shadow" and "ink".
 pub(crate) fn quoted(names: &[String]) -> String {
-    names.iter().map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ")
+    match names {
+        [] => String::new(),
+        [name] => fl!("quoted-names", name = name.as_str()),
+        [first, second] => {
+            fl!("quoted-names", "two", first = first.as_str(), second = second.as_str())
+        }
+        // the last two, then each before them in front of the rest
+        [before @ .., first, second] => {
+            let last =
+                fl!("quoted-names", "last", first = first.as_str(), second = second.as_str());
+            before.iter().rev().fold(last, |rest, name| {
+                fl!("quoted-names", "more", name = name.as_str(), rest = rest)
+            })
+        }
+    }
 }
 
 /// The layout of a sprite sheet nearest `columns` by `rows` whose cells
@@ -1075,6 +1090,15 @@ mod tests {
         assert_eq!(Kind::of(&path("a.aseprite"), false), Kind::Aseprite);
         assert_eq!(Kind::of(&[dir.path().to_path_buf()], false), Kind::Frames);
         assert_eq!(Kind::of(&[PathBuf::from("1.png"), PathBuf::from("2.png")], true), Kind::Frames);
+    }
+
+    #[test]
+    fn lists_names_in_quotes() {
+        let names =
+            |names: &[&str]| quoted(&names.iter().map(|&n| n.to_owned()).collect::<Vec<_>>());
+        assert_eq!(names(&["a"]), r#""a""#);
+        assert_eq!(names(&["a", "b"]), r#""a" and "b""#);
+        assert_eq!(names(&["a", "b", "c", "d"]), r#""a", "b", "c" and "d""#);
     }
 
     #[test]
