@@ -6,7 +6,7 @@ All notable changes to tgradish, newest first. This file follows [Keep a Changel
 
 ### Added
 
-- The GUI in Ukrainian, Russian, and American English. It follows the system's language, or the one chosen in Settings. A system set to English of a region that spells it as the US does (such as `en-US` or `en-PH`) gets American English; any other English gets British.
+- The GUI in Ukrainian, Russian, Brazilian Portuguese, Spanish, Indonesian, Uzbek, Turkish, German, French, and American English. The translations are first drafts awaiting review by native speakers, and corrections are welcome (see CONTRIBUTING.md). The GUI follows the system's language, or the one chosen in Settings. A system set to English of a region that spells it as the US does (such as `en-US` or `en-PH`) gets American English; any other English gets British.
 - Language in the GUI's Settings, marked with a globe, lists each language under its own name, with the system's first, showing which language that is. A change applies at once. While the `TGRADISH_LANG` environment variable sets the language, Settings shows it and says so instead of offering a choice.
 - `tgradish config init` writes the example config where tgradish reads it, creating its directory, and never overwrites an existing config.
 - In the `tgradish-core` library, `resolve::resolve` layers a preset's options and any number of layers over them into a conversion's, checks them, and sets aside values that have no effect, saying who set each.

@@ -159,7 +159,7 @@ These features work without ffmpeg:
 
 ## Usage examples
 
-Run `tgradish gui` to open the GUI, or launch `tgradish` from a file manager or application menu. Press `F1` in the GUI to view keyboard shortcuts. The GUI is in English (British and American), Ukrainian, and Russian: it follows the system's language, or the one picked under Language (🌐) in Settings.
+Run `tgradish gui` to open the GUI, or launch `tgradish` from a file manager or application menu. Press `F1` in the GUI to view keyboard shortcuts. The GUI is in English (British and American), Ukrainian, Russian, Brazilian Portuguese, Spanish, Indonesian, Uzbek, Turkish, German, and French: it follows the system's language, or the one picked under Language (🌐) in Settings. The translations are first drafts awaiting review by native speakers; corrections are welcome (see [CONTRIBUTING.md](CONTRIBUTING.md)).
 
 Command-line examples:
 
