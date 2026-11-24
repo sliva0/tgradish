@@ -44,6 +44,7 @@ To add a language, copy `en-GB/tgradish.ftl` into a directory named after its ta
 - Have nothing `en-GB` lacks, and use only the arguments (`{ $name }`) the same message in `en-GB` uses.
 - Have whatever its messages put in: `{ other-message }` puts in a message of the same file, and `{ -term }` a term it defines itself.
 - Give counts (`{ $count -> … }`) a variant for each plural form of the language, such as `[one]`, `[few]`, `[many]` and `*[other]` in Ukrainian; use `[1]` for "exactly one" where the number itself isn't shown, as a plural form such as Ukrainian's `[one]` covers 21 too.
+- Write numbers as the GUI writes those it fills in: with a decimal point and no thousands separator (`3.00 s`, `153.8 KiB`), whatever the language. Numbers aren't localised yet, so a translation that wrote `3,00 s` would disagree with the numbers beside it.
 - Use only characters the bundled fonts draw. To draw more, add them to `crates/gui/assets/fonts/subset.py` and run it with `uv run crates/gui/assets/fonts/subset.py`.
 
 Check every file with `cargo test -p tgradish-gui every_language_file_is_sound`, which `cargo test --workspace` runs too: it lists every problem of every file, with the English of each message missing. Keep the names of programs, formats and units as they are (tgradish, Telegram, ffmpeg, WebM, WebP, TGS, VP9, CRF, SSIM, Aseprite, `s`, `px`, `fps`, `KiB`); key names such as Ctrl may follow the language's keyboards.
