@@ -762,7 +762,10 @@ fn unfit(harness: &Harness<App>, at: &str, found: &mut Vec<String>) {
             .or_else(|| held.max_by_key(|(_, said)| said.len()))
             .map(|(id, said)| (*id, said.as_str()))
     };
-    let names: Vec<String> = harness.state().items.iter().map(|item| item.name()).collect();
+    let mut names: Vec<String> = harness.state().items.iter().map(|item| item.name()).collect();
+    // what is typed for the results' folder too: a field scrolls a path
+    // longer than itself, which a temporary folder's is on some machines
+    names.extend(harness.state().config.gui.output_dir.iter().map(|dir| dir.display().to_string()));
     let of_name = |text: &str| {
         let (first, last) = (text.split('…').next().unwrap_or_default(), text.rsplit('…').next());
         names
