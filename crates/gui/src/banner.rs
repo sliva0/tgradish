@@ -1073,34 +1073,12 @@ fn shortened(path: &Path, home: Option<&Path>) -> String {
     }
 }
 
-/// `text` cut short in its middle, where "…" goes, to fit `width`: the
-/// end of a path names the file, its start where it is.
+/// The path `text` cut short in its middle, where "…" goes, to fit `width`.
 fn elided(ui: &egui::Ui, text: &str, font: &egui::FontId, width: f32) -> String {
     let fits = |text: &str| {
         ui.painter().layout_no_wrap(text.to_owned(), font.clone(), Color32::WHITE).size().x <= width
     };
-    if fits(text) {
-        return text.to_owned();
-    }
-    let chars: Vec<char> = text.chars().collect();
-    let cut = |kept: usize| {
-        let head = kept / 2;
-        let tail = kept - head;
-        let start: String = chars[..head].iter().collect();
-        let end: String = chars[chars.len() - tail..].iter().collect();
-        format!("{start}…{end}")
-    };
-    // the most characters that still fit
-    let (mut low, mut high) = (0, chars.len());
-    while low < high {
-        let middle = (low + high).div_ceil(2);
-        if fits(&cut(middle)) {
-            low = middle;
-        } else {
-            high = middle - 1;
-        }
-    }
-    cut(low)
+    crate::widgets::path_cut(text, str::to_owned, fits)
 }
 
 #[cfg(test)]

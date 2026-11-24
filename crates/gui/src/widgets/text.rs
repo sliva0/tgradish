@@ -1,5 +1,5 @@
-//! Text measuring, and keeping widths and line breaks steady while the
-//! numbers in a text change.
+//! Text measuring, cutting paths short to fit, and keeping widths and
+//! line breaks steady while the numbers in a text change.
 
 use eframe::egui::{self, RichText};
 
@@ -19,6 +19,39 @@ pub(crate) fn text_width(ui: &egui::Ui, text: &str, padding: f32) -> f32 {
 /// allowing labels to switch to a shorter form before truncating.
 pub(crate) fn fitting(ui: &egui::Ui, texts: &[&str], room: f32, padding: f32) -> Option<usize> {
     texts.iter().position(|text| text_width(ui, text, padding) <= room)
+}
+
+/// `say` with `path` in it, the path cut short in its middle, where "…"
+/// goes, as little as `fits` allows: whole where it fits. The end of a
+/// path names the file, its start where it is, and a path without spaces
+/// has nowhere else to break.
+pub(crate) fn path_cut(
+    path: &str,
+    say: impl Fn(&str) -> String,
+    fits: impl Fn(&str) -> bool,
+) -> String {
+    let whole = say(path);
+    if path.is_empty() || fits(&whole) {
+        return whole;
+    }
+    let chars: Vec<char> = path.chars().collect();
+    let cut = |kept: usize| {
+        let head = kept / 2;
+        let start: String = chars[..head].iter().collect();
+        let end: String = chars[chars.len() - (kept - head)..].iter().collect();
+        say(&format!("{start}…{end}"))
+    };
+    // the most characters that still fit
+    let (mut low, mut high) = (0, chars.len().saturating_sub(1));
+    while low < high {
+        let middle = (low + high).div_ceil(2);
+        if fits(&cut(middle)) {
+            low = middle;
+        } else {
+            high = middle - 1;
+        }
+    }
+    cut(low)
 }
 
 /// Sizes number fields in `add` to fit `digits` tabular digits plus `suffix`
@@ -128,6 +161,20 @@ fn broken_as(text: &str, like: &str, breaks: &[usize]) -> String {
 mod tests {
     use super::*;
     use crate::widgets::{fixed, fps, seconds, speed, test_fonts, widest_seconds};
+
+    #[test]
+    fn cuts_a_path_short_in_its_middle_within_what_says_it() {
+        let say = |path: &str| format!("{path}, found");
+        let within = |most: usize| move |text: &str| text.chars().count() <= most;
+        let path = r"C:\ProgramData\Chocolatey\bin\ffmpeg.exe";
+        // whole where it fits
+        assert_eq!(path_cut(path, say, within(47)), format!("{path}, found"));
+        // else as much of its start and end as fit, the words around it whole
+        assert_eq!(path_cut(path, say, within(27)), r"C:\Progra…ffmpeg.exe, found");
+        // and where nothing of it fits, its words alone are left
+        assert_eq!(path_cut(path, say, within(3)), "…, found");
+        assert_eq!(path_cut("", say, within(3)), ", found");
+    }
 
     #[test]
     fn breaks_lines_where_the_widest_number_would() {

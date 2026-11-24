@@ -34,11 +34,11 @@ impl Default for Drawn {
 #[derive(Default)]
 pub(crate) struct SettingsDialog {
     open: bool,
-    /// Result of the last `ffmpeg` check: `(is_ready, status_message)`.
-    ffmpeg_status: Option<(bool, String)>,
+    /// Result of the last `ffmpeg` check.
+    ffmpeg_status: Option<Checked>,
     /// Background task running `ffmpeg` to check its version and encoders
     /// (cancelled if the dialog is reopened or the GUI exits).
-    checking: Option<Task<(bool, String)>>,
+    checking: Option<Task<Checked>>,
     /// Result of the last `config.toml` write (`Ok(message)` or `Err(error)`).
     saved: Option<Result<String, String>>,
     /// Snapshot of `Config` as last written to disk (or when the dialog opened).
@@ -52,9 +52,9 @@ pub(crate) struct SettingsDialog {
     /// Set when "Reset to defaults" is clicked; handled by `App` so the reset
     /// can be undone from a banner action.
     pub(crate) reset: bool,
-    /// Placeholder strings resolved on open: the detected `ffmpeg` on `PATH`
-    /// and an example output directory.
-    placeholders: (String, String),
+    /// What the empty path fields show, resolved on open: the `ffmpeg`
+    /// found on `PATH` and an example output directory.
+    placeholders: (Placeholder, Placeholder),
     /// Pending native file-picker request for `App` to open.
     pub(crate) pick: Option<crate::files::Pick>,
     /// True when "In a folder" is selected but no directory path has been
@@ -115,6 +115,24 @@ impl SettingsDialog {
         self.open
     }
 
+    /// Shows the `ffmpeg` found on `PATH` as at `ffmpeg`, and `folder` as
+    /// the example folder for results, whatever this computer has, as a
+    /// long path is on another.
+    #[cfg(test)]
+    pub(crate) fn as_if_found(&mut self, ffmpeg: &Path, folder: &Path) {
+        self.placeholders = (Placeholder::found(ffmpeg), Placeholder::example(folder));
+    }
+
+    /// Shows what checking the `ffmpeg` at `ffmpeg` finds where there is
+    /// none, and the settings as saved to `saved`.
+    #[cfg(test)]
+    pub(crate) fn as_if_missing(&mut self, ffmpeg: &Path, saved: &Path) {
+        let missing = tgradish_core::FfmpegMissing::NoProgram(ffmpeg.to_path_buf());
+        let err = tgradish_core::Error::FfmpegNotFound(missing);
+        self.ffmpeg_status = Some(checked(&err));
+        self.saved = Some(Ok(fl!("saved-to", path = saved.display().to_string())));
+    }
+
     /// Clears uncommitted path edits and `folder_unchosen` when resetting or
     /// restoring settings.
     pub(crate) fn forget_typed(&mut self) {
@@ -123,16 +141,45 @@ impl SettingsDialog {
     }
 }
 
+/// What an empty path field shows: `say` with `path` in it, which
+/// [`path_field`] cuts short in its middle where the field is too narrow
+/// for it whole.
+struct Placeholder {
+    path: String,
+    say: fn(&str) -> String,
+}
+
+impl Default for Placeholder {
+    /// Nothing shown.
+    fn default() -> Placeholder {
+        Placeholder { path: String::new(), say: |_| String::new() }
+    }
+}
+
+impl Placeholder {
+    /// The `ffmpeg` at `path`, found on `PATH`.
+    fn found(path: &Path) -> Placeholder {
+        let say = |path: &str| fl!("ffmpeg-found", path = path);
+        Placeholder { path: path.display().to_string(), say }
+    }
+
+    /// `path` as an example.
+    fn example(path: &Path) -> Placeholder {
+        let say = |path: &str| fl!("for-example", example = path);
+        Placeholder { path: path.display().to_string(), say }
+    }
+}
+
 /// What the empty fields of the ffmpeg program and of the folder for
 /// results show: the `ffmpeg` found on `PATH`, and an example folder.
-fn placeholders() -> (String, String) {
+fn placeholders() -> (Placeholder, Placeholder) {
     let ffmpeg = match tgradish_core::ffmpeg::Ffmpeg::on_path() {
-        Ok(found) => fl!("ffmpeg-found", path = found.ffmpeg.display().to_string()),
-        Err(_) if cfg!(windows) => fl!("for-example", example = r"C:\ffmpeg\bin"),
-        Err(_) => fl!("for-example", example = "/usr/local/bin/ffmpeg"),
+        Ok(found) => Placeholder::found(&found.ffmpeg),
+        Err(_) if cfg!(windows) => Placeholder::example(Path::new(r"C:\ffmpeg\bin")),
+        Err(_) => Placeholder::example(Path::new("/usr/local/bin/ffmpeg")),
     };
     let folder = tgradish_core::paths::pictures_dir()
-        .map(|dir| fl!("for-example", example = dir.join("Stickers").display().to_string()))
+        .map(|dir| Placeholder::example(&dir.join("Stickers")))
         .unwrap_or_default();
     (ffmpeg, folder)
 }
@@ -154,7 +201,7 @@ fn path_field(
     ui: &mut egui::Ui,
     typed: &mut Typed,
     setting: &mut Option<PathBuf>,
-    placeholder: &str,
+    placeholder: &Placeholder,
     problem: impl Fn(&Path) -> Option<String>,
 ) -> (Option<String>, bool) {
     if typed.of.as_ref() != Some(setting) {
@@ -164,8 +211,23 @@ fn path_field(
     let padding = 2.0 * ui.spacing().button_padding.x;
     let beside = widgets::text_width(ui, &fl!("choose"), padding) + ui.spacing().item_spacing.x;
     let width = (ui.available_width() - beside).min(280.0);
-    let edit = widgets::text_field(&mut typed.text).hint_text(placeholder).desired_width(width);
-    let field = ui.add(edit);
+    // the placeholder as wide as the field within its margins, else its
+    // path cut short in the middle, whole on hover, rather than cut short
+    // at its end, losing the file's name, or pushing the field wider
+    let room = width.min(ui.available_width()) - FIELD_MARGINS;
+    let font = egui::FontSelection::Default.resolve(ui.style());
+    let fits = |text: &str| {
+        let galley =
+            ui.painter().layout_no_wrap(text.to_owned(), font.clone(), egui::Color32::WHITE);
+        galley.size().x <= room
+    };
+    let whole = (placeholder.say)(&placeholder.path);
+    let shown = widgets::path_cut(&placeholder.path, placeholder.say, fits);
+    let edit = widgets::text_field(&mut typed.text).hint_text(shown.as_str()).desired_width(width);
+    let mut field = ui.add(edit);
+    if typed.text.is_empty() && shown != whole {
+        field = field.on_hover_text(whole);
+    }
     let trimmed = typed.text.trim();
     let path = (!trimmed.is_empty()).then(|| PathBuf::from(trimmed));
     let wrong = path.as_deref().and_then(problem);
@@ -177,6 +239,10 @@ fn path_field(
     }
     (wrong, changed)
 }
+
+/// How much narrower than a [`path_field`] its text is: egui's margins of
+/// a text field, 4 points each side, and a point to spare for rounding.
+const FIELD_MARGINS: f32 = 9.0;
 
 /// Draws the button beside a [`path_field`] that picks the path from the
 /// system's file dialog, returning `true` when clicked.
@@ -202,25 +268,58 @@ fn folder_problem(path: &Path) -> Option<String> {
     }
 }
 
-/// Draws the `ffmpeg` check status in `colour`, wrapping up to two lines and
-/// showing a full-text tooltip if truncated.
-fn ffmpeg_status(ui: &mut egui::Ui, status: &str, colour: egui::Color32) {
-    let font = egui::TextStyle::Body.resolve(ui.style());
-    let mut job = egui::text::LayoutJob::single_section(
-        status.to_owned(),
-        egui::TextFormat::simple(font, colour),
-    );
-    job.wrap = egui::text::TextWrapping {
-        max_rows: 2,
-        ..egui::text::TextWrapping::wrap_at_width(ui.available_width())
+/// What checking `ffmpeg` found: whether it is ready to convert, what is
+/// said of it, and the path that names, if it names one.
+#[derive(Clone, Debug, Default)]
+struct Checked {
+    ready: bool,
+    said: String,
+    path: Option<String>,
+}
+
+/// What checking `ffmpeg` found where it failed with `err`.
+fn checked(err: &tgradish_core::Error) -> Checked {
+    use tgradish_core::FfmpegMissing::{NoFfprobe, NoProgram};
+    let path = match err {
+        tgradish_core::Error::FfmpegNotFound(NoProgram(path) | NoFfprobe(path)) => {
+            Some(path.display().to_string())
+        }
+        _ => None,
     };
-    let galley = ui.painter().layout_job(job);
+    Checked { ready: false, said: crate::jobs::failure(err), path }
+}
+
+/// Draws what checking `ffmpeg` found in `colour`, wrapping up to two
+/// lines: the path it names cut short in its middle where it is too long
+/// for them, else the end cut short, and all of it on hover where either
+/// is.
+fn ffmpeg_status(ui: &mut egui::Ui, checked: &Checked, colour: egui::Color32) {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let width = ui.available_width();
+    let lay_out = |text: &str| {
+        let format = egui::TextFormat::simple(font.clone(), colour);
+        let mut job = egui::text::LayoutJob::single_section(text.to_owned(), format);
+        job.wrap = egui::text::TextWrapping {
+            max_rows: 2,
+            ..egui::text::TextWrapping::wrap_at_width(width)
+        };
+        ui.painter().layout_job(job)
+    };
+    let said = checked.said.as_str();
+    let shown = match &checked.path {
+        Some(path) if said.contains(path.as_str()) => {
+            let say = |cut: &str| said.replacen(path.as_str(), cut, 1);
+            widgets::path_cut(path, say, |text| !lay_out(text).elided)
+        }
+        _ => said.to_owned(),
+    };
+    let galley = lay_out(&shown);
     let (rect, response) = ui.allocate_exact_size(galley.size(), egui::Sense::hover());
-    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, status));
-    let elided = galley.elided;
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, said));
+    let cut = galley.elided || shown != said;
     ui.painter().galley(rect.min, galley, colour);
-    if elided {
-        response.on_hover_text(status);
+    if cut {
+        response.on_hover_text(said);
     }
 }
 
@@ -406,7 +505,8 @@ pub(crate) fn show(
         return;
     }
     if let Some(found) = dialog.checking.as_ref().and_then(Task::poll) {
-        dialog.ffmpeg_status = Some(found.unwrap_or_else(|message| (false, message)));
+        dialog.ffmpeg_status =
+            Some(found.unwrap_or_else(|said| Checked { said, ..Checked::default() }));
         dialog.checking = None;
     }
     let mut close = false;
@@ -543,7 +643,7 @@ fn sections(
         let ffmpeg = &mut config.ffmpeg;
         let wrong = ui
             .horizontal(|ui| {
-                let placeholder = dialog.placeholders.0.as_str();
+                let placeholder = &dialog.placeholders.0;
                 let typed = &mut dialog.ffmpeg_typed;
                 let (wrong, _) =
                     path_field(ui, typed, &mut ffmpeg.path, placeholder, ffmpeg_problem);
@@ -579,10 +679,13 @@ fn sections(
                 if dialog.checking.is_some() {
                     ui.spinner();
                     note(ui, fl!("checking-ffmpeg"));
-                } else if let Some((ok, status)) = &dialog.ffmpeg_status {
+                } else if let Some(checked) = &dialog.ffmpeg_status {
                     let visuals = ui.visuals();
-                    let colour = if *ok { theme::good(visuals) } else { theme::bad(visuals) };
-                    ffmpeg_status(ui, status, colour);
+                    let colour = match checked.ready {
+                        true => theme::good(visuals),
+                        false => theme::bad(visuals),
+                    };
+                    ffmpeg_status(ui, checked, colour);
                 }
             });
         });
@@ -956,12 +1059,12 @@ impl App {
     }
 }
 
-/// Probes the selected `ffmpeg` backend for version and `libvpx-vp9` support,
-/// returning `(is_ready, status_message)`. Runs it, so it may take a while.
-fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken) -> (bool, String) {
+/// Probes the selected `ffmpeg` backend for version and `libvpx-vp9` support.
+/// Runs it, so it may take a while.
+fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken) -> Checked {
     let backend = match Backend::select(choice, path) {
         Ok(backend) => backend,
-        Err(err) => return (false, crate::jobs::failure(&err)),
+        Err(err) => return checked(&err),
     };
     match backend.capabilities(cancel) {
         Ok(caps) => {
@@ -974,12 +1077,13 @@ fn check_ffmpeg(choice: FfmpegChoice, path: Option<&Path>, cancel: &CancelToken)
                 Some(number) if number.starts_with(|c: char| c.is_ascii_digit()) => number,
                 _ => version,
             };
-            match caps.libvpx_vp9 {
+            let (ready, said) = match caps.libvpx_vp9 {
                 true => (true, fl!("ffmpeg-ready", version = version)),
                 false => (false, fl!("ffmpeg-no-vp9", version = version)),
-            }
+            };
+            Checked { ready, said, path: None }
         }
-        Err(err) => (false, crate::jobs::failure(&err)),
+        Err(err) => checked(&err),
     }
 }
 
@@ -1866,7 +1970,8 @@ mod tests {
         let before = under(&harness);
         let version = "8.0.1-full_build-www.gyan.dev Copyright (c) 2000-2025";
         let status = fl!("ffmpeg-no-vp9", version = version);
-        harness.state_mut().dialogs.settings.ffmpeg_status = Some((false, status.clone()));
+        let checked = Checked { said: status.clone(), ..Checked::default() };
+        harness.state_mut().dialogs.settings.ffmpeg_status = Some(checked);
         harness.run_steps(2);
         harness.get_by_label(&status);
         assert_eq!(under(&harness), before);
@@ -1875,6 +1980,42 @@ mod tests {
             _ => false,
         });
         assert!(!cut, "{status:?} cut short");
+    }
+
+    /// A path too long for its field is cut short in its middle, its
+    /// file's name and what is said of it kept, and is said whole on hover.
+    #[test]
+    fn cuts_a_long_path_short_in_its_middle_whole_on_hover() {
+        crate::l10n::english();
+        let mut harness =
+            Harness::builder().with_size([crate::MIN_WIDTH, 820.0]).build_eframe(|cc| {
+                let app = App::with(Config::default(), None, Presets::builtin());
+                app.style(&cc.egui_ctx);
+                app
+            });
+        let found = Path::new(r"C:\ProgramData\Chocolatey\bin\long-folder-name\ffmpeg.exe");
+        let settings = &mut harness.state_mut().dialogs.settings;
+        settings.open();
+        settings.as_if_found(found, Path::new("/home/someone/Pictures/Stickers"));
+        harness.run_steps(4);
+        let whole = fl!("ffmpeg-found", path = found.display().to_string());
+        let field = harness.get_by(|node| {
+            node.role() == egui::accesskit::Role::TextInput
+                && node
+                    .placeholder()
+                    .is_some_and(|text| text.ends_with("ffmpeg.exe, found on PATH"))
+        });
+        let shown = field.accesskit_node().placeholder().unwrap_or_default().to_owned();
+        assert!(shown.starts_with(r"C:\Program") && shown.contains('…'), "{shown:?}");
+        let cut = harness.output().shapes.iter().any(|shape| match &shape.shape {
+            egui::Shape::Text(text) => text.galley.elided,
+            _ => false,
+        });
+        assert!(!cut, "cut short at its end");
+        let at = field.rect().center();
+        harness.event(egui::Event::PointerMoved(at));
+        harness.run_steps(4);
+        harness.get_by_label(&whole);
     }
 
     #[test]
@@ -1929,7 +2070,8 @@ mod tests {
         // in tgradish's own words, as reading a file without it would say
         let status = harness.state().dialogs.settings.ffmpeg_status.clone();
         assert!(
-            matches!(&status, Some((false, said)) if said.starts_with("ffmpeg wasn't found")),
+            matches!(&status, Some(Checked { ready: false, said, path: Some(_) })
+                if said.starts_with("ffmpeg wasn't found")),
             "{status:?}"
         );
     }

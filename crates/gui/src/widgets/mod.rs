@@ -42,7 +42,7 @@ pub(crate) use progress::{Fill, bar, bar_sized, bar_spent, gauge, steady_bar, th
 #[cfg(test)]
 pub(crate) use scroll::SCROLL_BAR;
 pub(crate) use scroll::{SCROLL_FADE, scrolled};
-pub(crate) use text::{fitting, steady_numbers, steady_width, text_width};
+pub(crate) use text::{fitting, path_cut, steady_numbers, steady_width, text_width};
 
 /// Installs the GUI's fonts into a bare test `harness`. egui's default fonts
 /// are disabled in Cargo features, and without glyphs a text cursor always

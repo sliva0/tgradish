@@ -265,17 +265,47 @@ fn encodes() -> crate::jobs::Progress {
     }
 }
 
-/// Settings, About, and the dialogs of presets of the user's own, kept in
-/// `dir`.
+/// Paths as long as some computers have them, without a space to wrap
+/// at: ffmpeg as Chocolatey installs it on Windows, and as one unpacks it
+/// in a folder of one's own, an example folder for results, and where the
+/// settings are kept.
+const LONG_PATHS: [&str; 4] = [
+    r"C:\ProgramData\Chocolatey\bin\ffmpeg.exe",
+    "/home/someone/.local/share/long-directory-name/ffmpeg-8.0-full_build/bin/ffmpeg",
+    r"C:\Users\someone-with-a-long-name\OneDrive\Pictures\Telegram-Stickers",
+    "/home/someone-with-a-long-name/.config/tgradish-settings-kept-here/config.toml",
+];
+
+/// Settings, with the ffmpeg found on PATH and the example folder at
+/// [`LONG_PATHS`] whatever this computer has, then with ffmpeg missing at
+/// the longer one and the settings saved to a long path; About, and the
+/// dialogs of presets of the user's own, kept in `dir`.
 fn dialogs(
     harness: &mut Harness<App>,
     dir: &Path,
     visit: &mut impl FnMut(&mut Harness<App>, &str),
 ) {
-    harness.state_mut().dialogs.settings.open();
+    let [found, unpacked, folder, saved] = LONG_PATHS.map(Path::new);
+    // the folder for results as long as a temporary one is on Windows,
+    // longer than its field
+    let long = dir.join("out").join("results-kept-in-a-folder-with-a-long-name");
+    let output_dir = harness.state_mut().config.gui.output_dir.replace(long);
+    let settings = &mut harness.state_mut().dialogs.settings;
+    settings.open();
+    settings.as_if_found(found, folder);
     settle(harness, None);
     visit(harness, "settings");
+    // the results saved next to their files, which leaves the field of
+    // the folder for them empty, showing the example
+    harness.state_mut().config.gui.output_dir = None;
+    let settings = &mut harness.state_mut().dialogs.settings;
+    settings.open();
+    settings.as_if_found(unpacked, folder);
+    settings.as_if_missing(unpacked, saved);
+    settle(harness, None);
+    visit(harness, "settings-long-paths");
     harness.state_mut().dialogs.settings = settings_dialog::SettingsDialog::default();
+    harness.state_mut().config.gui.output_dir = output_dir;
     harness.state_mut().dialogs.about = true;
     settle(harness, None);
     visit(harness, "about");
@@ -306,7 +336,11 @@ fn dialogs(
 
 /// A text the GUI drew.
 struct Drawn {
+    /// What it says whole, as it was asked to be drawn.
     text: String,
+    /// What it showed of that, its lines one after another, with the "…"
+    /// it was cut short at.
+    shown: String,
     rect: Rect,
     /// What it was drawn within: what lies outside is hidden.
     clip: Rect,
@@ -326,8 +360,10 @@ fn drawn(harness: &Harness<App>) -> Vec<Drawn> {
             egui::Shape::Text(text) => {
                 let galley = &text.galley;
                 let at = text.pos.to_vec2();
+                let shown: Vec<String> = galley.rows.iter().map(|row| row.text()).collect();
                 found.push(Drawn {
                     text: galley.text().to_owned(),
+                    shown: shown.join("\n"),
                     rect: galley.rect.translate(at),
                     clip,
                     elided: galley.elided,
@@ -473,9 +509,10 @@ const NARROW: egui::Vec2 = egui::vec2(crate::MIN_WIDTH, 820.0);
 const TALL: egui::Vec2 = egui::vec2(crate::MIN_WIDTH, 3000.0);
 
 /// Each dialog's scene, and the id of its area.
-const DIALOGS: [(&str, &str); 6] = [
+const DIALOGS: [(&str, &str); 7] = [
     ("inspect", "inspect"),
     ("settings", "settings"),
+    ("settings-long-paths", "settings"),
     ("about", "about"),
     ("shortcuts", "shortcuts"),
     ("manage-presets", "manage presets"),
@@ -746,11 +783,12 @@ fn unfit(harness: &Harness<App>, at: &str, found: &mut Vec<String>) {
         let clipped = drawn.rect.left() < drawn.clip.left() - 1.0
             || drawn.rect.right() > drawn.clip.right() + 1.0;
         if (drawn.elided || clipped) && !of_name(text) {
-            let how = if drawn.elided { "cut short" } else { "cut off where it is drawn" };
+            let how = match drawn.elided {
+                true => format!("cut short, shown as {:?}", words(&drawn.shown)),
+                false => "cut off where it is drawn".to_owned(),
+            };
             match message(text) {
-                Some((id, said)) => {
-                    found.push(format!("unfit\t{at}\t{id} {said:?} is {how}, shown as {text:?}"));
-                }
+                Some((id, said)) => found.push(format!("unfit\t{at}\t{id} {said:?} is {how}")),
                 None if pressed => found.push(format!("unfit\t{at}\t{text:?} is {how}")),
                 None => {}
             }
@@ -856,7 +894,10 @@ fn out_of_sight(harness: &Harness<App>, id: &str, at: &str, found: &mut Vec<Stri
         let node = node.accesskit_node();
         let Some(rect) = node.bounding_box() else { continue };
         let label = node.label().unwrap_or_default();
-        if !within(rect.x0, rect.x1, inside) {
+        // a field's text runs on past it where it is longer, scrolled
+        // within it, which is what is held to the frame
+        let run = node.role() == egui::accesskit::Role::TextRun;
+        if !run && !within(rect.x0, rect.x1, inside) {
             hidden.push(format!("{:?} {label:?} at {rect:?} is out of sight", node.role()));
         }
         if node.role() == egui::accesskit::Role::ProgressIndicator {
