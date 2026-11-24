@@ -48,6 +48,8 @@ To add a language, copy `en-GB/tgradish.ftl` into a directory named after its ta
 
 Check every file with `cargo test -p tgradish-gui every_language_file_is_sound`, which `cargo test --workspace` runs too: it lists every problem of every file, with the English of each message missing. Keep the names of programs, formats and units as they are (tgradish, Telegram, ffmpeg, WebM, WebP, TGS, VP9, CRF, SSIM, Aseprite, `s`, `px`, `fps`, `KiB`); key names such as Ctrl may follow the language's keyboards.
 
+`cargo test -p tgradish-gui fits_every_language`, which `cargo test --workspace` runs too, takes the GUI through its scenes in every language, at its narrowest and as it usually opens, and lists by language and message what doesn't fit: words cut short or cut off, drawn over others, or wrapped onto a second line in a narrow column or on a button where English's aren't; buttons pushed to the window's edge; and dialogs that don't fit the window at large scales. Shorten such words in a way natural to the language. With `TGRADISH_LANG=de` it checks German alone.
+
 To see a language, run the GUI with `TGRADISH_LANG=de`, which comes before the system's language and the one chosen in Settings, or `TGRADISH_LANG=pseudo` for longer, accented English to find text that doesn't fit. `TGRADISH_LANG=de cargo xtask strings` generates `target/strings/index.html`, which shows every GUI message, its translation under it, and screenshots of where it appears in that language, alongside all CLI help pages; without `TGRADISH_LANG` it shows English only.
 
 ## Licences
