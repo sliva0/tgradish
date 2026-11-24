@@ -59,6 +59,15 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
     section(ui, &fl!("size-and-quality"));
     let base = item.choices.webm_base(context.presets, context.config).unwrap_or_default();
     let base_fit = base.fit_or_default();
+    // the range fitting searches unless asked for another, shown greyed out
+    // while it is automatic: the same for any input where it fits a
+    // bitrate or a quality, and as planning finds it from the input for a
+    // frame rate or a length
+    let searched = match item.choices.webm.fit.unwrap_or(base_fit) {
+        _ if item.choices.webm.fit_range.is_some() => None,
+        Fit::Fps | Fit::Length => planned(item, context).ok().map(|(_, plan)| plan.fit_range),
+        fit => Some(webm::default_fit_range(fit, 0.0, 0.0)),
+    };
     let options = &mut item.choices.webm;
     let fit = options.fit.unwrap_or(base_fit);
     // lossless keeps no bitrate or quality to fit, so only ways of fitting
@@ -127,10 +136,10 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
                     options.fit_range = None;
                 }
             }
-            // automatic, the range isn't shown: it is fitting's to choose,
-            // unless the preset sets one
+            // automatic, the range is fitting's to choose, unless the
+            // preset sets one, and shows greyed out where it is known
             let set = options.fit_range;
-            let known = set.or(inherited);
+            let known = set.or(inherited).or(searched);
             let mut shown = known.unwrap_or(Range { min: 0.0, max: 0.0 });
             let pick = fl!("custom", "hint");
             let (min, max) = (&mut shown.min, &mut shown.max);
@@ -143,28 +152,29 @@ pub(super) fn webm_quality(ui: &mut egui::Ui, item: &mut Item, context: &Context
                 widgets::number_field(ui, set.is_some(), field)
             })
             .on_disabled_hover_text(pick.as_str());
-            ui.label(fl!("range-to"));
-            let field = bounds.field(max, known.is_some(), set.is_some());
-            let field = field.name(fl!("search-within", "high"));
-            let high = widgets::steady_width(ui, &widest, |ui| {
-                widgets::number_field(ui, set.is_some(), field)
-            })
-            .on_disabled_hover_text(pick.as_str());
-            if set.is_some() && (low.changed() || high.changed()) {
+            // not known yet, as before the input is read, one dash stands
+            // for the whole range, rather than a dash at each end with
+            // "to" between, which some languages write as a dash too
+            let high = known.map(|_| {
+                ui.label(fl!("range-to"));
+                let field = bounds.field(max, true, set.is_some());
+                let field = field.name(fl!("search-within", "high"));
+                widgets::steady_width(ui, &widest, |ui| {
+                    widgets::number_field(ui, set.is_some(), field)
+                })
+                .on_disabled_hover_text(pick.as_str())
+            });
+            if set.is_some() && (low.changed() || high.is_some_and(|high| high.changed())) {
                 shown.max = shown.max.max(shown.min);
                 options.fit_range = Some(shown);
             }
         });
     });
     // a custom range starts as the preset's, or the one fitting would
-    // search
+    // search, shown before
     if asked_custom {
-        let searched = || {
-            let (fps, length) = planned(item, context)
-                .map_or((30.0, telegram::MAX_SECONDS), |(_, plan)| (plan.fps, plan.length));
-            webm::default_fit_range(fit, fps, length)
-        };
-        item.choices.webm.fit_range = Some(inherited.unwrap_or_else(searched));
+        let guessed = || webm::default_fit_range(fit, 30.0, telegram::MAX_SECONDS);
+        item.choices.webm.fit_range = Some(inherited.or(searched).unwrap_or_else(guessed));
     }
     let options = &mut item.choices.webm;
     let quality = match fit {
@@ -265,10 +275,11 @@ impl RangeBounds {
         widgets::zeros(&most) + self.unit
     }
 
-    /// A field of one end, shown as "—" unless it is `known`, as fitting
-    /// chooses the range then; whole numbers without a decimal point, and
+    /// A field of one end, shown as "—" unless it is `known`, as it isn't
+    /// before the input is read; whole numbers without a decimal point, and
     /// seconds to the hundredth. Only a `live` one, the user's own, is
-    /// brought into what planning takes: a preset's shows as it is.
+    /// brought into what planning takes: a preset's or fitting's own shows
+    /// as it is.
     fn field<'a>(&self, value: &'a mut f64, known: bool, live: bool) -> widgets::Number<'a> {
         let refused = live && !self.takes.contains(value);
         let field = widgets::Number::new(value)
@@ -376,6 +387,53 @@ mod tests {
         harness.run_steps(2);
         assert_eq!(harness.state().choices.preset.as_deref(), Some("short"));
         assert_eq!(range(&harness), None);
+    }
+
+    #[test]
+    fn shows_the_range_fitting_searches_while_it_is_automatic() {
+        use crate::config::Config;
+        use egui_kittest::Harness;
+        use tgradish_core::presets::Presets;
+        use tgradish_core::telegram::Target;
+
+        let (presets, config) = (Presets::builtin(), Config::default());
+        let context = Context {
+            presets: &presets,
+            config: &config,
+            ffmpeg: config.ffmpeg.clone(),
+            ffmpeg_args: true,
+            output: None,
+            config_path: None,
+            presets_dir: None,
+            in_frames: false,
+        };
+        let mut item = Item::new(1, vec!["pig.mp4".into()], false, Target::Sticker);
+        item.choices.webm.fit = Some(Fit::Crf);
+        let mut harness =
+            Harness::new_ui_state(|ui, item: &mut Item| webm_quality(ui, item, &context), item);
+        harness.run_steps(2);
+        let drawn = |harness: &Harness<Item>| -> Vec<String> {
+            let shapes = harness.output().shapes.iter();
+            let text = |shape: &egui::epaint::ClippedShape| match &shape.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            };
+            shapes.filter_map(text).collect()
+        };
+        // by quality, the same for any input, greyed out as other choices
+        // left to tgradish are
+        let to = fl!("range-to");
+        let shown = drawn(&harness);
+        for end in ["4", "63", to.as_str()] {
+            assert!(shown.iter().any(|text| text == end), "{end} in {shown:?}");
+        }
+        // by length, which the input isn't read for yet: one dash for the
+        // whole range, not a dash at each end with "to" between
+        harness.state_mut().choices.webm.fit = Some(Fit::Length);
+        harness.run_steps(2);
+        let shown = drawn(&harness);
+        assert!(shown.iter().any(|text| text == "—"), "{shown:?}");
+        assert!(!shown.contains(&to), "{shown:?}");
     }
 
     #[test]
